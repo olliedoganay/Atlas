@@ -8,14 +8,21 @@ from typing import Any
 import json
 
 from mem0 import Memory
+from mem0.memory import storage as mem0_storage
+from qdrant_client.local import persistence as qdrant_persistence
 
 from ..config import AppConfig
+from ..security import build_encrypted_sqlite_module, open_application_sqlite, prepare_encrypted_qdrant_storage
 from .models import MemoryCandidate, MemoryRecord, StoredMemory
 
 class Mem0Service:
     def __init__(self, config: AppConfig):
         self.config = config
         self._memory: Memory | None = None
+        sqlite_module = build_encrypted_sqlite_module(data_dir=config.data_dir)
+        mem0_storage.sqlite3 = sqlite_module
+        qdrant_persistence.sqlite3 = sqlite_module
+        prepare_encrypted_qdrant_storage(config.qdrant_path, data_dir=config.data_dir)
         _reconcile_legacy_qdrant_collections(config)
 
     def search(self, query: str, *, user_id: str, limit: int) -> list[StoredMemory]:
@@ -167,7 +174,7 @@ def _local_collection_points(collection_dir: Path) -> int | None:
         return 0
 
     try:
-        with closing(sqlite3.connect(database_path)) as conn:
+        with closing(open_application_sqlite(database_path, data_dir=collection_dir.parents[2])) as conn:
             has_points_table = conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'points'"
             ).fetchone()

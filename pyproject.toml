@@ -19,6 +19,7 @@ dependencies = [
     "langgraph-checkpoint-sqlite==3.0.3",
     "mem0ai==1.0.11",
     "python-dotenv==1.2.2",
+    "sqlcipher3-wheels==0.5.7",
     "uvicorn==0.38.0",
 ]
 

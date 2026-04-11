@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useMemo, useState } from "react";
-import { Database, Info, Lock, Monitor, Plus, SlidersHorizontal, Unlock, Users } from "lucide-react";
+import { ChevronDown, ChevronRight, Database, Info, Lock, Monitor, Plus, SlidersHorizontal, Unlock, Users } from "lucide-react";
 
 import { ResetDialog } from "../components/ResetDialog";
 import {
@@ -46,6 +46,7 @@ export function SettingsPage() {
   const [unlockTargetUserId, setUnlockTargetUserId] = useState<string | null>(null);
   const [unlockPassword, setUnlockPassword] = useState("");
   const [appVersion, setAppVersion] = useState("1.0.0");
+  const [aboutHowToOpen, setAboutHowToOpen] = useState(false);
   const { data: status } = useQuery({
     queryKey: ["status"],
     queryFn: getStatus,
@@ -276,6 +277,56 @@ export function SettingsPage() {
         : section === "data"
           ? "Backend lifecycle controls and durable local state."
           : "Product identity and local-first privacy details.";
+  const aboutHowToSteps = [
+    {
+      title: "1. Create or select a profile",
+      body: "Open Settings, go to Users, then create a profile or switch to an existing one before starting chats.",
+    },
+    {
+      title: "2. Start a new chat",
+      body: "Go to Workspace and click the plus button in the Chats column to open a fresh thread.",
+    },
+    {
+      title: "3. Choose the model",
+      body: "Use the Model picker at the top right before sending the first message. After the first message, that thread keeps its model.",
+    },
+    {
+      title: "4. Choose the temperature",
+      body: "Use the Temp picker next to the model picker before the first message. Pick Model default or an exact value.",
+    },
+    {
+      title: "5. Send a message",
+      body: "Type in the composer at the bottom and click Send. Atlas starts answering in the active thread.",
+    },
+    {
+      title: "6. Stop a running answer",
+      body: "Click Stop while the model is still responding. This ends the current run for that thread.",
+    },
+    {
+      title: "7. Open model thinking",
+      body: "While the model is deciding, click the Deciding card to expand the available thinking stream when the model provides it.",
+    },
+    {
+      title: "8. Search your chats",
+      body: "Click Search chats in the sidebar or press Ctrl+K. You can search inside the current chat or across all local chats.",
+    },
+    {
+      title: "9. Compact a long chat",
+      body: "Click Compact now to summarize older context in the current thread. Atlas also does this automatically if auto compact is on.",
+    },
+    {
+      title: "10. Duplicate or delete a chat",
+      body: "Use the duplicate and delete buttons on each chat card in the sidebar to copy a thread or remove it.",
+    },
+    {
+      title: "11. Manage memories",
+      body: "Open Settings, go to Data, then use Remember to save a manual memory or Forget to remove one for the current profile.",
+    },
+    {
+      title: "12. Lock or unlock protected profiles",
+      body: "If a profile has a password, use Lock in Users to close it for the session and Unlock to open it again.",
+    },
+  ];
 
   return (
     <div className="settings-page">
@@ -621,25 +672,31 @@ export function SettingsPage() {
                 <div className="settings-row-copy">
                   <strong>Local protection</strong>
                   <p>
-                    {security?.run_artifacts_encrypted_at_rest && security?.run_index_encrypted_at_rest
-                      ? "Run files and the run index are encrypted at rest on this Windows device. Packaged backend logs stay off unless you enable them explicitly."
+                    {security?.run_artifacts_encrypted_at_rest &&
+                    security?.run_index_encrypted_at_rest &&
+                    security?.sqlite_encrypted_at_rest &&
+                    security?.vector_store_encrypted_at_rest
+                      ? "Run files, SQLite state, and local vector storage are encrypted at rest on this Windows device. Packaged backend logs stay off unless you enable them explicitly."
                       : "Atlas is storing local data without at-rest protection on this runtime."}
                   </p>
                 </div>
                 <span>
-                  {security?.run_artifacts_encrypted_at_rest && security?.run_index_encrypted_at_rest
-                    ? "DPAPI + minimal logs"
+                  {security?.run_artifacts_encrypted_at_rest &&
+                  security?.run_index_encrypted_at_rest &&
+                  security?.sqlite_encrypted_at_rest &&
+                  security?.vector_store_encrypted_at_rest
+                    ? "DPAPI + SQLCipher"
                     : "Unprotected"}
                 </span>
               </div>
               <div className="settings-row">
                 <div className="settings-row-copy">
-                  <strong>Current limit</strong>
+                  <strong>Upgrade note</strong>
                   <p>
-                    LangGraph checkpoints, Mem0 history, and local Qdrant storage still stay on disk as local files and are not encrypted at rest yet.
+                    Older plaintext checkpoint, memory-history, and local vector-store files are reset the first time Atlas enables encrypted local storage.
                   </p>
                 </div>
-                <span>SQLite + Qdrant pending</span>
+                <span>One-time reset</span>
               </div>
               <div className="settings-row danger">
                 <div className="settings-row-copy">
@@ -721,6 +778,33 @@ export function SettingsPage() {
                   <p>Installed desktop shell version.</p>
                 </div>
                 <span>{`Atlas Desktop v${appVersion}`}</span>
+              </div>
+              <div className="settings-row settings-row-block">
+                <button
+                  aria-expanded={aboutHowToOpen}
+                  className="settings-howto-toggle"
+                  onClick={() => setAboutHowToOpen((value) => !value)}
+                  type="button"
+                >
+                  <div className="settings-row-copy">
+                    <strong>How to use</strong>
+                    <p>These are the main actions you can take in Atlas and where to find them.</p>
+                  </div>
+                  <span className="settings-howto-toggle-meta">
+                    <span>{aboutHowToOpen ? "Hide" : "Show"}</span>
+                    {aboutHowToOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                  </span>
+                </button>
+                {aboutHowToOpen ? (
+                  <div className="settings-howto-list">
+                    {aboutHowToSteps.map((step) => (
+                      <div className="stack-card settings-howto-step" key={step.title}>
+                        <strong>{step.title}</strong>
+                        <p>{step.body}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             </div>
           ) : null}

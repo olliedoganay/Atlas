@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -34,7 +35,7 @@ def main() -> int:
         "PyInstaller",
         "--noconfirm",
         "--clean",
-        "--onedir",
+        "--onefile",
         "--name",
         "atlas-backend",
         "--distpath",
@@ -69,12 +70,18 @@ def main() -> int:
     try:
         subprocess.run(command, check=True, cwd=repo_root)
 
-        built_backend_dir = dist_root / "atlas-backend"
-        if not built_backend_dir.exists():
-            raise RuntimeError(f"Backend build output was not created: {built_backend_dir}")
+        built_backend_exe = dist_root / "atlas-backend.exe"
+        if not built_backend_exe.exists():
+            raise RuntimeError(f"Backend build output was not created: {built_backend_exe}")
 
-        shutil.copytree(built_backend_dir, backend_resource_dir, dirs_exist_ok=True)
+        backend_resource_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(built_backend_exe, backend_resource_dir / "atlas-backend.exe")
         shutil.copytree(repo_root / "prompts", prompt_resource_dir, dirs_exist_ok=True)
+        _wait_for_tree_ready(backend_resource_dir)
+        # Windows can briefly hold newly copied native extension files while
+        # Defender or the filesystem finishes post-copy work. Tauri's bundle
+        # step touches these resources immediately after this script exits.
+        time.sleep(5.0)
     finally:
         shutil.rmtree(session_root, ignore_errors=True)
     return 0
@@ -85,6 +92,23 @@ def _cleanup_old_sessions(build_root: Path, *, keep: Path) -> None:
         if path == keep:
             continue
         shutil.rmtree(path, ignore_errors=True)
+
+
+def _wait_for_tree_ready(root: Path) -> None:
+    pending = [path for path in root.rglob("*") if path.is_file()]
+    for attempt in range(20):
+        locked = False
+        for path in pending:
+            try:
+                with path.open("rb"):
+                    pass
+            except PermissionError:
+                locked = True
+                break
+        if not locked:
+            return
+        time.sleep(0.25 * (attempt + 1))
+    raise RuntimeError(f"Backend resources stayed locked after copy: {root}")
 
 
 if __name__ == "__main__":

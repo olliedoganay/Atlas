@@ -14,6 +14,7 @@ from atlas_local.graph.builder import execution_node_sequence, post_synthesis_no
 from atlas_local.llm import OllamaModelInfo
 from atlas_local.run_contract import RunHub
 from atlas_local.run_store import RunStore
+from atlas_local.security import sqlcipher_enabled
 
 
 class ApiServiceCreateTests(unittest.TestCase):
@@ -69,8 +70,9 @@ class ApiServiceCreateTests(unittest.TestCase):
             self.assertIn("security", payload)
             self.assertTrue(payload["security"]["run_artifacts_encrypted_at_rest"])
             self.assertTrue(payload["security"]["run_index_encrypted_at_rest"])
-            self.assertFalse(payload["security"]["sqlite_encrypted_at_rest"])
+            self.assertEqual(payload["security"]["sqlite_encrypted_at_rest"], sqlcipher_enabled())
             self.assertEqual(payload["security"]["vector_store"], "local-qdrant")
+            self.assertEqual(payload["security"]["vector_store_encrypted_at_rest"], sqlcipher_enabled())
 
 
 class UserProtectionTests(unittest.TestCase):

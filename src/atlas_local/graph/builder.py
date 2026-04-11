@@ -12,6 +12,7 @@ from ..config import AppConfig, load_config
 from ..llm import LLMProvider
 from ..memory.mem0_service import Mem0Service
 from ..providers.base import ChatModelProvider
+from ..security import open_application_sqlite
 from ..session import scoped_thread_id
 from .context import GraphContext
 from .nodes import GraphNodes
@@ -89,9 +90,13 @@ def execution_node_sequence(*, include_browser: bool | None = None) -> tuple[str
 def build_chat_application(config: AppConfig | None = None) -> AgentApplication:
     resolved = config or load_config()
     stack = ExitStack()
-    checkpointer = stack.enter_context(
-        SqliteSaver.from_conn_string(str(resolved.langgraph_checkpoint_db))
+    checkpoint_conn = open_application_sqlite(
+        resolved.langgraph_checkpoint_db,
+        data_dir=resolved.data_dir,
+        check_same_thread=False,
     )
+    stack.callback(checkpoint_conn.close)
+    checkpointer = SqliteSaver(checkpoint_conn)
     checkpointer.setup()
 
     llm_provider = LLMProvider(resolved)

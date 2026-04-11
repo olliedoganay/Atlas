@@ -14,19 +14,13 @@ Chats, memories, and run state stay on your machine.
 
 ## Install from Release
 
-If you want the normal desktop app, use a packaged release instead of the repo dev launcher.
+For normal use, install a packaged release instead of running the repo in dev mode.
 
 1. Open the repository `Releases` page on GitHub.
 2. Download the latest Windows installer or packaged `.exe`.
 3. Install and launch `Atlas`.
 
 The packaged app runs without the extra PowerShell window used by `tauri dev`.
-
-Release standard:
-
-- manifest version: `X.Y.Z`
-- git tag: `vX.Y.Z`
-- GitHub release title: `Atlas vX.Y.Z`
 
 ## Requirements for Source Builds
 
@@ -97,14 +91,12 @@ If you open a new terminal later, reactivate the repo environment first:
 .venv\Scripts\Activate.ps1
 ```
 
-Useful source commands:
+Optional source commands:
 
 ```powershell
 .venv\Scripts\atlas-backend.exe
 .venv\Scripts\atlas.exe --user-id your_user
 .venv\Scripts\atlas.exe --user-id your_user --ask "What should I build next?"
-python atlas.py --user-id your_user
-python atlas.py --user-id your_user --ask "What should I build next?"
 python -m atlas_local.api
 ```
 
@@ -115,14 +107,9 @@ Atlas is designed for local use:
 - the desktop app talks to a local backend
 - Ollama is expected to run on the same machine
 - Windows builds protect the run index and saved run artifacts with DPAPI
+- LangGraph checkpoints, Mem0 history, and local Qdrant storage are encrypted at rest with SQLCipher-backed local storage
 - password-protected profiles wrap their profile key behind the profile password
 - packaged backend logs stay off by default unless you explicitly enable them
-
-Current limitation:
-
-- LangGraph checkpoints, Mem0 history, and local Qdrant storage are still persisted as local files and are not encrypted at rest yet
-
-Atlas is local-first and partially hardened, but it is not yet a full encrypted vault.
 
 ## Verify the Repo
 

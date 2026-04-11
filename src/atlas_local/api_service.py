@@ -4,8 +4,8 @@ import base64
 import os
 import queue
 import shutil
-import sqlite3
 import threading
+from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from time import monotonic
@@ -24,6 +24,7 @@ from .llm import OllamaModelInfo, list_local_ollama_model_info
 from .memory.models import MemoryRecord
 from .run_contract import RunEvent, RunHub, TERMINAL_EVENT_TYPES
 from .run_store import PASSWORD_PROTECTED, RunStore
+from .security import open_application_sqlite, sqlcipher_enabled
 from .session import scoped_thread_id
 from .text_normalization import MojibakeRepairStream
 
@@ -120,13 +121,13 @@ class AtlasBackendService:
                 "run_artifacts_encrypted_at_rest": supports_dpapi,
                 "run_index_encrypted_at_rest": supports_dpapi,
                 "packaged_logs_default": "off",
-                "sqlite_encrypted_at_rest": False,
+                "sqlite_encrypted_at_rest": sqlcipher_enabled(),
                 "sqlite_paths": [
                     str(self.config.langgraph_checkpoint_db),
                     str(self.config.mem0_history_db),
                 ],
                 "vector_store": "local-qdrant",
-                "vector_store_encrypted_at_rest": False,
+                "vector_store_encrypted_at_rest": sqlcipher_enabled(),
                 "vector_store_path": str(self.config.qdrant_path),
             },
         }
@@ -629,7 +630,7 @@ class AtlasBackendService:
         runtime_thread_ids = {thread_id}
         if user_id:
             runtime_thread_ids.add(scoped_thread_id(user_id, thread_id))
-        with sqlite3.connect(self.config.langgraph_checkpoint_db) as conn:
+        with closing(open_application_sqlite(self.config.langgraph_checkpoint_db, data_dir=self.config.data_dir)) as conn:
             for runtime_thread_id in runtime_thread_ids:
                 conn.execute("DELETE FROM writes WHERE thread_id = ?", (runtime_thread_id,))
                 conn.execute("DELETE FROM checkpoints WHERE thread_id = ?", (runtime_thread_id,))
@@ -708,7 +709,7 @@ class AtlasBackendService:
     def reset_all(self, *, confirmation: str) -> dict[str, Any]:
         if confirmation != "RESET ATLAS":
             raise RuntimeError("Reset confirmation did not match `RESET ATLAS`.")
-        with sqlite3.connect(self.config.langgraph_checkpoint_db) as conn:
+        with closing(open_application_sqlite(self.config.langgraph_checkpoint_db, data_dir=self.config.data_dir)) as conn:
             conn.execute("DELETE FROM writes")
             conn.execute("DELETE FROM checkpoints")
             conn.commit()
@@ -1448,7 +1449,7 @@ class AtlasBackendService:
     def _list_checkpoint_threads(self) -> list[str]:
         if not self.config.langgraph_checkpoint_db.exists():
             return []
-        with sqlite3.connect(self.config.langgraph_checkpoint_db) as conn:
+        with closing(open_application_sqlite(self.config.langgraph_checkpoint_db, data_dir=self.config.data_dir)) as conn:
             rows = conn.execute("SELECT DISTINCT thread_id FROM checkpoints ORDER BY thread_id ASC").fetchall()
         return [str(row[0]) for row in rows if row and row[0]]
 
