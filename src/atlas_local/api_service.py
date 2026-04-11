@@ -726,7 +726,8 @@ class AtlasBackendService:
 
             self._raise_if_cancelled(run_id)
             prior_compacted_count = int(state.get("compacted_message_count", 0) or 0)
-            representation_tokens_before = _estimate_thread_representation_tokens(
+            representation_tokens_before = self._count_thread_representation_tokens(
+                model=chat_model,
                 messages=state.get("messages", []),
                 thread_summary=str(state.get("thread_summary", "") or ""),
                 compacted_message_count=prior_compacted_count,
@@ -735,7 +736,8 @@ class AtlasBackendService:
             if compaction:
                 state.update(compaction)
                 updated_compacted_count = int(state.get("compacted_message_count", 0) or 0)
-                representation_tokens_after = _estimate_thread_representation_tokens(
+                representation_tokens_after = self._count_thread_representation_tokens(
+                    model=chat_model,
                     messages=state.get("messages", []),
                     thread_summary=str(state.get("thread_summary", "") or ""),
                     compacted_message_count=updated_compacted_count,
@@ -855,7 +857,8 @@ class AtlasBackendService:
             self._emit_stage(run_id, "compaction")
 
             prior_compacted_count = int(state.get("compacted_message_count", 0) or 0)
-            representation_tokens_before = _estimate_thread_representation_tokens(
+            representation_tokens_before = self._count_thread_representation_tokens(
+                model=chat_model,
                 messages=state.get("messages", []),
                 thread_summary=str(state.get("thread_summary", "") or ""),
                 compacted_message_count=prior_compacted_count,
@@ -863,7 +866,8 @@ class AtlasBackendService:
             compaction = self._manual_compact_context(state=state, runtime=runtime)
             state.update(compaction)
             updated_compacted_count = int(state.get("compacted_message_count", 0) or 0)
-            representation_tokens_after = _estimate_thread_representation_tokens(
+            representation_tokens_after = self._count_thread_representation_tokens(
+                model=chat_model,
                 messages=state.get("messages", []),
                 thread_summary=str(state.get("thread_summary", "") or ""),
                 compacted_message_count=updated_compacted_count,
@@ -915,7 +919,11 @@ class AtlasBackendService:
         state: dict[str, Any],
         runtime: SimpleNamespace,
     ) -> str:
-        messages = _build_answer_messages(state=state, runtime_context=runtime.context)
+        messages = _build_answer_messages(
+            state=state,
+            runtime_context=runtime.context,
+            token_counter=self._message_token_counter(runtime.context.chat_model),
+        )
 
         answer_parts: list[str] = []
         thinking_parts: list[str] = []
@@ -1024,13 +1032,16 @@ class AtlasBackendService:
         threshold = max(1024, int(effective_context_window * 0.72))
         updated_summary = str(state.get("thread_summary", "") or "")
         compacted_count = max(0, min(int(state.get("compacted_message_count", 0) or 0), len(all_messages)))
-        if _estimate_history_tokens(all_messages[compacted_count:]) <= threshold:
+        if self._count_messages_tokens(model=runtime.context.chat_model, messages=all_messages[compacted_count:]) <= threshold:
             return {"detected_context_window": effective_context_window}
 
         recent_window = min(8, max(2, len(all_messages) // 2))
         max_iterations = 3
 
-        while max_iterations > 0 and _estimate_history_tokens(all_messages[compacted_count:]) > threshold:
+        while (
+            max_iterations > 0
+            and self._count_messages_tokens(model=runtime.context.chat_model, messages=all_messages[compacted_count:]) > threshold
+        ):
             cutoff = len(all_messages) - recent_window
             if cutoff <= compacted_count:
                 break
@@ -1056,6 +1067,44 @@ class AtlasBackendService:
             "compacted_message_count": compacted_count,
             "detected_context_window": effective_context_window,
         }
+
+    def _message_token_counter(self, model: str):
+        provider = getattr(self.app, "llm_provider", None)
+        counter = getattr(provider, "count_message_tokens", None)
+        if not callable(counter):
+            return None
+        return lambda messages: counter(model, messages)
+
+    def _count_messages_tokens(self, *, model: str, messages: list[Any]) -> int:
+        if not messages:
+            return 0
+        token_counter = self._message_token_counter(model)
+        if token_counter is not None:
+            try:
+                counted = int(token_counter(messages))
+                if counted >= 0:
+                    return counted
+            except Exception:
+                pass
+        return _estimate_prompt_messages_tokens(messages)
+
+    def _count_thread_representation_tokens(
+        self,
+        *,
+        model: str,
+        messages: list[Any],
+        thread_summary: str,
+        compacted_message_count: int,
+    ) -> int:
+        clamped_compacted_count = max(0, min(int(compacted_message_count or 0), len(messages)))
+        total = self._count_messages_tokens(model=model, messages=messages[clamped_compacted_count:])
+        summary = thread_summary.strip()
+        if summary:
+            total += self._count_messages_tokens(
+                model=model,
+                messages=[SystemMessage(content=f"Conversation summary from earlier in this thread:\n{summary}")],
+            )
+        return total
 
     def _manual_compact_context(self, *, state: dict[str, Any], runtime: SimpleNamespace) -> dict[str, Any]:
         effective_context_window = int(runtime.context.effective_context_window or 0)

@@ -58,6 +58,20 @@ class LLMProvider:
             )
         return self._json_chat_models[resolved_model]
 
+    def count_message_tokens(self, model: str | None, messages: list[Any]) -> int:
+        resolved_model = (model or self.config.chat_model).strip()
+        if not messages:
+            return 0
+        try:
+            counter = getattr(self.chat(resolved_model), "get_num_tokens_from_messages", None)
+            if callable(counter):
+                counted = int(counter(messages))
+                if counted >= 0:
+                    return counted
+        except Exception:
+            pass
+        return _approximate_message_tokens(messages)
+
     def effective_context_window(self, model: str | None = None, *, ttl_seconds: float = 15.0) -> int:
         resolved_model = (model or self.config.chat_model).strip()
         cached = self._context_windows.get(resolved_model)
@@ -289,3 +303,26 @@ def _close_chat_client(chat_model: ChatOllama) -> None:
             close()
         except Exception:
             pass
+
+
+def _approximate_message_tokens(messages: list[Any]) -> int:
+    total = 0
+    for message in messages:
+        content = getattr(message, "content", message)
+        if isinstance(content, str):
+            total += max(1, len(content) // 4)
+            continue
+        if isinstance(content, list):
+            for item in content:
+                if isinstance(item, str):
+                    total += max(1, len(item) // 4)
+                elif isinstance(item, dict):
+                    item_type = str(item.get("type", "")).strip().lower()
+                    if item_type == "text":
+                        total += max(1, len(str(item.get("text", ""))) // 4)
+                    elif item_type == "image_url":
+                        total += 256
+            total += 8
+            continue
+        total += max(1, len(str(content)) // 4)
+    return total

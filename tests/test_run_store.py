@@ -6,6 +6,7 @@ from unittest import mock
 from atlas_local.config import load_config
 from atlas_local.run_store import RunStore
 from atlas_local.run_store import _atomic_write_json
+from atlas_local.run_store import _read_json_with_retry
 
 
 class RunStoreTests(unittest.TestCase):
@@ -25,6 +26,26 @@ class RunStoreTests(unittest.TestCase):
                 _atomic_write_json(path, {"status": "ok"})
 
             self.assertEqual(path.read_text(encoding="utf-8").strip(), '{\n  "status": "ok"\n}')
+            self.assertEqual(attempts["count"], 2)
+
+    def test_read_json_retries_after_permission_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "artifact.json"
+            path.write_text('{\n  "status": "ok"\n}', encoding="utf-8")
+            original_read_text = Path.read_text
+            attempts = {"count": 0}
+
+            def flaky_read_text(self, *args, **kwargs):
+                if self == path:
+                    attempts["count"] += 1
+                    if attempts["count"] == 1:
+                        raise PermissionError("simulated windows file lock")
+                return original_read_text(self, *args, **kwargs)
+
+            with mock.patch("pathlib.Path.read_text", new=flaky_read_text):
+                payload = _read_json_with_retry(path)
+
+            self.assertEqual(payload, {"status": "ok"})
             self.assertEqual(attempts["count"], 2)
 
     def test_create_run_preserves_model_default_temperature(self) -> None:

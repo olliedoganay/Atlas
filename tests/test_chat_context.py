@@ -72,6 +72,32 @@ class ChatContextTests(unittest.TestCase):
         self.assertEqual(len(messages), 2)
         self.assertEqual(messages[-1].content, "latest question")
 
+    def test_prompt_window_can_use_exact_message_token_counter(self) -> None:
+        state = {
+            "messages": [
+                HumanMessage(content="first"),
+                HumanMessage(content="second"),
+                HumanMessage(content="latest question"),
+            ],
+        }
+        context = GraphContext(
+            user_id="u1",
+            thread_id="main",
+            session_id="u1__main",
+            chat_model="test-model",
+            chat_temperature=0.2,
+            cross_chat_memory=False,
+            effective_context_window=1200,
+        )
+
+        messages = _build_answer_messages(
+            state=state,
+            runtime_context=context,
+            token_counter=lambda batch: len(batch) * 400,
+        )
+
+        self.assertEqual([message.content for message in messages], ["second", "latest question"])
+
     def test_latest_user_text_ignores_image_blocks(self) -> None:
         state = {
             "messages": [

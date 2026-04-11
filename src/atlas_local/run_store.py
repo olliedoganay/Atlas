@@ -175,7 +175,7 @@ class RunStore:
                 timestamp = now_timestamp()
                 path = self.runs_dir / f"{run_id}.json"
                 if path.exists():
-                    artifact = json.loads(path.read_text(encoding="utf-8"))
+                    artifact = _read_json_with_retry(path)
                 else:
                     artifact = {
                         "run_id": run_id,
@@ -211,7 +211,7 @@ class RunStore:
         path = self.runs_dir / f"{run_id}.json"
         if not path.exists():
             raise RuntimeError(f"Run not found: {run_id}")
-        return json.loads(path.read_text(encoding="utf-8"))
+        return _read_json_with_retry(path)
 
     def list_threads(self, *, user_id: str | None = None) -> list[dict[str, Any]]:
         index = self._read_index()
@@ -308,7 +308,7 @@ class RunStore:
                     item["thread_title"] = resolved_title
                     path = self.runs_dir / f"{run_id}.json"
                     if path.exists():
-                        artifact = json.loads(path.read_text(encoding="utf-8"))
+                        artifact = _read_json_with_retry(path)
                         artifact["thread_title"] = resolved_title
                         self._write_run_file(run_id, artifact)
             self._write_index(index)
@@ -409,7 +409,7 @@ class RunStore:
             self._write_index({"threads": {}, "runs": {}, "users": {}})
 
     def _read_index(self) -> dict[str, Any]:
-        payload = json.loads(self._index_path.read_text(encoding="utf-8"))
+        payload = _read_json_with_retry(self._index_path)
         payload.setdefault("threads", {})
         payload.setdefault("runs", {})
         payload.setdefault("users", {})
@@ -465,3 +465,16 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
 
     if last_error is not None:
         raise last_error
+
+
+def _read_json_with_retry(path: Path) -> dict[str, Any]:
+    last_error: PermissionError | None = None
+    for attempt in range(6):
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except PermissionError as exc:
+            last_error = exc
+            time.sleep(0.05 * (attempt + 1))
+    if last_error is not None:
+        raise last_error
+    return json.loads(path.read_text(encoding="utf-8"))

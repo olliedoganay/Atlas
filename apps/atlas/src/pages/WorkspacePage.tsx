@@ -539,7 +539,7 @@ export function WorkspacePage() {
                 </div>
               ) : null}
               {transcript.map((message, index) => (
-                isTimelineSystemMessage(message) ? (
+                isContextCompactionMessage(message) ? (
                   <article
                     className={`message-card system compact-context-message${message.ephemeral ? " active" : ""}`}
                     key={compactionMessageKey(message, index)}
@@ -583,6 +583,21 @@ export function WorkspacePage() {
                         <pre className="compaction-summary-preview-text">{message.threadSummary}</pre>
                       </div>
                     ) : null}
+                  </article>
+                ) : isTimelineSystemMessage(message) ? (
+                  <article
+                    className={`message-card system timeline-system-message${message.ephemeral ? " active" : ""}`}
+                    key={compactionMessageKey(message, index)}
+                    role={message.ephemeral ? "status" : undefined}
+                  >
+                    <div className="timeline-system-meta">
+                      <span className={`status-pill subtle ${timelineSystemBadgeClass(message)}`}>
+                        <span className="status-dot" />
+                        {timelineSystemBadgeLabel(message)}
+                      </span>
+                      {message.ephemeral ? <span className="ephemeral-tag">{timelineEphemeralLabel(message)}</span> : null}
+                    </div>
+                    <p className="timeline-system-text">{formatTimelineSystemMessageText(message)}</p>
                   </article>
                 ) : (
                   <article className={`message-card ${message.role}`} key={`${message.role}-${index}-${message.content.length}`}>

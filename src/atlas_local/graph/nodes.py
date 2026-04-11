@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Callable
 from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
@@ -59,7 +60,11 @@ class GraphNodes:
         state: AgentState,
         runtime: Runtime[GraphContext],
     ) -> dict[str, Any]:
-        messages = _build_answer_messages(state=state, runtime_context=runtime.context)
+        messages = _build_answer_messages(
+            state=state,
+            runtime_context=runtime.context,
+            token_counter=_provider_message_token_counter(self.llm_provider, runtime.context.chat_model),
+        )
         try:
             response = self.llm_provider.chat(
                 runtime.context.chat_model,
@@ -156,7 +161,15 @@ def _message_text(content: Any) -> str:
     return "\n".join(part for part in parts if part).strip()
 
 
-def _build_answer_messages(*, state: AgentState, runtime_context: GraphContext) -> list[HumanMessage | AIMessage | SystemMessage]:
+MessageTokenCounter = Callable[[list[BaseMessage]], int]
+
+
+def _build_answer_messages(
+    *,
+    state: AgentState,
+    runtime_context: GraphContext,
+    token_counter: MessageTokenCounter | None = None,
+) -> list[HumanMessage | AIMessage | SystemMessage]:
     memory_message = _memory_context_message(state=state, runtime_context=runtime_context)
     summary_message = _thread_summary_message(state)
     recent_messages = _recent_prompt_messages(
@@ -164,6 +177,7 @@ def _build_answer_messages(*, state: AgentState, runtime_context: GraphContext) 
         runtime_context=runtime_context,
         memory_message=memory_message,
         summary_message=summary_message,
+        token_counter=token_counter,
     )
     prefix = [item for item in (memory_message, summary_message) if item is not None]
     return prefix + recent_messages
@@ -192,6 +206,7 @@ def _recent_prompt_messages(
     runtime_context: GraphContext,
     memory_message: SystemMessage | None,
     summary_message: SystemMessage | None,
+    token_counter: MessageTokenCounter | None,
 ) -> list[BaseMessage]:
     messages = list(state.get("messages", []))
     compacted_count = max(0, min(int(state.get("compacted_message_count", 0) or 0), len(messages)))
@@ -205,13 +220,13 @@ def _recent_prompt_messages(
         return candidate_messages
 
     prompt_budget = max(1024, int(effective_context_window * 0.72))
-    reserved_tokens = _estimate_message_tokens(memory_message) + _estimate_message_tokens(summary_message) + 64
+    reserved_tokens = _count_messages_tokens([memory_message, summary_message], token_counter=token_counter) + 64
     available_tokens = max(256, prompt_budget - reserved_tokens)
 
     selected: list[BaseMessage] = []
     consumed = 0
     for message in reversed(candidate_messages):
-        message_tokens = _estimate_message_tokens(message)
+        message_tokens = _count_messages_tokens([message], token_counter=token_counter)
         if selected and consumed + message_tokens > available_tokens:
             break
         selected.insert(0, message)
@@ -228,6 +243,24 @@ def _estimate_message_tokens(message: BaseMessage | None) -> int:
     if message is None:
         return 0
     return _estimate_content_tokens(message.content) + 8
+
+
+def _count_messages_tokens(
+    messages: list[BaseMessage | None],
+    *,
+    token_counter: MessageTokenCounter | None,
+) -> int:
+    items = [message for message in messages if message is not None]
+    if not items:
+        return 0
+    if token_counter is not None:
+        try:
+            counted = int(token_counter(items))
+            if counted >= 0:
+                return counted
+        except Exception:
+            pass
+    return sum(_estimate_message_tokens(message) for message in items)
 
 
 def _estimate_content_tokens(content: Any) -> int:
@@ -252,6 +285,16 @@ def _format_list(values: list[str]) -> str:
     if not values:
         return "- none"
     return "\n".join(f"- {item}" for item in values)
+
+
+def _provider_message_token_counter(
+    llm_provider: ChatModelProvider,
+    model: str,
+) -> MessageTokenCounter | None:
+    counter = getattr(llm_provider, "count_message_tokens", None)
+    if not callable(counter):
+        return None
+    return lambda messages: counter(model, messages)
 
 
 def _strip_empty_sources_footer(answer: str) -> str:

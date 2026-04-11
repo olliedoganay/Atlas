@@ -204,13 +204,18 @@ class ContextCompactionTests(unittest.TestCase):
             summarized_batches.append(messages)
             return "summary"
 
+        service.app = SimpleNamespace(
+            llm_provider=SimpleNamespace(
+                count_message_tokens=lambda _model, messages: len(messages) * 700,
+            )
+        )
         service._summarize_message_batch = summarize_message_batch
         state = {
             "messages": [
-                HumanMessage(content="u" * 1800),
-                AIMessage(content="a" * 1800),
-                HumanMessage(content="u" * 1800),
-                AIMessage(content="a" * 1800),
+                HumanMessage(content="u1"),
+                AIMessage(content="a1"),
+                HumanMessage(content="u2"),
+                AIMessage(content="a2"),
             ],
             "thread_summary": "",
             "compacted_message_count": 0,
@@ -230,12 +235,14 @@ class ContextCompactionTests(unittest.TestCase):
         self.assertEqual(result["thread_summary"], "summary")
         self.assertEqual(len(summarized_batches), 1)
 
-        before_tokens = _estimate_thread_representation_tokens(
+        before_tokens = service._count_thread_representation_tokens(
+            model="gemma4:e4b",
             messages=state["messages"],
             thread_summary="",
             compacted_message_count=0,
         )
-        after_tokens = _estimate_thread_representation_tokens(
+        after_tokens = service._count_thread_representation_tokens(
+            model="gemma4:e4b",
             messages=state["messages"],
             thread_summary=result["thread_summary"],
             compacted_message_count=result["compacted_message_count"],

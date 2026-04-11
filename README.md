@@ -8,7 +8,6 @@ Atlas is a local-first desktop chat workspace for Ollama. It runs a Tauri deskto
 - optional cross-chat memory backed by Mem0 + local Qdrant storage
 - manual memory add/delete from the desktop settings page
 - persisted thread history, run events, and stream state on disk
-- no browser automation, research mode, benchmark runner, or world-state graph
 
 ## Stack
 
