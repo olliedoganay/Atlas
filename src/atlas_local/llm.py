@@ -1,0 +1,291 @@
+from __future__ import annotations
+
+import json
+from dataclasses import asdict, dataclass, field
+from time import monotonic
+from typing import Any
+from urllib import error, request
+from urllib.parse import urljoin
+
+from langchain_ollama import ChatOllama
+
+from .config import AppConfig
+
+
+def format_runtime_error(config: AppConfig, exc: Exception, *, chat_model: str | None = None) -> RuntimeError:
+    resolved_chat_model = chat_model or config.chat_model
+    message = (
+        "Ollama request failed. "
+        f"Configured chat_model={resolved_chat_model!r}, "
+        f"embed_model={config.embed_model!r}, "
+        f"base_url={config.ollama_url!r}. "
+        "Make sure Ollama is running and the required models are pulled."
+    )
+    return RuntimeError(message)
+
+
+@dataclass
+class LLMProvider:
+    config: AppConfig
+    _chat_models: dict[tuple[str, float | None], ChatOllama] = field(default_factory=dict, init=False, repr=False)
+    _json_chat_models: dict[str, ChatOllama] = field(default_factory=dict, init=False, repr=False)
+    _context_windows: dict[str, tuple[float, int]] = field(default_factory=dict, init=False, repr=False)
+
+    def chat(self, model: str | None = None, *, temperature: float | None = None) -> ChatOllama:
+        resolved_model = (model or self.config.chat_model).strip()
+        resolved_temperature = None if temperature is None else float(temperature)
+        cache_key = (resolved_model, resolved_temperature)
+        if cache_key not in self._chat_models:
+            options: dict[str, Any] = {
+                "model": resolved_model,
+                "base_url": self.config.ollama_url,
+                "validate_model_on_init": True,
+            }
+            if resolved_temperature is not None:
+                options["temperature"] = resolved_temperature
+            self._chat_models[cache_key] = ChatOllama(**options)
+        return self._chat_models[cache_key]
+
+    def json_chat(self, model: str | None = None) -> ChatOllama:
+        resolved_model = (model or self.config.chat_model).strip()
+        if resolved_model not in self._json_chat_models:
+            self._json_chat_models[resolved_model] = ChatOllama(
+                model=resolved_model,
+                base_url=self.config.ollama_url,
+                temperature=0.0,
+                format="json",
+                validate_model_on_init=True,
+            )
+        return self._json_chat_models[resolved_model]
+
+    def effective_context_window(self, model: str | None = None, *, ttl_seconds: float = 15.0) -> int:
+        resolved_model = (model or self.config.chat_model).strip()
+        cached = self._context_windows.get(resolved_model)
+        now = monotonic()
+        if cached and now - cached[0] < ttl_seconds:
+            return cached[1]
+        value = resolve_effective_context_window(self.config, resolved_model)
+        self._context_windows[resolved_model] = (now, value)
+        return value
+
+    def abort_active_requests(self) -> None:
+        for chat_model in list(self._chat_models.values()):
+            _close_chat_client(chat_model)
+        for chat_model in list(self._json_chat_models.values()):
+            _close_chat_client(chat_model)
+        self._chat_models.clear()
+        self._json_chat_models.clear()
+
+
+@dataclass(frozen=True)
+class OllamaModelInfo:
+    name: str
+    family: str = ""
+    families: tuple[str, ...] = ()
+    supports_images: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload["families"] = list(self.families)
+        return payload
+
+
+def list_local_ollama_models(config: AppConfig, *, timeout_seconds: float = 3.0) -> list[str]:
+    return [item.name for item in list_local_ollama_model_info(config, timeout_seconds=timeout_seconds)]
+
+
+def list_local_ollama_model_info(config: AppConfig, *, timeout_seconds: float = 3.0) -> list[OllamaModelInfo]:
+    endpoint = urljoin(f"{config.ollama_url.rstrip('/')}/", "api/tags")
+    try:
+        with request.urlopen(endpoint, timeout=timeout_seconds) as response:
+            payload: dict[str, Any] = json.loads(response.read().decode("utf-8"))
+    except (error.URLError, TimeoutError, json.JSONDecodeError, OSError):
+        return [OllamaModelInfo(name=config.chat_model)]
+
+    models = payload.get("models", [])
+    entries: list[OllamaModelInfo] = []
+    seen: set[str] = set()
+    for item in models:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "")).strip()
+        if not name or name in seen or not _is_chat_capable_model(item):
+            continue
+        seen.add(name)
+        details = item.get("details", {}) if isinstance(item.get("details"), dict) else {}
+        family = str(details.get("family", "")).strip()
+        families = tuple(str(entry).strip() for entry in details.get("families", []) if str(entry).strip())
+        entries.append(
+            OllamaModelInfo(
+                name=name,
+                family=family,
+                families=families,
+                supports_images=_is_vision_capable_model(item),
+            )
+        )
+
+    entries.sort(key=lambda item: item.name)
+    if config.chat_model not in {item.name for item in entries}:
+        entries.insert(0, OllamaModelInfo(name=config.chat_model))
+    return entries
+
+
+def resolve_effective_context_window(
+    config: AppConfig,
+    model: str,
+    *,
+    timeout_seconds: float = 2.5,
+    fallback: int = 8192,
+) -> int:
+    resolved_model = model.strip() or config.chat_model
+    ps_payload = _ollama_json_request(config, "api/ps", timeout_seconds=timeout_seconds)
+    context_from_ps = _context_from_ps_payload(ps_payload, resolved_model)
+    if context_from_ps:
+        return context_from_ps
+
+    show_payload = _ollama_json_request(
+        config,
+        "api/show",
+        timeout_seconds=timeout_seconds,
+        body={"model": resolved_model},
+    )
+    context_from_show = _context_from_show_payload(show_payload)
+    if context_from_show:
+        return context_from_show
+    return fallback
+
+
+def _ollama_json_request(
+    config: AppConfig,
+    endpoint: str,
+    *,
+    timeout_seconds: float,
+    body: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    url = urljoin(f"{config.ollama_url.rstrip('/')}/", endpoint)
+    data = None
+    headers = {}
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    request_object = request.Request(url, data=data, headers=headers, method="POST" if body is not None else "GET")
+    try:
+        with request.urlopen(request_object, timeout=timeout_seconds) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+            return payload if isinstance(payload, dict) else {}
+    except (error.URLError, TimeoutError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def _context_from_ps_payload(payload: dict[str, Any], model: str) -> int | None:
+    models = payload.get("models", [])
+    if not isinstance(models, list):
+        return None
+    target = model.strip().lower()
+    for item in models:
+        if not isinstance(item, dict):
+            continue
+        names = {
+            str(item.get("name", "")).strip().lower(),
+            str(item.get("model", "")).strip().lower(),
+        }
+        if target not in names:
+            continue
+        candidates = (
+            item.get("context_length"),
+            item.get("num_ctx"),
+            item.get("options", {}).get("num_ctx") if isinstance(item.get("options"), dict) else None,
+            item.get("details", {}).get("context_length") if isinstance(item.get("details"), dict) else None,
+        )
+        for value in candidates:
+            parsed = _parse_positive_int(value)
+            if parsed:
+                return parsed
+    return None
+
+
+def _context_from_show_payload(payload: dict[str, Any]) -> int | None:
+    parameters = payload.get("parameters")
+    if isinstance(parameters, str):
+        for line in parameters.splitlines():
+            key, _, value = line.partition(" ")
+            if key.strip().lower() == "num_ctx":
+                parsed = _parse_positive_int(value)
+                if parsed:
+                    return parsed
+
+    model_info = payload.get("model_info", {})
+    if isinstance(model_info, dict):
+        preferred_key = next((key for key in model_info if key.endswith(".context_length")), None)
+        if preferred_key:
+            parsed = _parse_positive_int(model_info.get(preferred_key))
+            if parsed:
+                return parsed
+        fallback_key = next((key for key in model_info if key.endswith(".original_context_length")), None)
+        if fallback_key:
+            parsed = _parse_positive_int(model_info.get(fallback_key))
+            if parsed:
+                return parsed
+    return None
+
+
+def _parse_positive_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, float):
+        return int(value) if value > 0 else None
+    text = str(value or "").strip()
+    if not text:
+        return None
+    digits = "".join(character for character in text if character.isdigit())
+    if not digits:
+        return None
+    parsed = int(digits)
+    return parsed if parsed > 0 else None
+
+
+def _is_chat_capable_model(payload: dict[str, Any]) -> bool:
+    name = str(payload.get("name", "")).lower()
+    model = str(payload.get("model", "")).lower()
+    details = payload.get("details", {}) if isinstance(payload.get("details"), dict) else {}
+    family = str(details.get("family", "")).lower()
+    families = [str(item).lower() for item in details.get("families", []) if str(item).strip()]
+    combined = " ".join([name, model, family, " ".join(families)])
+    blocked_markers = ("embed", "embedding", "bert")
+    return not any(marker in combined for marker in blocked_markers)
+
+
+def _is_vision_capable_model(payload: dict[str, Any]) -> bool:
+    name = str(payload.get("name", "")).lower()
+    model = str(payload.get("model", "")).lower()
+    details = payload.get("details", {}) if isinstance(payload.get("details"), dict) else {}
+    family = str(details.get("family", "")).lower()
+    families = [str(item).lower() for item in details.get("families", []) if str(item).strip()]
+    combined = " ".join([name, model, family, " ".join(families)])
+    vision_markers = (
+        "vision",
+        "llava",
+        "vl",
+        "minicpm-v",
+        "bakllava",
+        "moondream",
+        "gemma3",
+        "gemma4",
+        "qwen2.5vl",
+        "qwen2-vl",
+        "qwen-vl",
+    )
+    return any(marker in combined for marker in vision_markers)
+
+
+def _close_chat_client(chat_model: ChatOllama) -> None:
+    client_wrapper = getattr(chat_model, "_client", None)
+    transport_client = getattr(client_wrapper, "_client", None)
+    close = getattr(transport_client, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:
+            pass

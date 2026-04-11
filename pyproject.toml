@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "atlas-local"
+version = "0.1.0"
+description = "Local desktop chat runtime with persistent memory for Atlas."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [
+    { name = "Atlas" },
+]
+dependencies = [
+    "fastapi==0.122.0",
+    "langchain-ollama==1.1.0",
+    "langgraph==1.1.6",
+    "langgraph-checkpoint-sqlite==3.0.3",
+    "mem0ai==1.0.11",
+    "playwright>=1.54,<2",
+    "python-dotenv==1.2.2",
+    "uvicorn==0.38.0",
+    "z3-solver==4.16.0.0",
+]
+
+[project.scripts]
+atlas = "atlas_local.entrypoints:atlas_main"
+atlas-backend = "atlas_local.entrypoints:atlas_backend_main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

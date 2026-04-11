@@ -1,0 +1,293 @@
+import json
+import os
+import queue
+import unittest
+
+from fastapi.testclient import TestClient
+
+from atlas_local.api import create_api_app
+
+
+class FakeService:
+    def __init__(self) -> None:
+        self.artifacts = {
+            "run-1": {
+                "run_id": "run-1",
+                "status": "completed",
+                "events": [
+                    {"type": "run_started", "timestamp": "2026-04-08T00:00:00Z", "payload": {"mode": "chat"}},
+                    {"type": "token", "timestamp": "2026-04-08T00:00:01Z", "payload": {"text": "hello"}},
+                    {"type": "run_completed", "timestamp": "2026-04-08T00:00:02Z", "payload": {"answer": "hello"}},
+                ],
+                "trace_items": [],
+                "answer": "hello",
+                "citations": [],
+            }
+        }
+        self.subscribers: dict[str, list[queue.Queue[dict[str, object]]]] = {}
+
+    def close(self) -> None:
+        return None
+
+    def health(self):
+        return {"status": "ok", "product": "Atlas"}
+
+    def status(self):
+        return {
+            "status": "ok",
+            "product_name": "Atlas",
+            "backend": "Atlas local runtime",
+            "default_chat_model": "test-model",
+            "chat_model": "test-model",
+            "default_chat_temperature": 0.2,
+            "chat_temperature": 0.2,
+            "embed_model": "embed-model",
+            "ollama_url": "http://127.0.0.1:11434",
+            "active_profile": "default",
+            "profiles": ["default"],
+            "busy": False,
+            "browser_headless": True,
+            "search_provider": "yahoo_browser",
+            "benchmark_suites": ["web_interactive_v1"],
+        }
+
+    def list_models(self):
+        return {
+            "default_model": "test-model",
+            "default_temperature": 0.2,
+            "temperature_presets": [
+                {"label": "0.0", "value": 0.0},
+                {"label": "0.1", "value": 0.1},
+                {"label": "0.2", "value": 0.2},
+            ],
+            "models": ["test-model", "model-b"],
+            "model_details": [
+                {"name": "test-model", "supports_images": False},
+                {"name": "model-b", "supports_images": True},
+            ],
+        }
+
+    def list_users(self):
+        return [{"user_id": "research_user", "updated_at": "2026-04-08T00:00:00Z"}]
+
+    def create_user(self, *, user_id: str):
+        return {"user_id": user_id, "updated_at": "2026-04-08T00:00:00Z"}
+
+    def list_memories(self, *, user_id: str, limit: int = 50):
+        return [{"memory": "name: Atlas Tester", "memory_id": "mem-1", "metadata": {"source": "manual"}}][:limit]
+
+    def add_memory(self, *, user_id: str, text: str):
+        return {"status": "ok", "user_id": user_id, "memory_id": "mem-2", "text": text}
+
+    def delete_memory(self, *, user_id: str, memory_id: str):
+        return {"status": "ok", "user_id": user_id, "memory_id": memory_id}
+
+    def reset_user(self, *, user_id: str, confirmation_user_id: str):
+        if user_id != confirmation_user_id:
+            raise RuntimeError("User confirmation did not match the requested user id.")
+        return {"status": "ok", "user_id": user_id}
+
+    def list_threads(self, *, user_id=None):
+        return [
+            {
+                "user_id": user_id or "research_user",
+                "thread_id": "main",
+                "title": "Main chat",
+                "chat_model": "test-model",
+                "temperature": 0.2,
+                "last_mode": "chat",
+            }
+        ]
+
+    def rename_thread(self, *, user_id: str, thread_id: str, title: str):
+        return {"user_id": user_id, "thread_id": thread_id, "title": title}
+
+    def duplicate_thread(self, *, user_id: str, thread_id: str):
+        return {"user_id": user_id, "thread_id": f"{thread_id}-copy", "title": "Main chat copy", "chat_model": "test-model", "temperature": 0.2}
+
+    def cancel_run(self, run_id: str):
+        return {"status": "cancelling", "run_id": run_id}
+
+    def get_thread_history(self, *, user_id=None, thread_id: str):
+        return [{"role": "user", "content": f"{user_id or 'research_user'}:{thread_id}", "attachments": []}]
+
+    def get_run(self, run_id: str):
+        if run_id not in self.artifacts:
+            raise RuntimeError(f"Run not found: {run_id}")
+        return self.artifacts[run_id]
+
+    def subscribe(self, run_id: str):
+        subscriber: queue.Queue[dict[str, object]] = queue.Queue()
+        self.subscribers.setdefault(run_id, []).append(subscriber)
+        return subscriber
+
+    def unsubscribe(self, run_id: str, subscriber):
+        self.subscribers[run_id] = [item for item in self.subscribers.get(run_id, []) if item is not subscriber]
+
+    def start_chat(
+        self,
+        *,
+        prompt: str,
+        user_id: str,
+        thread_id: str,
+        chat_model=None,
+        temperature=None,
+        thread_title=None,
+        cross_chat_memory: bool = True,
+        auto_compact_long_chats: bool = True,
+        images=None,
+    ):
+        return {
+            "run_id": "run-1",
+            "status": "running",
+            "prompt": prompt,
+            "user_id": user_id,
+            "thread_id": thread_id,
+            "thread_title": thread_title or thread_id,
+            "chat_model": chat_model or "test-model",
+            "temperature": temperature,
+            "cross_chat_memory": cross_chat_memory,
+            "auto_compact_long_chats": auto_compact_long_chats,
+            "images": images or [],
+        }
+
+    def reset_all(self, *, confirmation: str):
+        return {"status": "ok", "confirmation": confirmation}
+
+
+class ApiTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.client = TestClient(create_api_app(FakeService()))
+
+    def test_health_and_status(self) -> None:
+        health = self.client.get("/health")
+        status = self.client.get("/status")
+        models = self.client.get("/models")
+        users = self.client.get("/users")
+        memories = self.client.get("/memories", params={"user_id": "research_user"})
+        self.assertEqual(health.status_code, 200)
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(models.status_code, 200)
+        self.assertEqual(users.status_code, 200)
+        self.assertEqual(memories.status_code, 200)
+        self.assertEqual(health.json()["product"], "Atlas")
+        self.assertEqual(models.json()["models"], ["test-model", "model-b"])
+        self.assertEqual(models.json()["default_temperature"], 0.2)
+        self.assertTrue(models.json()["model_details"][1]["supports_images"])
+        self.assertEqual(users.json()[0]["user_id"], "research_user")
+        self.assertEqual(memories.json()[0]["memory_id"], "mem-1")
+
+    def test_thread_listing_and_run_details(self) -> None:
+        response = self.client.get("/threads", params={"user_id": "research_user"})
+        details = self.client.get("/runs/run-1")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(details.status_code, 200)
+        self.assertEqual(response.json()[0]["thread_id"], "main")
+        self.assertEqual(response.json()[0]["title"], "Main chat")
+        self.assertEqual(details.json()["answer"], "hello")
+
+    def test_chat_run_creation(self) -> None:
+        response = self.client.post(
+            "/chat",
+            json={
+                "prompt": "hello",
+                "user_id": "research_user",
+                "thread_id": "main",
+                "chat_model": "model-b",
+                "temperature": 0.6,
+                "thread_title": "Renamed chat",
+                "cross_chat_memory": False,
+                "auto_compact_long_chats": False,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["run_id"], "run-1")
+        self.assertEqual(response.json()["chat_model"], "model-b")
+        self.assertEqual(response.json()["temperature"], 0.6)
+
+    def test_chat_run_creation_allows_model_default_temperature(self) -> None:
+        response = self.client.post(
+            "/chat",
+            json={
+                "prompt": "hello",
+                "user_id": "research_user",
+                "thread_id": "main",
+                "chat_model": "model-b",
+                "temperature": None,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["temperature"])
+
+    def test_cancel_run(self) -> None:
+        response = self.client.post("/runs/run-1/cancel")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "cancelling")
+        self.assertEqual(response.json()["run_id"], "run-1")
+
+    def test_user_creation_and_thread_rename(self) -> None:
+        created = self.client.post("/users", json={"user_id": "atlas_user"})
+        renamed = self.client.patch(
+            "/threads/main/title",
+            json={"user_id": "research_user", "title": "Research notes"},
+        )
+        duplicated = self.client.post("/threads/main/duplicate", json={"user_id": "research_user"})
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual(renamed.status_code, 200)
+        self.assertEqual(duplicated.status_code, 200)
+        self.assertEqual(created.json()["user_id"], "atlas_user")
+        self.assertEqual(renamed.json()["title"], "Research notes")
+        self.assertEqual(duplicated.json()["thread_id"], "main-copy")
+
+    def test_user_delete(self) -> None:
+        deleted = self.client.delete("/users/research_user", params={"confirmation_user_id": "research_user"})
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(deleted.json()["user_id"], "research_user")
+
+    def test_memory_create_and_delete(self) -> None:
+        created = self.client.post("/memories", json={"user_id": "research_user", "text": "remember this"})
+        deleted = self.client.delete("/memories/mem-2", params={"user_id": "research_user"})
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(created.json()["memory_id"], "mem-2")
+        self.assertEqual(deleted.json()["memory_id"], "mem-2")
+
+    def test_stream_replays_events_in_order(self) -> None:
+        with self.client.stream("GET", "/chat/stream/run-1") as response:
+            self.assertEqual(response.status_code, 200)
+            payload = "".join(response.iter_text())
+        self.assertIn("event: run_started", payload)
+        self.assertIn("event: token", payload)
+        self.assertIn("event: run_completed", payload)
+        self.assertLess(payload.index("event: run_started"), payload.index("event: token"))
+        self.assertLess(payload.index("event: token"), payload.index("event: run_completed"))
+
+    def test_reset_endpoints(self) -> None:
+        reset_user = self.client.delete("/users/research_user", params={"confirmation_user_id": "research_user"})
+        reset_all = self.client.post("/admin/reset/all", json={"confirmation": "RESET ATLAS"})
+        self.assertEqual(reset_user.status_code, 200)
+        self.assertEqual(reset_all.status_code, 200)
+
+    def test_options_preflight_bypasses_instance_token(self) -> None:
+        original = os.environ.get("ATLAS_INSTANCE_TOKEN")
+        os.environ["ATLAS_INSTANCE_TOKEN"] = "test-token"
+        try:
+            client = TestClient(create_api_app(FakeService()))
+            response = client.options(
+                "/status",
+                headers={
+                    "Origin": "tauri://localhost",
+                    "Access-Control-Request-Method": "GET",
+                    "Access-Control-Request-Headers": "x-atlas-instance-token,content-type",
+                },
+            )
+        finally:
+            if original is None:
+                os.environ.pop("ATLAS_INSTANCE_TOKEN", None)
+            else:
+                os.environ["ATLAS_INSTANCE_TOKEN"] = original
+        self.assertNotEqual(response.status_code, 401)
+
+
+if __name__ == "__main__":
+    unittest.main()
