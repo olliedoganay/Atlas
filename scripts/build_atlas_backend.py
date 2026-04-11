@@ -14,6 +14,7 @@ def main() -> int:
     backend_resource_dir = resources_dir / "backend"
     prompt_resource_dir = resources_dir / "prompts"
     build_root = repo_root / "output" / "pyinstaller"
+    build_root.mkdir(parents=True, exist_ok=True)
     session_root = Path(tempfile.mkdtemp(prefix="session-", dir=build_root))
     dist_root = session_root / "dist"
     work_root = session_root / "build"
@@ -23,7 +24,6 @@ def main() -> int:
         if path.exists():
             shutil.rmtree(path, ignore_errors=True)
 
-    build_root.mkdir(parents=True, exist_ok=True)
     _cleanup_old_sessions(build_root, keep=session_root)
 
     for path in (resources_dir, dist_root, work_root, spec_root):
