@@ -209,7 +209,7 @@ export function AtlasShell() {
   };
 
   const createThread = () => {
-    setCurrentThreadId(`atlas-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}`);
+    setCurrentThreadId(buildDraftThreadId());
     setCurrentThreadTitle("");
     setDraftThreadModel(defaultModel);
     setDraftThreadTemperature(null);
@@ -416,4 +416,12 @@ function isSameThread(thread: ThreadSummary, target: ThreadSummary, fallbackUser
   const threadUserId = thread.user_id || fallbackUserId;
   const targetUserId = target.user_id || fallbackUserId;
   return threadUserId === targetUserId && thread.thread_id === target.thread_id;
+}
+
+function buildDraftThreadId() {
+  const timestamp = new Date().toISOString().replace(/[:.T]/g, "-").replace("Z", "");
+  const suffix = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID().slice(0, 6)
+    : Math.random().toString(36).slice(2, 8);
+  return `atlas-${timestamp}-${suffix}`;
 }

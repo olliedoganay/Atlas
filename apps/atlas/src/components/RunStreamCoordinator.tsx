@@ -11,6 +11,7 @@ export function RunStreamCoordinator() {
   const activeRunUserId = useAtlasStore((state) => state.activeRunUserId);
   const activeRunThreadId = useAtlasStore((state) => state.activeRunThreadId);
   const isStreaming = useAtlasStore((state) => state.isStreaming);
+  const appendThinking = useAtlasStore((state) => state.appendThinking);
   const appendToken = useAtlasStore((state) => state.appendToken);
   const setStage = useAtlasStore((state) => state.setStage);
   const completeRun = useAtlasStore((state) => state.completeRun);
@@ -20,12 +21,21 @@ export function RunStreamCoordinator() {
   const teardownRef = useRef<(() => void) | null>(null);
   const attachedRunIdRef = useRef<string | null>(null);
   const tokenBufferRef = useRef("");
+  const thinkingBufferRef = useRef("");
   const tokenFlushTimerRef = useRef<number | null>(null);
+  const thinkingFlushTimerRef = useRef<number | null>(null);
 
   const clearTokenFlushTimer = () => {
     if (tokenFlushTimerRef.current !== null) {
       window.clearTimeout(tokenFlushTimerRef.current);
       tokenFlushTimerRef.current = null;
+    }
+  };
+
+  const clearThinkingFlushTimer = () => {
+    if (thinkingFlushTimerRef.current !== null) {
+      window.clearTimeout(thinkingFlushTimerRef.current);
+      thinkingFlushTimerRef.current = null;
     }
   };
 
@@ -37,6 +47,14 @@ export function RunStreamCoordinator() {
     tokenBufferRef.current = "";
   };
 
+  const flushBufferedThinking = () => {
+    if (!thinkingBufferRef.current) {
+      return;
+    }
+    appendThinking(thinkingBufferRef.current);
+    thinkingBufferRef.current = "";
+  };
+
   const scheduleTokenFlush = () => {
     if (tokenFlushTimerRef.current !== null) {
       return;
@@ -45,6 +63,16 @@ export function RunStreamCoordinator() {
       tokenFlushTimerRef.current = null;
       flushBufferedTokens();
     }, 32);
+  };
+
+  const scheduleThinkingFlush = () => {
+    if (thinkingFlushTimerRef.current !== null) {
+      return;
+    }
+    thinkingFlushTimerRef.current = window.setTimeout(() => {
+      thinkingFlushTimerRef.current = null;
+      flushBufferedThinking();
+    }, 48);
   };
 
   const invalidateRunQueries = async (runId: string, userId: string, threadId: string) => {
@@ -108,6 +136,7 @@ export function RunStreamCoordinator() {
   useEffect(() => {
     if (!currentRunId || !currentRunMode || !activeRunUserId || !activeRunThreadId || !isStreaming) {
       clearTokenFlushTimer();
+      clearThinkingFlushTimer();
       teardownRef.current?.();
       teardownRef.current = null;
       attachedRunIdRef.current = null;
@@ -118,6 +147,7 @@ export function RunStreamCoordinator() {
     }
 
     clearTokenFlushTimer();
+    clearThinkingFlushTimer();
     teardownRef.current?.();
 
     attachedRunIdRef.current = currentRunId;
@@ -130,6 +160,8 @@ export function RunStreamCoordinator() {
             setStage(String(event.payload.stage ?? "running"));
             break;
           case "thinking_token":
+            thinkingBufferRef.current += String(event.payload.text ?? "");
+            scheduleThinkingFlush();
             break;
           case "token":
             tokenBufferRef.current += String(event.payload.text ?? "");
@@ -179,7 +211,9 @@ export function RunStreamCoordinator() {
           }
           case "run_completed":
             clearTokenFlushTimer();
+            clearThinkingFlushTimer();
             flushBufferedTokens();
+            flushBufferedThinking();
             attachedRunIdRef.current = null;
             teardownRef.current?.();
             teardownRef.current = null;
@@ -187,7 +221,9 @@ export function RunStreamCoordinator() {
             break;
           case "run_failed":
             clearTokenFlushTimer();
+            clearThinkingFlushTimer();
             flushBufferedTokens();
+            flushBufferedThinking();
             attachedRunIdRef.current = null;
             teardownRef.current?.();
             teardownRef.current = null;
@@ -200,7 +236,9 @@ export function RunStreamCoordinator() {
       },
       (message) => {
         clearTokenFlushTimer();
+        clearThinkingFlushTimer();
         flushBufferedTokens();
+        flushBufferedThinking();
         attachedRunIdRef.current = null;
         teardownRef.current = null;
         void recoverRunAfterStreamError(currentRunId, activeRunUserId, activeRunThreadId, message);
@@ -210,6 +248,7 @@ export function RunStreamCoordinator() {
     activeRunThreadId,
     activeRunUserId,
     appendToken,
+    appendThinking,
     completeRun,
     currentRunId,
     currentRunMode,
@@ -223,6 +262,7 @@ export function RunStreamCoordinator() {
   useEffect(() => {
     return () => {
       clearTokenFlushTimer();
+      clearThinkingFlushTimer();
       teardownRef.current?.();
       teardownRef.current = null;
       attachedRunIdRef.current = null;

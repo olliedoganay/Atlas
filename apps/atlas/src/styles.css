@@ -1322,6 +1322,44 @@ pre {
   font-weight: 500;
 }
 
+.thinking-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.thinking-toggle.interactive {
+  cursor: pointer;
+}
+
+.thinking-toggle .stream-waiting-line {
+  margin-top: 0;
+}
+
+.thinking-panel {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.thinking-panel-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--muted-strong);
+  font-family: inherit;
+  font-size: 0.94rem;
+  line-height: 1.6;
+}
+
 .stream-dots {
   display: inline-flex;
   align-items: center;

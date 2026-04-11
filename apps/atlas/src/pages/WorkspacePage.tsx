@@ -1,6 +1,6 @@
 import * as ScrollArea from "@radix-ui/react-scroll-area";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Edit3, ImagePlus, Lock, Send, Square, X } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Edit3, ImagePlus, Lock, Send, Square, X } from "lucide-react";
 import { ChangeEvent, FormEvent, KeyboardEvent, UIEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { MessageContent } from "../components/MessageContent";
@@ -59,6 +59,7 @@ export function WorkspacePage() {
   const currentStage = useAtlasStore((state) => state.currentStage);
   const pendingPrompt = useAtlasStore((state) => state.pendingPrompt);
   const pendingAttachments = useAtlasStore((state) => state.pendingAttachments);
+  const liveThinking = useAtlasStore((state) => state.liveThinking);
   const liveAnswer = useAtlasStore((state) => state.liveAnswer);
   const liveError = useAtlasStore((state) => state.liveError);
   const compactionNotice = useAtlasStore((state) => state.compactionNotice);
@@ -74,6 +75,7 @@ export function WorkspacePage() {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
   const [expandedCompactionKeys, setExpandedCompactionKeys] = useState<Record<string, boolean>>({});
+  const [isThinkingExpanded, setIsThinkingExpanded] = useState(false);
 
   const { data: status } = useQuery({
     queryKey: ["status"],
@@ -138,6 +140,8 @@ export function WorkspacePage() {
   }, [currentThreadId, currentThreadTitle, currentUserId, defaultModel, draftThreadModel, draftThreadTemperature, threadItems]);
 
   const currentThreadHasActiveRun =
+    Boolean(currentRunId) &&
+    isStreaming &&
     activeRunUserId === currentUserId &&
     activeRunThreadId === currentThreadId;
   const activeRunIdForThread = currentThreadHasActiveRun ? currentRunId : null;
@@ -220,6 +224,10 @@ export function WorkspacePage() {
   useEffect(() => {
     setExpandedCompactionKeys({});
   }, [currentUserId, currentThreadId]);
+
+  useEffect(() => {
+    setIsThinkingExpanded(false);
+  }, [currentRunId]);
 
   const startRun = useMutation({
     mutationFn: async (value: string) => {
@@ -625,14 +633,47 @@ export function WorkspacePage() {
                   <div className="message-meta">
                     <span>{currentRunMode === "compact" ? "SYSTEM" : formatMessageRoleLabel("assistant")}</span>
                   </div>
-                  <div className="stream-waiting-line" aria-live="polite">
-                    <span>{currentRunMode === "compact" ? "Compacting older context" : "Deciding"}</span>
-                    <span className="stream-dots" aria-hidden="true">
-                      <span />
-                      <span />
-                      <span />
-                    </span>
-                  </div>
+                  {currentRunMode === "compact" ? (
+                    <div className="stream-waiting-line" aria-live="polite">
+                      <span>Compacting older context</span>
+                      <span className="stream-dots" aria-hidden="true">
+                        <span />
+                        <span />
+                        <span />
+                      </span>
+                    </div>
+                  ) : (
+                    <>
+                      <button
+                        aria-expanded={liveThinking ? isThinkingExpanded : false}
+                        className={`thinking-toggle ${liveThinking ? "interactive" : ""}`}
+                        onClick={() => {
+                          if (!liveThinking) {
+                            return;
+                          }
+                          setIsThinkingExpanded((current) => !current);
+                        }}
+                        type="button"
+                      >
+                        <span className="stream-waiting-line" aria-live="polite">
+                          <span>Deciding</span>
+                          <span className="stream-dots" aria-hidden="true">
+                            <span />
+                            <span />
+                            <span />
+                          </span>
+                        </span>
+                        {liveThinking ? (
+                          isThinkingExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />
+                        ) : null}
+                      </button>
+                      {isThinkingExpanded && liveThinking ? (
+                        <div className="thinking-panel">
+                          <pre className="thinking-panel-text">{liveThinking}</pre>
+                        </div>
+                      ) : null}
+                    </>
+                  )}
                 </article>
               ) : null}
               {currentThreadHasActiveRun && liveError ? <div className="error-banner">{liveError}</div> : null}

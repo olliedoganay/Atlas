@@ -34,6 +34,7 @@ type AtlasState = {
   currentStage: string;
   pendingPrompt: string;
   pendingAttachments: ImageAttachment[];
+  liveThinking: string;
   liveAnswer: string;
   liveError: string;
   compactionNotice: CompactionNotice | null;
@@ -56,6 +57,7 @@ type AtlasState = {
     threadId: string,
     attachments?: ImageAttachment[],
   ) => void;
+  appendThinking: (text: string) => void;
   appendToken: (text: string) => void;
   setStage: (stage: string) => void;
   completeRun: () => void;
@@ -87,6 +89,7 @@ export const useAtlasStore = create<AtlasState>()(
       currentStage: "idle",
       pendingPrompt: "",
       pendingAttachments: [],
+      liveThinking: "",
       liveAnswer: "",
       liveError: "",
       compactionNotice: null,
@@ -111,11 +114,13 @@ export const useAtlasStore = create<AtlasState>()(
           pendingPrompt: prompt,
           pendingAttachments: attachments,
           currentStage: "starting",
+          liveThinking: "",
           liveAnswer: "",
           liveError: "",
           compactionNotice: null,
           isStreaming: true,
         }),
+      appendThinking: (text) => set((state) => ({ liveThinking: `${state.liveThinking}${text}` })),
       appendToken: (text) => set((state) => ({ liveAnswer: `${state.liveAnswer}${text}` })),
       setStage: (stage) => set({ currentStage: stage }),
       completeRun: () =>
@@ -127,6 +132,7 @@ export const useAtlasStore = create<AtlasState>()(
           isStreaming: false,
           pendingPrompt: "",
           pendingAttachments: [],
+          liveThinking: "",
           liveAnswer: "",
           liveError: "",
           compactionNotice: null,
@@ -136,7 +142,13 @@ export const useAtlasStore = create<AtlasState>()(
         set({
           currentRunId: null,
           currentRunMode: null,
+          activeRunUserId: null,
+          activeRunThreadId: null,
           isStreaming: false,
+          pendingPrompt: "",
+          pendingAttachments: [],
+          liveThinking: "",
+          liveAnswer: "",
           liveError: message,
           compactionNotice: null,
           currentStage: "failed",
@@ -152,6 +164,7 @@ export const useAtlasStore = create<AtlasState>()(
           currentStage: "idle",
           pendingPrompt: "",
           pendingAttachments: [],
+          liveThinking: "",
           liveAnswer: "",
           liveError: "",
           compactionNotice: null,
