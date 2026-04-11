@@ -49,6 +49,7 @@ type AtlasState = {
   compactionNotice: CompactionNotice | null;
   searchJumpTarget: SearchJumpTarget | null;
   recentSearchQueries: string[];
+  backendStartupStartedAt: number;
   isStreaming: boolean;
   setTheme: (theme: ThemeMode) => void;
   setCurrentUserId: (value: string) => void;
@@ -79,6 +80,7 @@ type AtlasState = {
   stepSearchJumpTarget: (delta: number) => void;
   clearSearchJumpTarget: () => void;
   addRecentSearchQuery: (query: string) => void;
+  markBackendBooting: () => void;
   clearLiveRun: () => void;
 };
 
@@ -110,6 +112,7 @@ export const useAtlasStore = create<AtlasState>()(
       compactionNotice: null,
       searchJumpTarget: null,
       recentSearchQueries: [],
+      backendStartupStartedAt: Date.now(),
       isStreaming: false,
       setTheme: (theme) => set({ theme }),
       setCurrentUserId: (value) => set({ currentUserId: value }),
@@ -205,6 +208,7 @@ export const useAtlasStore = create<AtlasState>()(
           ].slice(0, 6);
           return { recentSearchQueries: deduped };
         }),
+      markBackendBooting: () => set({ backendStartupStartedAt: Date.now() }),
       clearLiveRun: () =>
         set({
           currentRunId: null,

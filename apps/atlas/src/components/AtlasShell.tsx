@@ -20,6 +20,7 @@ import { ChatSearchDialog } from "./ChatSearchDialog";
 import { ResetDialog } from "./ResetDialog";
 import { RunStreamCoordinator } from "./RunStreamCoordinator";
 import { useAtlasStore } from "../store/useAtlasStore";
+import { useBackendPhase } from "../lib/backendPhase";
 
 const navigation = [
   { to: "/workspace", label: "Workspace", icon: Workflow },
@@ -42,12 +43,18 @@ export function AtlasShell() {
   const setDraftThreadModel = useAtlasStore((state) => state.setDraftThreadModel);
   const setDraftThreadTemperature = useAtlasStore((state) => state.setDraftThreadTemperature);
   const setSearchJumpTarget = useAtlasStore((state) => state.setSearchJumpTarget);
+  const backendStartupStartedAt = useAtlasStore((state) => state.backendStartupStartedAt);
+  const markBackendBooting = useAtlasStore((state) => state.markBackendBooting);
   const toggleNavCollapsed = useAtlasStore((state) => state.toggleNavCollapsed);
   const isWorkspaceRoute = location.pathname === "/workspace";
   const [threadToDelete, setThreadToDelete] = useState<ThreadSummary | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
 
-  const { data: status } = useQuery({
+  const {
+    data: status,
+    isPending: statusPending,
+    isFetching: statusFetching,
+  } = useQuery({
     queryKey: ["status"],
     queryFn: getStatus,
     refetchInterval: 5000,
@@ -57,6 +64,7 @@ export function AtlasShell() {
   const { data: models } = useQuery({
     queryKey: ["models"],
     queryFn: getModels,
+    enabled: Boolean(status),
     staleTime: 10000,
     retry: 1,
     refetchOnWindowFocus: false,
@@ -64,9 +72,16 @@ export function AtlasShell() {
   const { data: users = [], isFetched: usersFetched } = useQuery({
     queryKey: ["users"],
     queryFn: getUsers,
+    enabled: Boolean(status),
     staleTime: 5000,
     retry: 1,
     refetchOnWindowFocus: false,
+  });
+  const backendPhase = useBackendPhase({
+    hasStatus: Boolean(status),
+    isPending: statusPending,
+    isFetching: statusFetching,
+    bootStartedAt: backendStartupStartedAt,
   });
   const currentUserProfile = users.find((user) => user.user_id === currentUserId);
   const currentUserLocked = Boolean(currentUserProfile?.locked);
@@ -215,6 +230,7 @@ export function AtlasShell() {
   }, [currentUserId, isWorkspaceRoute]);
 
   const restartBackend = async () => {
+    markBackendBooting();
     await restartManagedBackend();
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["status"] }),
@@ -238,7 +254,8 @@ export function AtlasShell() {
   };
 
   const userLabel = currentUserId || "No user selected";
-  const backendOnline = Boolean(status);
+  const backendOnline = backendPhase === "online";
+  const backendStarting = backendPhase === "starting";
 
   return (
     <div className={`app-shell ${navCollapsed ? "nav-collapsed" : ""}`}>
@@ -391,11 +408,11 @@ export function AtlasShell() {
               <span>Active profile</span>
             </div>
           </div>
-          <div className={`status-pill ${backendOnline ? "online" : "offline"}`}>
+          <div className={`status-pill ${backendOnline ? "online" : backendStarting ? "starting" : "offline"}`}>
             <span className="status-dot" />
-            <span>{backendOnline ? "Backend online" : "Backend offline"}</span>
+            <span>{backendOnline ? "Backend online" : backendStarting ? "Starting backend" : "Backend offline"}</span>
           </div>
-          {!backendOnline ? (
+          {!backendOnline && !backendStarting ? (
             <button className="ghost-button full-width" onClick={restartBackend} type="button">
               <RotateCcw size={16} />
               Restart backend

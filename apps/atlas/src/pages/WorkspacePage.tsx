@@ -22,6 +22,7 @@ import {
   type UserSummary,
   unlockUser,
 } from "../lib/api";
+import { useBackendPhase } from "../lib/backendPhase";
 import { useAtlasStore } from "../store/useAtlasStore";
 
 type ConversationMessage = {
@@ -70,6 +71,7 @@ export function WorkspacePage() {
   const currentRunMode = useAtlasStore((state) => state.currentRunMode);
   const activeRunUserId = useAtlasStore((state) => state.activeRunUserId);
   const activeRunThreadId = useAtlasStore((state) => state.activeRunThreadId);
+  const backendStartupStartedAt = useAtlasStore((state) => state.backendStartupStartedAt);
   const currentStage = useAtlasStore((state) => state.currentStage);
   const pendingPrompt = useAtlasStore((state) => state.pendingPrompt);
   const pendingAttachments = useAtlasStore((state) => state.pendingAttachments);
@@ -97,19 +99,33 @@ export function WorkspacePage() {
   const [highlightedHistoryIndex, setHighlightedHistoryIndex] = useState<number | null>(null);
   const [copiedMessageKey, setCopiedMessageKey] = useState<string | null>(null);
 
-  const { data: status } = useQuery({
+  const {
+    data: status,
+    isPending: statusPending,
+    isFetching: statusFetching,
+  } = useQuery({
     queryKey: ["status"],
     queryFn: getStatus,
     staleTime: 5000,
   });
+  const backendPhase = useBackendPhase({
+    hasStatus: Boolean(status),
+    isPending: statusPending,
+    isFetching: statusFetching,
+    bootStartedAt: backendStartupStartedAt,
+  });
+  const backendOnline = backendPhase === "online";
+  const backendStarting = backendPhase === "starting";
   const { data: models } = useQuery({
     queryKey: ["models"],
     queryFn: getModels,
+    enabled: backendOnline,
     staleTime: 10000,
   });
   const { data: users = [] } = useQuery({
     queryKey: ["users"],
     queryFn: getUsers,
+    enabled: backendOnline,
     staleTime: 5000,
     retry: 1,
     refetchOnWindowFocus: false,
@@ -129,13 +145,13 @@ export function WorkspacePage() {
   const { data: threads = [] } = useQuery({
     queryKey: ["threads", currentUserId],
     queryFn: () => getThreads(currentUserId),
-    enabled: Boolean(currentUserId) && !currentUserLocked,
+    enabled: backendOnline && Boolean(currentUserId) && !currentUserLocked,
     staleTime: 2000,
   });
   const { data: history = [] } = useQuery({
     queryKey: ["thread-history", currentUserId, currentThreadId],
     queryFn: () => getThreadHistory(currentThreadId, currentUserId),
-    enabled: Boolean(currentUserId && currentThreadId) && !currentUserLocked,
+    enabled: backendOnline && Boolean(currentUserId && currentThreadId) && !currentUserLocked,
     staleTime: 2000,
   });
 
@@ -159,6 +175,7 @@ export function WorkspacePage() {
   const availableModels = (models?.models ?? []).filter(Boolean);
   const ollamaOnline = Boolean(models?.ollama_online);
   const hasLocalModels = Boolean(models?.has_local_models);
+  const ollamaUrl = status?.ollama_url || "http://127.0.0.1:11434";
 
   const currentThread = useMemo(() => {
     const existing = threadItems.find((item) => item.thread_id === currentThreadId);
@@ -236,7 +253,9 @@ export function WorkspacePage() {
     [models?.model_details, selectedModel],
   );
   const selectedModelSupportsImages = Boolean(selectedModelDetails?.supports_images);
-  const headerSummary = !status
+  const headerSummary = backendStarting
+    ? "Atlas is starting the local runtime."
+    : !backendOnline
     ? "Local runtime offline. Restart Atlas from the sidebar to continue."
     : !currentUserId
       ? "Choose a profile before starting the first chat."
@@ -249,21 +268,31 @@ export function WorkspacePage() {
     : selectedModel
       ? "Model and temperature lock after the first message in this thread."
       : "Choose a local model and temperature before the first message.";
-  const idleTitle = !status ? "Backend offline" : !currentUserId || !modelCatalogLoaded || !ollamaOnline || !hasLocalModels ? "Finish setup" : "Start the next thread";
-  const idleDescription = !status
+  const idleTitle = backendStarting
+    ? "Starting backend"
+    : !backendOnline
+    ? "Backend offline"
+    : !currentUserId || !modelCatalogLoaded || !ollamaOnline || !hasLocalModels
+      ? "Finish setup"
+      : "Start the next thread";
+  const idleDescription = backendStarting
+    ? "Atlas is starting the managed local runtime. Chats, profiles, and models will appear as soon as it comes online."
+    : !backendOnline
     ? "Atlas cannot load chats or models until the managed backend comes back online. Use the restart control in the sidebar when the runtime is ready."
     : !currentUserId
       ? "Choose a profile first. Atlas keeps chats, memory, and search scoped to the active profile."
     : !modelCatalogLoaded
       ? "Atlas is checking the local Ollama model list before the first message."
     : !ollamaOnline
-      ? "Start Ollama on this machine, then refresh the local model list before sending the first message."
+      ? "Open Ollama on this machine, then refresh the local model list before sending the first message."
     : !hasLocalModels
       ? "Pull at least one local chat model with Ollama, then refresh Atlas to use it in new chats."
       : selectedModelSupportsImages
       ? "Ask a question, upload a photo for context, or use this thread as a clean branch for a new line of thinking."
       : "Use this thread to compare ideas, condense notes, or sketch the next move.";
-  const composerPlaceholder = !status
+  const composerPlaceholder = backendStarting
+    ? "Starting local runtime..."
+    : !backendOnline
     ? "Backend offline. Restart the local runtime to continue."
     : !currentUserId
       ? "Choose a profile before sending the first message."
@@ -279,7 +308,7 @@ export function WorkspacePage() {
               ? "Drop a photo, a rough brief, or the first line."
               : "Start with a question, a draft, or the next move.";
   const canStartChat = Boolean(
-    status &&
+    backendOnline &&
       currentUserId &&
       !currentUserLocked &&
       modelCatalogLoaded &&
@@ -559,10 +588,16 @@ export function WorkspacePage() {
     return items;
   }, [currentThreadCompactionNotice, currentThreadHasActiveRun, history, liveAnswer, pendingAttachments, pendingPrompt]);
   const shouldShowOnboarding = Boolean(
-    status &&
+    backendOnline &&
       modelCatalogLoaded &&
       transcript.length === 0 &&
       (!currentUserId || !ollamaOnline || !hasLocalModels),
+  );
+  const showOllamaWarning = Boolean(
+    backendOnline &&
+      modelCatalogLoaded &&
+      !ollamaOnline &&
+      !shouldShowOnboarding,
   );
 
   useEffect(() => {
@@ -819,6 +854,19 @@ export function WorkspacePage() {
       </div>
 
       <div className="conversation-shell">
+        {showOllamaWarning ? (
+          <div className="workspace-warning-banner" role="status">
+            <div className="workspace-warning-copy">
+              <strong>Ollama is not running.</strong>
+              <span>
+                Open Ollama on this machine at <strong>{ollamaUrl}</strong>, then refresh Atlas.
+              </span>
+            </div>
+            <button className="ghost-button compact-button" onClick={() => void refreshModels()} type="button">
+              Refresh
+            </button>
+          </div>
+        ) : null}
         {activeSearchNavigator ? (
           <div className="search-inline-navigator">
             <div className="search-inline-copy">
@@ -1044,7 +1092,7 @@ export function WorkspacePage() {
                             ) : !ollamaOnline ? (
                               <>
                                 <div className="workspace-onboarding-summary">
-                                  Atlas is online, but Ollama is not responding at <strong>{status?.ollama_url}</strong>.
+                                  Atlas is online, but Ollama is not responding at <strong>{ollamaUrl}</strong>.
                                 </div>
                                 <div className="workspace-onboarding-inline-form">
                                   <code className="workspace-onboarding-command">ollama serve</code>
