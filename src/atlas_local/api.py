@@ -97,7 +97,7 @@ def create_api_app(service: AtlasBackendService | None = None) -> FastAPI:
             if service is None and managed_service is not None:
                 managed_service.close()
 
-    app = FastAPI(title="Atlas API", version="1.0.0", lifespan=lifespan)
+    app = FastAPI(title="Atlas API", version="1.0.1", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(allowed_origins),
@@ -116,10 +116,7 @@ def create_api_app(service: AtlasBackendService | None = None) -> FastAPI:
         if request.method.upper() == "OPTIONS":
             return await call_next(request)
         if required_token:
-            provided = (
-                request.headers.get("x-atlas-instance-token", "").strip()
-                or request.query_params.get("token", "").strip()
-            )
+            provided = request.headers.get("x-atlas-instance-token", "").strip()
             if provided != required_token:
                 return JSONResponse(status_code=401, content={"detail": "Atlas backend identity check failed."})
         return await call_next(request)

@@ -210,6 +210,11 @@ fn backend_command(
     runtime: &BackendRuntime,
 ) -> Result<(PathBuf, Vec<String>, LaunchMode), String> {
     if !cfg!(debug_assertions) {
+        if insecure_localhost_override_enabled() {
+            return Err(
+                "Atlas cannot start because ATLAS_ALLOW_INSECURE_LOCALHOST is enabled in this environment. Remove that override and launch Atlas again.".to_string(),
+            );
+        }
         if let Some((exe, resource_dir)) = packaged_sidecar(app) {
             let data_dir = app
                 .path()
@@ -312,6 +317,13 @@ fn packaged_backend_logs_enabled() -> bool {
     matches!(
         env::var("ATLAS_ENABLE_PACKAGED_LOGS"),
         Ok(value) if value == "1" || value.eq_ignore_ascii_case("true")
+    )
+}
+
+fn insecure_localhost_override_enabled() -> bool {
+    matches!(
+        env::var("ATLAS_ALLOW_INSECURE_LOCALHOST"),
+        Ok(value) if value == "1" || value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("yes") || value.eq_ignore_ascii_case("on")
     )
 }
 

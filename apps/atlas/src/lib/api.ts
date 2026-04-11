@@ -355,38 +355,102 @@ export function streamRun(
   onEvent: (event: RunStatusEvent) => void,
   onError: (message: string) => void,
 ): () => void {
-  let source: EventSource | null = null;
+  const controller = new AbortController();
   let closed = false;
+  let sawTerminalEvent = false;
   void getBackendRuntime()
     .then((runtime) => {
       if (closed) {
         return;
       }
-      const tokenQuery = runtime.token ? `?token=${encodeURIComponent(runtime.token)}` : "";
-      source = new EventSource(`${buildApiUrl(runtime)}/${mode}/stream/${encodeURIComponent(runId)}${tokenQuery}`);
-      const handler = (event: Event) => {
-        const message = event as MessageEvent<string>;
-        try {
-          onEvent(JSON.parse(message.data) as RunStatusEvent);
-        } catch (error) {
-          onError(error instanceof Error ? error.message : "Failed to parse stream event.");
-        }
-      };
 
-      const eventNames = [
-        "run_started",
-        "stage_changed",
-        "thinking_token",
-        "token",
-        "context_compacted",
-        "run_completed",
-        "run_failed",
-      ];
-      eventNames.forEach((name) => source?.addEventListener(name, handler as EventListener));
-      source.onerror = () => {
-        onError("Atlas stream disconnected.");
-        source?.close();
-      };
+      void fetch(`${buildApiUrl(runtime)}/${mode}/stream/${encodeURIComponent(runId)}`, {
+        method: "GET",
+        headers: {
+          Accept: "text/event-stream",
+          ...(runtime.token ? { "X-Atlas-Instance-Token": runtime.token } : {}),
+        },
+        signal: controller.signal,
+      })
+        .then(async (response) => {
+          if (!response.ok) {
+            const contentType = response.headers.get("content-type") ?? "";
+            const payload =
+              contentType.includes("application/json")
+                ? await response.json()
+                : { detail: await response.text() };
+            throw new Error(String(payload.detail ?? payload.error ?? response.statusText));
+          }
+
+          const body = response.body;
+          if (!body) {
+            throw new Error("Atlas stream body was empty.");
+          }
+
+          const reader = body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+
+          const dispatchEventBlock = (block: string) => {
+            const dataLines: string[] = [];
+            const lines = block.split(/\r?\n/);
+            for (const line of lines) {
+              if (!line || line.startsWith(":")) {
+                continue;
+              }
+              if (line.startsWith("event:")) {
+                continue;
+              }
+              if (line.startsWith("data:")) {
+                dataLines.push(line.slice(5).trimStart());
+              }
+            }
+            if (!dataLines.length) {
+              return;
+            }
+            try {
+              const parsed = JSON.parse(dataLines.join("\n")) as RunStatusEvent;
+              if (parsed.type === "run_completed" || parsed.type === "run_failed") {
+                sawTerminalEvent = true;
+              }
+              onEvent(parsed);
+            } catch (error) {
+              onError(error instanceof Error ? error.message : "Failed to parse stream event.");
+            }
+          };
+
+          while (!closed) {
+            const { value, done } = await reader.read();
+            buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+
+            let separatorIndex = buffer.search(/\r?\n\r?\n/);
+            while (separatorIndex !== -1) {
+              const separatorMatch = buffer.slice(separatorIndex).match(/^\r?\n\r?\n/);
+              const separatorLength = separatorMatch?.[0].length ?? 2;
+              const block = buffer.slice(0, separatorIndex);
+              buffer = buffer.slice(separatorIndex + separatorLength);
+              dispatchEventBlock(block);
+              separatorIndex = buffer.search(/\r?\n\r?\n/);
+            }
+
+            if (done) {
+              if (buffer.trim()) {
+                dispatchEventBlock(buffer);
+              }
+              break;
+            }
+          }
+
+          if (!closed && !sawTerminalEvent) {
+            onError("Atlas stream disconnected.");
+          }
+        })
+        .catch((error) => {
+          if (closed || controller.signal.aborted) {
+            return;
+          }
+          onError(error instanceof Error ? error.message : "Atlas stream disconnected.");
+        });
     })
     .catch((error) => {
       onError(error instanceof Error ? error.message : "Atlas runtime is unavailable.");
@@ -394,7 +458,7 @@ export function streamRun(
 
   return () => {
     closed = true;
-    source?.close();
+    controller.abort();
   };
 }
 

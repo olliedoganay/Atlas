@@ -45,7 +45,7 @@ export function SettingsPage() {
   const [pendingDeleteUserId, setPendingDeleteUserId] = useState<string | null>(null);
   const [unlockTargetUserId, setUnlockTargetUserId] = useState<string | null>(null);
   const [unlockPassword, setUnlockPassword] = useState("");
-  const [appVersion, setAppVersion] = useState("1.0.0");
+  const [appVersion, setAppVersion] = useState("1.0.1");
   const [aboutHowToOpen, setAboutHowToOpen] = useState(false);
   const { data: status } = useQuery({
     queryKey: ["status"],

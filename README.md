@@ -103,12 +103,14 @@ python -m atlas_local.api
 
 ## Security Model
 
+For the threat model and supported protection boundaries, see [SECURITY.md](SECURITY.md).
+
 Atlas is designed for local use:
 
 - the desktop app talks to a local backend
 - Ollama is expected to run on the same machine
 - Windows builds protect the run index and saved run artifacts with DPAPI
-- LangGraph checkpoints, Mem0 history, and local Qdrant storage are encrypted at rest with SQLCipher-backed local storage
+- packaged Windows runtimes encrypt LangGraph checkpoints, Mem0 history, and local Qdrant storage with SQLCipher-backed local storage
 - password-protected profiles wrap their profile key behind the profile password
 - packaged backend logs stay off by default unless you explicitly enable them
 

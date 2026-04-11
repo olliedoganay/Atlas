@@ -402,6 +402,18 @@ class ApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_stream_requires_header_token_not_query_token(self) -> None:
+        with patch.dict(os.environ, {"ATLAS_INSTANCE_TOKEN": "test-token"}, clear=False):
+            client = TestClient(create_api_app(FakeService()))
+            query_response = client.get("/chat/stream/run-1?token=test-token")
+            header_response = client.get(
+                "/chat/stream/run-1",
+                headers={"X-Atlas-Instance-Token": "test-token"},
+            )
+
+        self.assertEqual(query_response.status_code, 401)
+        self.assertEqual(header_response.status_code, 200)
+
     def test_options_preflight_bypasses_instance_token(self) -> None:
         with patch.dict(os.environ, {"ATLAS_INSTANCE_TOKEN": "test-token"}, clear=False):
             client = TestClient(create_api_app(FakeService()))
