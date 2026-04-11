@@ -39,7 +39,6 @@ class RunStoreTests(unittest.TestCase):
                 chat_model="gpt-oss:20b",
                 temperature=None,
                 prompt="hello",
-                profile_name="default",
             )
 
             self.assertIsNone(artifact["temperature"])

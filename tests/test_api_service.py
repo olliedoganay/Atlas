@@ -1,8 +1,4 @@
-import shutil
-import sqlite3
-import tempfile
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -43,29 +39,21 @@ class ApiServiceCreateTests(unittest.TestCase):
 
 
 class GraphExecutionSequenceTests(unittest.TestCase):
-    def test_sequences_share_browser_and_non_browser_order(self) -> None:
+    def test_sequences_match_chat_only_runtime(self) -> None:
         self.assertEqual(
-            pre_synthesis_node_sequence(include_browser=False),
-            ("retrieve_memories", "retrieve_world_state"),
-        )
-        self.assertEqual(
-            pre_synthesis_node_sequence(include_browser=True),
-            ("retrieve_memories", "retrieve_world_state", "plan_browser_research", "browser_loop"),
+            pre_synthesis_node_sequence(),
+            ("retrieve_memories",),
         )
         self.assertEqual(
             post_synthesis_node_sequence(),
-            ("extract_updates", "adjudicate_updates", "persist"),
+            ("extract_updates", "persist"),
         )
         self.assertEqual(
-            execution_node_sequence(include_browser=True),
+            execution_node_sequence(),
             (
                 "retrieve_memories",
-                "retrieve_world_state",
-                "plan_browser_research",
-                "browser_loop",
-                "synthesize_answer_with_citations",
+                "synthesize_answer",
                 "extract_updates",
-                "adjudicate_updates",
                 "persist",
             ),
         )
@@ -157,29 +145,8 @@ class ThreadTemperatureResolutionTests(unittest.TestCase):
 
 
 class ResetUserTests(unittest.TestCase):
-    def test_reset_user_clears_user_data_and_resets_threads(self) -> None:
-        temp_dir = tempfile.mkdtemp()
-        self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
-        world_db_path = Path(temp_dir) / "world.sqlite"
-        with sqlite3.connect(world_db_path) as conn:
-            conn.execute("CREATE TABLE world_events (user_id TEXT NOT NULL, thread_id TEXT)")
-            conn.execute("CREATE TABLE memory_records (user_id TEXT NOT NULL)")
-            conn.execute("CREATE TABLE claims (user_id TEXT NOT NULL)")
-            conn.execute("CREATE TABLE sources (user_id TEXT NOT NULL)")
-            conn.execute("CREATE TABLE entities (user_id TEXT NOT NULL)")
-            conn.executemany(
-                "INSERT INTO world_events (user_id, thread_id) VALUES (?, ?)",
-                [("research_user", "main"), ("research_user", "notes"), ("other_user", "other")],
-            )
-            for table in ("memory_records", "claims", "sources", "entities"):
-                conn.executemany(
-                    f"INSERT INTO {table} (user_id) VALUES (?)",
-                    [("research_user",), ("other_user",)],
-                )
-            conn.commit()
-
+    def test_reset_user_clears_memories_and_resets_threads(self) -> None:
         service = AtlasBackendService.__new__(AtlasBackendService)
-        service.config = SimpleNamespace(world_db_path=world_db_path)
         service.app = SimpleNamespace(memory_service=SimpleNamespace(delete_all=lambda **_: None))
         service.run_store = SimpleNamespace(
             list_threads=lambda **_: [{"thread_id": "main"}, {"thread_id": "notes"}],
@@ -219,19 +186,6 @@ class ResetUserTests(unittest.TestCase):
             reset_thread_calls,
             [("main", "research_user"), ("notes", "research_user")],
         )
-
-        with sqlite3.connect(world_db_path) as conn:
-            for table in ("world_events", "memory_records", "claims", "sources", "entities"):
-                remaining = conn.execute(
-                    f"SELECT COUNT(*) FROM {table} WHERE user_id = ?",
-                    ("research_user",),
-                ).fetchone()
-                self.assertEqual(remaining[0], 0)
-            other_user_events = conn.execute(
-                "SELECT COUNT(*) FROM world_events WHERE user_id = ?",
-                ("other_user",),
-            ).fetchone()
-            self.assertEqual(other_user_events[0], 1)
 
 
 class ContextCompactionTests(unittest.TestCase):

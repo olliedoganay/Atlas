@@ -13,11 +13,9 @@ class FakeApp:
     def __exit__(self, exc_type, exc, tb):
         return False
 
-    def ask(self, prompt: str, *, user_id: str, thread_id: str, research_mode: bool = False):
+    def ask(self, prompt: str, *, user_id: str, thread_id: str):
         return {
-            "answer": f"echo:{prompt}|{user_id}|{thread_id}|research={research_mode}",
-            "reasoning_report": {"claims": [], "violations": [], "recommendations": []},
-            "citations": [],
+            "answer": f"echo:{prompt}|{user_id}|{thread_id}",
         }
 
     def list_memories(self, *, user_id: str, limit: int = 20):
@@ -33,7 +31,7 @@ class CliSmokeTests(unittest.TestCase):
                 ["ask", "hello", "--user-id", "u1", "--thread-id", "t1"]
             )
         self.assertEqual(exit_code, 0)
-        self.assertIn("echo:hello|u1|t1|research=False", stdout.getvalue())
+        self.assertIn("echo:hello|u1|t1", stdout.getvalue())
 
 
 if __name__ == "__main__":

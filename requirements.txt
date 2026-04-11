@@ -3,8 +3,6 @@ langchain-ollama==1.1.0
 langgraph==1.1.6
 langgraph-checkpoint-sqlite==3.0.3
 mem0ai==1.0.11
-playwright>=1.54,<2
 pyinstaller==6.19.0
 python-dotenv==1.2.2
 uvicorn==0.38.0
-z3-solver==4.16.0.0

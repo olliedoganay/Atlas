@@ -63,17 +63,7 @@ def run_smoke_launcher(
     parser.add_argument("prompt", nargs="?", default=default_prompt)
     parser.add_argument("--user-id", required=True)
     parser.add_argument("--thread-id", default="smoke-test")
-    parser.add_argument("--show-report", action="store_true")
     args = parser.parse_args(argv)
 
-    cli_args = [
-        "ask",
-        args.prompt,
-        "--user-id",
-        args.user_id,
-        "--thread-id",
-        args.thread_id,
-    ]
-    if args.show_report:
-        cli_args.append("--show-report")
+    cli_args = ["ask", args.prompt, "--user-id", args.user_id, "--thread-id", args.thread_id]
     return cli_main(cli_args)

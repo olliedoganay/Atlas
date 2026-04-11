@@ -5,7 +5,6 @@ import sys
 
 from .config import load_config
 from .graph.builder import build_chat_application
-from .reasoning.models import ReasoningReport
 from .runtime import configure_console
 
 
@@ -17,7 +16,6 @@ def build_parser() -> argparse.ArgumentParser:
     ask_parser.add_argument("prompt", help="Prompt to send to the agent.")
     ask_parser.add_argument("--user-id", required=True)
     ask_parser.add_argument("--thread-id", default="default-thread")
-    ask_parser.add_argument("--show-report", action="store_true")
 
     chat_parser = subparsers.add_parser("chat", help="Start an interactive chat session.")
     chat_parser.add_argument("--user-id", required=True)
@@ -44,7 +42,6 @@ def main(argv: list[str] | None = None) -> int:
                     prompt=args.prompt,
                     user_id=args.user_id,
                     thread_id=args.thread_id,
-                    show_report=args.show_report,
                 )
 
             if args.command == "chat":
@@ -67,14 +64,9 @@ def _run_single_turn(
     prompt: str,
     user_id: str,
     thread_id: str,
-    show_report: bool,
 ) -> int:
-    result = app.ask(prompt, user_id=user_id, thread_id=thread_id, research_mode=False)
+    result = app.ask(prompt, user_id=user_id, thread_id=thread_id)
     print(result.get("answer", ""))
-    if show_report:
-        report = ReasoningReport.from_dict(result.get("reasoning_report"))
-        print("\n=== REASONING REPORT ===\n")
-        print(report.to_prompt_text())
     return 0
 
 
@@ -92,7 +84,7 @@ def _run_chat(*, app, user_id: str, thread_id: str) -> int:
         if user_input.lower() in {"exit", "quit", "bye"}:
             return 0
 
-        result = app.ask(user_input, user_id=user_id, thread_id=thread_id, research_mode=False)
+        result = app.ask(user_input, user_id=user_id, thread_id=thread_id)
         print(f"Atlas: {result.get('answer', '')}")
 
 

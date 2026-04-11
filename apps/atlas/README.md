@@ -16,7 +16,7 @@ npm run build
 npm run tauri dev
 ```
 
-Generated folders such as `dist`, `output`, `.playwright-cli`, and `src-tauri/target` are ignored and should not be committed.
+Generated folders such as `dist`, `output`, and `src-tauri/target` are ignored and should not be committed.
 
 ## Recommended IDE Setup
 

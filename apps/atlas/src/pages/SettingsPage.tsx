@@ -379,10 +379,10 @@ export function SettingsPage() {
               </div>
               <div className="settings-row">
                 <div className="settings-row-copy">
-                  <strong>Active profile</strong>
-                  <p>The currently loaded runtime profile.</p>
+                  <strong>Runtime mode</strong>
+                  <p>The current backend runtime shape exposed to the desktop shell.</p>
                 </div>
-                <span>{status?.active_profile ?? "default"}</span>
+                <span>{status?.runtime_mode ?? "chat-only"}</span>
               </div>
               <div className="settings-row">
                 <div className="settings-row-copy">
@@ -465,10 +465,10 @@ export function SettingsPage() {
               </div>
               <div className="settings-row">
                 <div className="settings-row-copy">
-                  <strong>Active profile</strong>
-                  <p>The runtime profile currently loaded for local inference.</p>
+                  <strong>Runtime mode</strong>
+                  <p>The backend is intentionally reduced to the chat-only runtime.</p>
                 </div>
-                <span>{status?.active_profile ?? "default"}</span>
+                <span>{status?.runtime_mode ?? "chat-only"}</span>
               </div>
               <div className="settings-row">
                 <div className="settings-row-copy">

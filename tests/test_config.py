@@ -14,13 +14,9 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.chat_temperature, 0.2)
             self.assertEqual(config.embed_model, "nomic-embed-text:latest")
             self.assertEqual(config.embed_dim, 768)
-            self.assertEqual(config.search_provider, "yahoo_browser")
-            self.assertEqual(config.max_browser_steps, 8)
             self.assertTrue(config.qdrant_path.exists())
             self.assertTrue(config.langgraph_checkpoint_db.parent.exists())
-            self.assertTrue(config.browser_storage_dir.exists())
-            self.assertTrue(config.evals_dir.exists())
-            self.assertTrue(config.proposals_dir.exists())
+            self.assertTrue(config.mem0_history_db.parent.exists())
 
 
 if __name__ == "__main__":

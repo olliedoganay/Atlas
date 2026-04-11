@@ -32,7 +32,6 @@ class RunStore:
         chat_model: str,
         temperature: float | None,
         prompt: str,
-        profile_name: str,
         thread_title: str | None = None,
     ) -> dict[str, Any]:
         run_id = str(uuid.uuid4())
@@ -48,14 +47,12 @@ class RunStore:
             "chat_model": chat_model,
             "temperature": temperature,
             "prompt": prompt,
-            "profile_name": profile_name,
             "status": "running",
             "started_at": now_timestamp(),
             "completed_at": None,
             "answer": "",
             "events": [],
             "trace_items": [],
-            "citations": [],
             "error": None,
         }
         with self._lock:
@@ -70,7 +67,6 @@ class RunStore:
                 "temperature": temperature,
                 "status": "running",
                 "started_at": artifact["started_at"],
-                "profile_name": profile_name,
             }
             index["threads"][self._thread_key(user_id, thread_id)] = {
                 "user_id": user_id,
@@ -97,8 +93,6 @@ class RunStore:
             artifact["events"].append(event)
             if event_type == "token":
                 artifact["answer"] = f"{artifact.get('answer', '')}{payload.get('text', '')}"
-            if event_type == "citation_added":
-                artifact["citations"].append(payload)
             self._write_run_file(run_id, artifact)
         return event
 
@@ -110,13 +104,12 @@ class RunStore:
             self._write_run_file(run_id, artifact)
         return enriched
 
-    def complete_run(self, run_id: str, *, answer: str, citations: list[dict[str, Any]]) -> dict[str, Any]:
+    def complete_run(self, run_id: str, *, answer: str) -> dict[str, Any]:
         with self._lock:
             artifact = self.get_run(run_id)
             artifact["status"] = "completed"
             artifact["completed_at"] = now_timestamp()
             artifact["answer"] = answer
-            artifact["citations"] = citations
             self._write_run_file(run_id, artifact)
             index = self._read_index()
             if run_id in index["runs"]:

@@ -21,7 +21,6 @@ class FakeService:
                 ],
                 "trace_items": [],
                 "answer": "hello",
-                "citations": [],
             }
         }
         self.subscribers: dict[str, list[queue.Queue[dict[str, object]]]] = {}
@@ -43,12 +42,8 @@ class FakeService:
             "chat_temperature": 0.2,
             "embed_model": "embed-model",
             "ollama_url": "http://127.0.0.1:11434",
-            "active_profile": "default",
-            "profiles": ["default"],
+            "runtime_mode": "chat-only",
             "busy": False,
-            "browser_headless": True,
-            "search_provider": "yahoo_browser",
-            "benchmark_suites": ["web_interactive_v1"],
         }
 
     def list_models(self):

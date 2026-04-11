@@ -5,30 +5,22 @@ import queue
 import shutil
 import sqlite3
 import threading
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from time import monotonic
-from uuid import uuid4
-from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
+from uuid import uuid4
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from .browser.models import Citation
 from .config import AppConfig, load_config
 from .graph.builder import AgentApplication, build_chat_application
 from .graph.builder import post_synthesis_node_sequence, pre_synthesis_node_sequence
 from .graph.context import GraphContext
-from .graph.nodes import (
-    _build_answer_messages,
-    _finalize_answer_text,
-    _grounded_research_answer,
-    _latest_user_text,
-)
+from .graph.nodes import _build_answer_messages, _finalize_answer_text, _latest_user_text
 from .llm import OllamaModelInfo, list_local_ollama_model_info
 from .memory.models import MemoryRecord
-from .reasoning.models import ReasoningReport
-from .reasoning.rules import evaluate_world_state
 from .run_contract import RunEvent, RunHub, TERMINAL_EVENT_TYPES
 from .run_store import RunStore
 from .session import scoped_thread_id
@@ -75,7 +67,7 @@ class AtlasBackendService:
             "chat_temperature": self.config.chat_temperature,
             "embed_model": self.config.embed_model,
             "ollama_url": self.config.ollama_url,
-            "active_profile": self.app.profile.name,
+            "runtime_mode": "chat-only",
             "busy": self._execution_lock.locked(),
         }
 
@@ -269,153 +261,36 @@ class AtlasBackendService:
         images: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         return self._start_run(
-            mode="chat",
             prompt=prompt,
             user_id=user_id,
             thread_id=thread_id,
             chat_model=chat_model,
             temperature=temperature,
             thread_title=thread_title,
-            research_mode=False,
             cross_chat_memory=cross_chat_memory,
             auto_compact_long_chats=auto_compact_long_chats,
             images=images or [],
         )
 
-    def start_research(
-        self,
-        *,
-        prompt: str,
-        user_id: str,
-        thread_id: str,
-        chat_model: str | None = None,
-        temperature: float | None = None,
-        thread_title: str | None = None,
-        cross_chat_memory: bool = True,
-    ) -> dict[str, Any]:
-        return self._start_run(
-            mode="research",
-            prompt=prompt,
-            user_id=user_id,
-            thread_id=thread_id,
-            chat_model=chat_model,
-            temperature=temperature,
-            thread_title=thread_title,
-            research_mode=True,
-            cross_chat_memory=cross_chat_memory,
-            auto_compact_long_chats=True,
-            images=[],
-        )
-
     def list_memories(self, *, user_id: str, limit: int = 50) -> list[dict[str, Any]]:
         return [item.__dict__ for item in self.app.list_memories(user_id=user_id, limit=limit)]
-
-    def world_inspect(self, *, user_id: str, limit: int = 50) -> dict[str, Any]:
-        snapshot = self.app.world_inspect(user_id=user_id, limit=limit)
-        claims = []
-        for item in snapshot.get("claims", []):
-            claim_id = item.get("claim_id")
-            if not claim_id:
-                continue
-            claim = self.app.world_store.get_claim(str(claim_id))
-            if claim is not None:
-                claims.append(claim)
-        report = evaluate_world_state(
-            claims,
-            self.app.world_store.list_recent_events(user_id=user_id, limit=min(limit, 20)),
-        )
-        snapshot["reasoning_report"] = report.to_dict()
-        return snapshot
-
-    def deprecate_claim(self, *, claim_id: str) -> dict[str, Any]:
-        claim = self.app.world_store.get_claim(claim_id)
-        if not claim:
-            raise RuntimeError(f"Claim not found: {claim_id}")
-        self.app.world_store.update_claim_status(claim_id, status="deprecated")
-        self.app.nodes._delete_claim_memory(claim.user_id, claim_id)
-        self.app.world_store.record_event(
-            user_id=claim.user_id,
-            event_type="claim.deprecated.manual",
-            thread_id="atlas-desktop",
-            payload={"claim_id": claim_id},
-        )
-        return {"status": "ok", "claim_id": claim_id}
-
-    def browser_open(self, *, url: str, thread_id: str, user_id: str | None = None) -> dict[str, Any]:
-        resolved_thread_id = scoped_thread_id(user_id, thread_id) if user_id else thread_id
-        try:
-            return self.app.browser_open(url, thread_id=resolved_thread_id)
-        except RuntimeError:
-            raise
-        except Exception as exc:
-            raise RuntimeError(f"Browser open failed: {exc}") from exc
-
-    def browser_trace(
-        self,
-        *,
-        thread_id: str | None = None,
-        trace_path: str | None = None,
-        user_id: str | None = None,
-    ) -> list[dict[str, Any]]:
-        if self.app.browser_manager is None:
-            raise RuntimeError("Browser subsystem is not available in chat-only mode.")
-        if trace_path:
-            return self.app.browser_replay(trace_path)
-        if not thread_id:
-            raise RuntimeError("thread_id or trace_path is required")
-        resolved_thread_id = scoped_thread_id(user_id, thread_id) if user_id else thread_id
-        latest = self.app.browser_manager.latest_trace_path(thread_id=resolved_thread_id)
-        if not latest:
-            return []
-        return self.app.browser_replay(latest)
-
-    def run_benchmark(self, *, suite: str, profile_name: str | None = None) -> dict[str, Any]:
-        return self.app.run_benchmark(suite=suite, profile_name=profile_name).to_dict()
-
-    def load_benchmark_report(self, run_id_or_path: str) -> dict[str, Any]:
-        return self.app.load_benchmark_report(run_id_or_path).to_dict()
-
-    def propose_improvement(self, *, run_id_or_path: str, profile_name: str | None = None) -> dict[str, Any]:
-        return self.app.propose_improvement(run_id_or_path=run_id_or_path, profile_name=profile_name).to_dict()
-
-    def promote_profile(self, *, profile_name: str) -> dict[str, Any]:
-        return {"promoted": profile_name, "path": self.app.promote_profile(profile_name=profile_name)}
 
     def reset_thread(self, *, thread_id: str, user_id: str | None = None) -> dict[str, Any]:
         runtime_thread_ids = {thread_id}
         if user_id:
             runtime_thread_ids.add(scoped_thread_id(user_id, thread_id))
-            claim_ids = self.app.world_store.list_claim_ids_for_thread(user_id=user_id, thread_id=thread_id)
-            for claim_id in claim_ids:
-                self.app.nodes._delete_claim_memory(user_id, claim_id)
-            thread_cleanup = self.app.world_store.purge_thread(user_id=user_id, thread_id=thread_id)
-        else:
-            thread_cleanup = {"claims": 0, "memory_records": 0, "sources": 0, "events": 0}
         with sqlite3.connect(self.config.langgraph_checkpoint_db) as conn:
             for runtime_thread_id in runtime_thread_ids:
                 conn.execute("DELETE FROM writes WHERE thread_id = ?", (runtime_thread_id,))
                 conn.execute("DELETE FROM checkpoints WHERE thread_id = ?", (runtime_thread_id,))
             conn.commit()
         self.run_store.delete_thread(user_id=user_id, thread_id=thread_id)
-        for runtime_thread_id in runtime_thread_ids:
-            browser_dir = self.config.browser_storage_dir / _safe_name(runtime_thread_id)
-            if browser_dir.exists():
-                shutil.rmtree(browser_dir, ignore_errors=True)
-        return {"status": "ok", "thread_id": thread_id, "deleted_world_state": thread_cleanup}
+        return {"status": "ok", "thread_id": thread_id}
 
     def reset_user(self, *, user_id: str, confirmation_user_id: str) -> dict[str, Any]:
         if confirmation_user_id != user_id:
             raise RuntimeError("User confirmation did not match the requested user id.")
         thread_ids = {item["thread_id"] for item in self.run_store.list_threads(user_id=user_id)}
-        with sqlite3.connect(self.config.world_db_path) as conn:
-            rows = conn.execute(
-                "SELECT DISTINCT thread_id FROM world_events WHERE user_id = ?",
-                (user_id,),
-            ).fetchall()
-            thread_ids.update(row[0] for row in rows if row and row[0])
-            for table in ("world_events", "memory_records", "claims", "sources", "entities"):
-                conn.execute(f"DELETE FROM {table} WHERE user_id = ?", (user_id,))
-            conn.commit()
         try:
             self.app.memory_service.delete_all(user_id=user_id)
         except Exception:
@@ -428,38 +303,30 @@ class AtlasBackendService:
     def reset_all(self, *, confirmation: str) -> dict[str, Any]:
         if confirmation != "RESET ATLAS":
             raise RuntimeError("Reset confirmation did not match `RESET ATLAS`.")
-        if self.app.browser_manager is not None:
-            self.app.browser_manager.close()
         with sqlite3.connect(self.config.langgraph_checkpoint_db) as conn:
             conn.execute("DELETE FROM writes")
             conn.execute("DELETE FROM checkpoints")
-            conn.commit()
-        with sqlite3.connect(self.config.world_db_path) as conn:
-            for table in ("world_events", "memory_records", "claims", "sources", "entities"):
-                conn.execute(f"DELETE FROM {table}")
             conn.commit()
         try:
             self.app.memory_service.reset()
         except Exception:
             pass
-        for directory in (self.config.browser_storage_dir, self.config.evals_dir, self.config.data_dir / "runs"):
-            if directory.exists():
-                shutil.rmtree(directory, ignore_errors=True)
-            directory.mkdir(parents=True, exist_ok=True)
+        runs_dir = self.config.data_dir / "runs"
+        if runs_dir.exists():
+            shutil.rmtree(runs_dir, ignore_errors=True)
+        runs_dir.mkdir(parents=True, exist_ok=True)
         self.run_store.reset_all()
         return {"status": "ok"}
 
     def _start_run(
         self,
         *,
-        mode: str,
         prompt: str,
         user_id: str,
         thread_id: str,
         chat_model: str | None,
         temperature: float | None,
         thread_title: str | None,
-        research_mode: bool,
         cross_chat_memory: bool,
         auto_compact_long_chats: bool,
         images: list[dict[str, str]],
@@ -485,13 +352,12 @@ class AtlasBackendService:
         )
 
         artifact = self.run_store.create_run(
-            mode=mode,
+            mode="chat",
             user_id=user_id,
             thread_id=thread_id,
             chat_model=resolved_chat_model,
             temperature=resolved_temperature,
             prompt=prompt,
-            profile_name=self.app.profile.name,
             thread_title=resolved_thread_title,
         )
         with self._control_lock:
@@ -506,7 +372,6 @@ class AtlasBackendService:
                 "thread_id": thread_id,
                 "chat_model": resolved_chat_model,
                 "temperature": resolved_temperature,
-                "research_mode": research_mode,
                 "cross_chat_memory": cross_chat_memory,
                 "auto_compact_long_chats": auto_compact_long_chats,
                 "images": images,
@@ -530,7 +395,6 @@ class AtlasBackendService:
         thread_id: str,
         chat_model: str,
         temperature: float | None,
-        research_mode: bool,
         cross_chat_memory: bool,
         auto_compact_long_chats: bool,
         images: list[dict[str, str]],
@@ -556,7 +420,6 @@ class AtlasBackendService:
                 session_id=session_id,
                 chat_model=chat_model,
                 chat_temperature=temperature,
-                research_mode=research_mode,
                 cross_chat_memory=cross_chat_memory,
                 auto_compact_long_chats=auto_compact_long_chats,
                 effective_context_window=effective_context_window,
@@ -568,7 +431,7 @@ class AtlasBackendService:
                 run_id,
                 "run_started",
                 {
-                    "mode": "research" if research_mode else "chat",
+                    "mode": "chat",
                     "thread_id": thread_id,
                     "chat_model": chat_model,
                     "temperature": temperature,
@@ -584,61 +447,6 @@ class AtlasBackendService:
                 inputs={"query": prompt},
                 outputs={"count": len(state.get("retrieved_memories", [])), "items": state.get("retrieved_memories", [])[:5]},
             )
-
-            self._emit_stage(run_id, "world_state_retrieval")
-            self._run_graph_node(run_id=run_id, node_name="retrieve_world_state", state=state, runtime=runtime)
-            report = ReasoningReport.from_dict(state.get("reasoning_report"))
-            self._emit_trace(
-                run_id,
-                stage="world-state retrieval",
-                rationale="Loaded relevant canonical claims and recent events for this user.",
-                inputs={"user_id": user_id},
-                outputs={
-                    "claims": len(state.get("world_claims", [])),
-                    "violations": [item.message for item in report.violations],
-                },
-            )
-
-            if research_mode:
-                self._emit_stage(run_id, "browser_planning")
-                self._run_graph_node(run_id=run_id, node_name="plan_browser_research", state=state, runtime=runtime)
-                self._emit_trace(
-                    run_id,
-                    stage="browser planning",
-                    rationale="Decided whether the current request requires browser-grounded research.",
-                    inputs={"research_mode": research_mode},
-                    outputs=state.get("browser_plan", {}),
-                )
-
-                self._emit_stage(run_id, "browser_actions")
-                try:
-                    self._run_graph_node(run_id=run_id, node_name="browser_loop", state=state, runtime=runtime)
-                except Exception as exc:
-                    self._emit_trace(
-                        run_id,
-                        stage="browser actions",
-                        rationale="Browser-grounded research failed before Atlas could verify any sources.",
-                        inputs={"research_mode": research_mode},
-                        outputs={"error": str(exc)},
-                    )
-                    raise
-                for citation in state.get("citations", []):
-                    self._emit_event(run_id, "citation_added", citation)
-                self._emit_trace(
-                    run_id,
-                    stage="browser actions",
-                    rationale="Collected browser trace steps and source citations when web context was required.",
-                    inputs={"research_mode": research_mode},
-                    outputs={
-                        "steps": len(state.get("browser_trace", [])),
-                        "citations": len(state.get("citations", [])),
-                    },
-                    artifacts={"citations": state.get("citations", [])},
-                )
-            else:
-                state.setdefault("browser_plan", {"use_browser": False})
-                state.setdefault("browser_trace", [])
-                state.setdefault("citations", [])
 
             self._raise_if_cancelled(run_id)
             prior_compacted_count = int(state.get("compacted_message_count", 0) or 0)
@@ -667,57 +475,27 @@ class AtlasBackendService:
             self._emit_trace(
                 run_id,
                 stage="synthesis",
-                rationale="Synthesized the final answer from memory, world state, and citations.",
-                inputs={
-                    "memory_items": len(state.get("retrieved_memories", [])),
-                    "world_claims": len(state.get("world_claims", [])),
-                    "citations": len(state.get("citations", [])),
-                },
+                rationale="Synthesized the final answer from the current thread and retrieved memory context.",
+                inputs={"memory_items": len(state.get("retrieved_memories", []))},
                 outputs={"answer_chars": len(answer)},
             )
 
+            self._emit_stage(run_id, "memory_persistence")
             self._run_graph_node(run_id=run_id, node_name="extract_updates", state=state, runtime=runtime)
-            if state.get("update_candidates"):
-                self._raise_if_cancelled(run_id)
-                self._run_graph_node(run_id=run_id, node_name="adjudicate_updates", state=state, runtime=runtime)
-                self._run_graph_node(run_id=run_id, node_name="persist", state=state, runtime=runtime)
-                if research_mode:
-                    decisions = [item.get("decision", {}).get("action", "reject") for item in state.get("adjudicated_updates", [])]
-                    self._emit_stage(run_id, "claim_extraction")
-                    self._emit_trace(
-                        run_id,
-                        stage="claim extraction",
-                        rationale="Extracted durable candidates suitable for canonical storage.",
-                        inputs={"answer_present": bool(answer)},
-                        outputs={"candidates": len(state.get("update_candidates", []))},
-                    )
-                    self._emit_stage(run_id, "claim_adjudication")
-                    self._emit_trace(
-                        run_id,
-                        stage="claim adjudication",
-                        rationale="Compared candidates against active claims and selected update actions.",
-                        inputs={"candidates": len(state.get("update_candidates", []))},
-                        outputs={"actions": decisions},
-                    )
-                    self._emit_stage(run_id, "persistence")
-                    final_report = ReasoningReport.from_dict(state.get("reasoning_report"))
-                    self._emit_trace(
-                        run_id,
-                        stage="persistence",
-                        rationale="Persisted accepted updates and refreshed the canonical world view.",
-                        inputs={"adjudicated": len(state.get("adjudicated_updates", []))},
-                        outputs={
-                            "world_claims": len(state.get("world_claims", [])),
-                            "violations": [item.message for item in final_report.violations],
-                        },
-                    )
+            self._run_graph_node(run_id=run_id, node_name="persist", state=state, runtime=runtime)
+            self._emit_trace(
+                run_id,
+                stage="memory persistence",
+                rationale="Persisted durable user facts that were suitable for future retrieval.",
+                inputs={"candidates": len(state.get("update_candidates", []))},
+                outputs={"stored": len(state.get("persisted_memories", []))},
+            )
+
             self.app.graph.update_state(
                 config,
                 {
                     "messages": [new_user_message, new_ai_message],
                     "answer": answer,
-                    "citations": list(state.get("citations", [])),
-                    "reasoning_report": state.get("reasoning_report", {}),
                     "thread_summary": str(state.get("thread_summary", "") or ""),
                     "compacted_message_count": int(state.get("compacted_message_count", 0) or 0),
                     "detected_context_window": int(state.get("detected_context_window", 0) or 0),
@@ -725,18 +503,12 @@ class AtlasBackendService:
                 as_node="persist",
             )
 
-            artifact = self.run_store.complete_run(
-                run_id,
-                answer=state.get("answer", ""),
-                citations=list(state.get("citations", [])),
-            )
+            artifact = self.run_store.complete_run(run_id, answer=state.get("answer", ""))
             self._emit_event(
                 run_id,
                 "run_completed",
                 {
                     "answer": artifact.get("answer", ""),
-                    "citations": artifact.get("citations", []),
-                    "reasoning_report": state.get("reasoning_report", {}),
                 },
             )
         except Exception as exc:  # pragma: no cover - integration path
@@ -757,16 +529,6 @@ class AtlasBackendService:
         state: dict[str, Any],
         runtime: SimpleNamespace,
     ) -> str:
-        citations = [Citation.from_dict(item) for item in state.get("citations", [])]
-        if runtime.context.research_mode and citations:
-            answer = _grounded_research_answer(
-                question=_latest_user_text(state),
-                citations=citations,
-            )
-            for chunk in _stream_chunks(answer):
-                self._emit_event(run_id, "token", {"text": chunk})
-            return answer
-
         messages = _build_answer_messages(state=state, runtime_context=runtime.context)
 
         answer_parts: list[str] = []
@@ -799,7 +561,7 @@ class AtlasBackendService:
             answer_parts.append(trailing_answer)
             self._emit_event(run_id, "token", {"text": trailing_answer})
         answer_body = "".join(answer_parts)
-        answer = _finalize_answer_text(answer_body, state=state)
+        answer = _finalize_answer_text(answer_body)
         suffix = answer[len(answer_body):]
         if suffix:
             self._emit_event(run_id, "token", {"text": suffix})
@@ -813,8 +575,7 @@ class AtlasBackendService:
         state: dict[str, Any],
         runtime: SimpleNamespace,
     ) -> None:
-        include_browser = bool(runtime.context.research_mode and self.app.browser_manager is not None)
-        allowed_nodes = set(pre_synthesis_node_sequence(include_browser=include_browser)) | set(post_synthesis_node_sequence())
+        allowed_nodes = set(pre_synthesis_node_sequence()) | set(post_synthesis_node_sequence())
         if node_name not in allowed_nodes:
             raise RuntimeError(f"Unsupported graph execution node: {node_name}")
         self._raise_if_cancelled(run_id)
@@ -1104,7 +865,6 @@ def _render_messages_for_summary(messages: list[HumanMessage | AIMessage]) -> st
 
 
 def _message_text_for_summary(message: HumanMessage | AIMessage) -> str:
-    content = getattr(message, "content", "")
     text = _latest_user_text({"messages": [message]}) if isinstance(message, HumanMessage) else _chunk_to_text(message)
     cleaned = " ".join(str(text).split()).strip()
     return cleaned
@@ -1296,16 +1056,6 @@ def _data_url_media_type(value: str) -> str:
     if value.startswith("data:") and ";" in value:
         return value[5 : value.index(";")]
     return "image/png"
-
-
-def _stream_chunks(text: str, *, chunk_size: int = 120) -> list[str]:
-    if not text:
-        return []
-    return [text[index : index + chunk_size] for index in range(0, len(text), chunk_size)]
-
-
-def _safe_name(value: str) -> str:
-    return "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in value)
 
 
 def _suggest_thread_title(prompt: str, *, max_words: int = 6, max_chars: int = 56) -> str:

@@ -31,8 +31,6 @@ $targets = @(
   "apps\atlas\src-tauri\resources\prompts",
   "apps\atlas\dist",
   "apps\atlas\output",
-  "apps\atlas\.playwright-cli",
-  ".playwright-cli",
   ".pytest_cache",
   "output",
   "test-results"

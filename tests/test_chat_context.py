@@ -11,8 +11,6 @@ class ChatContextTests(unittest.TestCase):
         state = {
             "messages": [HumanMessage(content="What is my name?")],
             "retrieved_memories": ["name: Atlas Tester"],
-            "world_claims": [{"predicate": "name", "value": "Atlas Tester", "claim_type": "profile"}],
-            "reasoning_report": {},
         }
         context = GraphContext(
             user_id="u1",
@@ -27,15 +25,12 @@ class ChatContextTests(unittest.TestCase):
 
         self.assertIsInstance(messages[0], SystemMessage)
         self.assertIn("Relevant persistent memories", str(messages[0].content))
-        self.assertIn("Relevant persistent facts", str(messages[0].content))
 
     def test_cross_chat_memory_disabled_keeps_raw_messages(self) -> None:
         user_message = HumanMessage(content="What is my name?")
         state = {
             "messages": [user_message],
             "retrieved_memories": ["name: Atlas Tester"],
-            "world_claims": [{"predicate": "name", "value": "Atlas Tester", "claim_type": "profile"}],
-            "reasoning_report": {},
         }
         context = GraphContext(
             user_id="u1",

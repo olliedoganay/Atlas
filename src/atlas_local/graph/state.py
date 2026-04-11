@@ -12,12 +12,6 @@ class AgentState(TypedDict, total=False):
     compacted_message_count: int
     detected_context_window: int
     retrieved_memories: list[str]
-    world_claims: list[dict[str, Any]]
-    world_events: list[dict[str, Any]]
-    browser_plan: dict[str, Any]
-    browser_trace: list[dict[str, Any]]
-    citations: list[dict[str, Any]]
     update_candidates: list[dict[str, Any]]
-    adjudicated_updates: list[dict[str, Any]]
-    reasoning_report: dict[str, Any]
+    persisted_memories: list[dict[str, Any]]
     answer: str

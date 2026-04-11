@@ -58,7 +58,7 @@ export type BackendStatus = {
   chat_temperature: number;
   embed_model: string;
   ollama_url: string;
-  active_profile: string;
+  runtime_mode: string;
   busy: boolean;
 };
 
@@ -94,7 +94,6 @@ export type RunSummary = {
   chat_model?: string;
   temperature?: number | null;
   prompt: string;
-  profile_name: string;
   status: string;
   started_at: string;
   completed_at?: string | null;

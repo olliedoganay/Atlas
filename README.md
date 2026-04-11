@@ -1,21 +1,21 @@
 # Atlas
 
-Atlas is a local-first desktop chat workspace for Ollama. It runs a Tauri desktop shell on top of a Python backend, keeps thread history on your machine, and lets each thread stay pinned to its chosen model once the conversation begins.
+Atlas is a local-first desktop chat workspace for Ollama. It runs a Tauri desktop shell on top of a Python backend, keeps thread history on your machine, and locks each thread to its chosen model and temperature after the first message.
 
-## Highlights
+## Current Scope
 
-- chat with local Ollama models in a desktop UI
-- lock model and temperature per thread after the first message
-- keep thread history and draft chats
-- enable optional cross-chat memory and manual memory controls
-- run everything locally with a small surface area: `Workspace` and `Settings`
+- chat-only local runtime
+- optional cross-chat memory backed by Mem0 + local Qdrant storage
+- manual memory add/delete from the desktop settings page
+- persisted thread history, run events, and stream state on disk
+- no browser automation, research mode, benchmark runner, or world-state graph
 
 ## Stack
 
 - desktop shell: Tauri, React, Vite
 - backend: Python, FastAPI, LangGraph
 - model runtime: Ollama
-- local state: `.data/`
+- local storage: `.data/`, local Qdrant, sqlite checkpoints
 
 ## Requirements
 
@@ -29,7 +29,7 @@ Atlas is a local-first desktop chat workspace for Ollama. It runs a Tauri deskto
 
 ## Platform Notes
 
-The current repo scripts, CI, launcher wrappers, and packaging flow are Windows-first. The source tree is largely portable, but the documented commands and automated validation currently assume Windows paths, PowerShell, and `.exe` entrypoints.
+The repo scripts, CI, launcher wrappers, and packaging flow are Windows-first. The source tree is mostly portable, but the documented commands and automated verification assume Windows paths, PowerShell, and `.exe` entrypoints.
 
 ## Quick Start
 
@@ -54,8 +54,7 @@ Run the desktop app from source:
 .\scripts\start_atlas_dev.ps1
 ```
 
-The first launch after a cleanup can take longer because the Tauri/Rust binary may rebuild from scratch.
-When the app opens, create or select a user in `Settings` before starting a chat. Atlas starts with no user selected.
+On first launch, pick or create a user in `Settings` before starting a chat. Atlas starts with no active user selected.
 
 ## Common Commands
 
@@ -97,6 +96,15 @@ python atlas.py --user-id your_user --ask "What should I build next?"
 python -m atlas_local.api
 ```
 
+## Memory Model
+
+Atlas currently keeps memory simple:
+
+- manual notes can be added or deleted in `Settings`
+- semantic retrieval can pull relevant memories from other chats for the same user
+- lightweight heuristic extraction persists durable user facts from chat into memory
+- extracted memory is intentionally limited to profile, preference, and constraint-style notes
+
 ## Development
 
 Verify backend tests, the packaged backend resource build, the frontend production bundle, and the Rust desktop shell compile check:
@@ -129,36 +137,29 @@ Optional flags:
 
 ## Repository Layout
 
-- `src/atlas_local`: Python runtime and local API
+- `src/atlas_local`: Python runtime, API, graph execution, memory integration, and launchers
 - `apps/atlas`: desktop shell built with Tauri, React, and Vite
 - `prompts`: prompt templates used by the backend
-- `scripts`: dev, verify, and cleanup helpers
+- `scripts`: dev, verify, package, and cleanup helpers
 - `tests`: backend and API test suite
 
-## Git Hygiene
+## Local Data
 
-These paths should stay out of Git:
+Atlas writes runtime data under `.data/`:
 
-- `.env`
-- `.venv`
-- `.data`
-- `__pycache__`
-- `output`
-- `apps/atlas/output`
-- `apps/atlas/dist`
-- `apps/atlas/src-tauri/target`
-- `apps/atlas/src-tauri/resources/backend`
-- `apps/atlas/src-tauri/resources/prompts`
+- `langgraph/checkpoints.sqlite`: thread checkpoint state
+- `mem0_history.sqlite`: Mem0 history database
+- `qdrant/`: local vector storage for semantic memory
+- `runs/`: saved run artifacts and event streams
 
-The repo ignore rules already cover these generated folders.
+These paths should stay out of Git. The repo ignore rules already cover them.
 
 ## Architecture
 
 - `src/atlas_local/api.py`: FastAPI surface for the desktop client
-- `src/atlas_local/api_service.py`: backend orchestration and run lifecycle
+- `src/atlas_local/api_service.py`: backend orchestration, streaming, thread duplication, and reset flows
 - `src/atlas_local/run_store.py`: persisted thread and run artifacts
 - `src/atlas_local/run_contract.py`: shared run event and trace contract
-- `src/atlas_local/graph/*`: agent graph composition and execution
+- `src/atlas_local/graph/*`: chat graph composition, context compaction, and memory injection
+- `src/atlas_local/memory/*`: Mem0 integration and heuristic memory extraction
 - `src/atlas_local/providers/*`: provider abstraction boundary
-- `src/atlas_local/memory/*`: cross-chat memory integration
-- `src/atlas_local/world/*`: durable world-state and events
