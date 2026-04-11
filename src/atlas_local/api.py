@@ -149,6 +149,10 @@ def create_api_app(service: AtlasBackendService | None = None) -> FastAPI:
     def duplicate_thread(thread_id: str, request: UserRequest) -> dict[str, Any]:
         return _handle_runtime(lambda: backend().duplicate_thread(user_id=request.user_id, thread_id=thread_id))
 
+    @app.post("/threads/{thread_id}/compact")
+    def compact_thread(thread_id: str, request: UserRequest) -> dict[str, Any]:
+        return _handle_runtime(lambda: backend().start_manual_compact(user_id=request.user_id, thread_id=thread_id))
+
     @app.get("/threads/{thread_id}/history")
     def thread_history(thread_id: str, user_id: str | None = Query(default=None)) -> list[dict[str, Any]]:
         return _handle_runtime(lambda: backend().get_thread_history(user_id=user_id, thread_id=thread_id))
@@ -179,6 +183,10 @@ def create_api_app(service: AtlasBackendService | None = None) -> FastAPI:
 
     @app.get("/chat/stream/{run_id}")
     async def chat_stream(run_id: str) -> StreamingResponse:
+        return _streaming_response(backend(), run_id)
+
+    @app.get("/compact/stream/{run_id}")
+    async def compact_stream(run_id: str) -> StreamingResponse:
         return _streaming_response(backend(), run_id)
 
     @app.post("/admin/reset/thread")

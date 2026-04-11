@@ -12,6 +12,8 @@ from typing import Any
 from .config import AppConfig
 from .run_contract import RunEvent, RunTraceItem, make_run_event, make_trace_item, now_timestamp
 
+ACTIVE_RUN_STATUSES = {"queued", "running", "cancelling"}
+
 
 class RunStore:
     def __init__(self, config: AppConfig):
@@ -33,6 +35,9 @@ class RunStore:
         temperature: float | None,
         prompt: str,
         thread_title: str | None = None,
+        status: str = "running",
+        touch_thread: bool = True,
+        history_after_message_count: int = 0,
     ) -> dict[str, Any]:
         run_id = str(uuid.uuid4())
         index = self._read_index()
@@ -47,7 +52,8 @@ class RunStore:
             "chat_model": chat_model,
             "temperature": temperature,
             "prompt": prompt,
-            "status": "running",
+            "status": status,
+            "history_after_message_count": max(0, int(history_after_message_count or 0)),
             "started_at": now_timestamp(),
             "completed_at": None,
             "answer": "",
@@ -65,24 +71,26 @@ class RunStore:
                 "thread_title": resolved_title,
                 "chat_model": chat_model,
                 "temperature": temperature,
-                "status": "running",
+                "status": status,
+                "history_after_message_count": artifact["history_after_message_count"],
                 "started_at": artifact["started_at"],
             }
-            index["threads"][self._thread_key(user_id, thread_id)] = {
-                "user_id": user_id,
-                "thread_id": thread_id,
-                "title": resolved_title,
-                "chat_model": chat_model,
-                "temperature": temperature,
-                "last_mode": mode,
-                "updated_at": artifact["started_at"],
-                "last_prompt": prompt[:120],
-                "last_run_id": run_id,
-            }
-            index["users"][user_id] = {
-                "user_id": user_id,
-                "updated_at": artifact["started_at"],
-            }
+            if touch_thread:
+                index["threads"][self._thread_key(user_id, thread_id)] = {
+                    "user_id": user_id,
+                    "thread_id": thread_id,
+                    "title": resolved_title,
+                    "chat_model": chat_model,
+                    "temperature": temperature,
+                    "last_mode": mode,
+                    "updated_at": artifact["started_at"],
+                    "last_prompt": prompt[:120],
+                    "last_run_id": run_id,
+                }
+                index["users"][user_id] = {
+                    "user_id": user_id,
+                    "updated_at": artifact["started_at"],
+                }
             self._write_index(index)
         return artifact
 
@@ -119,6 +127,29 @@ class RunStore:
             self._write_index(index)
         return artifact
 
+    def mark_run_running(self, run_id: str) -> dict[str, Any]:
+        with self._lock:
+            artifact = self.get_run(run_id)
+            artifact["status"] = "running"
+            self._write_run_file(run_id, artifact)
+            index = self._read_index()
+            if run_id in index["runs"]:
+                index["runs"][run_id]["status"] = "running"
+            self._write_index(index)
+        return artifact
+
+    def mark_run_cancelling(self, run_id: str) -> dict[str, Any]:
+        with self._lock:
+            artifact = self.get_run(run_id)
+            if artifact.get("status") not in {"completed", "failed"}:
+                artifact["status"] = "cancelling"
+                self._write_run_file(run_id, artifact)
+            index = self._read_index()
+            if run_id in index["runs"] and index["runs"][run_id].get("status") not in {"completed", "failed"}:
+                index["runs"][run_id]["status"] = "cancelling"
+            self._write_index(index)
+        return artifact
+
     def fail_run(self, run_id: str, *, error: str) -> dict[str, Any]:
         with self._lock:
             artifact = self.get_run(run_id)
@@ -134,6 +165,48 @@ class RunStore:
             self._write_index(index)
         return artifact
 
+    def fail_incomplete_runs(self, *, error: str) -> list[str]:
+        recovered: list[str] = []
+        with self._lock:
+            index = self._read_index()
+            for run_id, item in index.get("runs", {}).items():
+                if item.get("status") not in ACTIVE_RUN_STATUSES:
+                    continue
+                timestamp = now_timestamp()
+                path = self.runs_dir / f"{run_id}.json"
+                if path.exists():
+                    artifact = json.loads(path.read_text(encoding="utf-8"))
+                else:
+                    artifact = {
+                        "run_id": run_id,
+                        "mode": item.get("mode", "chat"),
+                        "user_id": item.get("user_id", ""),
+                        "thread_id": item.get("thread_id", ""),
+                        "thread_title": item.get("thread_title", item.get("thread_id", "")),
+                        "chat_model": item.get("chat_model", ""),
+                        "temperature": item.get("temperature"),
+                        "prompt": "",
+                        "status": item.get("status", "failed"),
+                        "history_after_message_count": int(item.get("history_after_message_count", 0) or 0),
+                        "started_at": item.get("started_at", timestamp),
+                        "completed_at": None,
+                        "answer": "",
+                        "events": [],
+                        "trace_items": [],
+                        "error": None,
+                    }
+                artifact["status"] = "failed"
+                artifact["completed_at"] = timestamp
+                artifact["error"] = error
+                artifact.setdefault("events", [])
+                artifact["events"].append(make_run_event("run_failed", {"error": error}, timestamp=timestamp))
+                self._write_run_file(run_id, artifact)
+                item["status"] = "failed"
+                item["completed_at"] = timestamp
+                recovered.append(run_id)
+            self._write_index(index)
+        return recovered
+
     def get_run(self, run_id: str) -> dict[str, Any]:
         path = self.runs_dir / f"{run_id}.json"
         if not path.exists():
@@ -147,6 +220,22 @@ class RunStore:
             items = [item for item in items if item.get("user_id") == user_id]
         items.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
         return items
+
+    def list_runs_for_thread(self, *, user_id: str | None, thread_id: str) -> list[dict[str, Any]]:
+        index = self._read_index()
+        run_ids = [
+            run_id
+            for run_id, item in index.get("runs", {}).items()
+            if item.get("thread_id") == thread_id and (user_id is None or item.get("user_id") == user_id)
+        ]
+        artifacts: list[dict[str, Any]] = []
+        for run_id in run_ids:
+            try:
+                artifacts.append(self.get_run(run_id))
+            except RuntimeError:
+                continue
+        artifacts.sort(key=lambda item: (str(item.get("started_at", "") or ""), str(item.get("run_id", "") or "")))
+        return artifacts
 
     def list_users(self) -> list[dict[str, Any]]:
         index = self._read_index()
@@ -330,6 +419,7 @@ class RunStore:
         for item in payload["runs"].values():
             item.setdefault("thread_title", item.get("thread_id", ""))
             item.setdefault("temperature", self.config.chat_temperature)
+            item.setdefault("history_after_message_count", 0)
             user_id = item.get("user_id")
             if user_id and user_id not in payload["users"]:
                 payload["users"][user_id] = {"user_id": user_id, "updated_at": item.get("started_at", "")}

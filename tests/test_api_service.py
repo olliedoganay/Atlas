@@ -1,12 +1,19 @@
 import unittest
+import tempfile
+import threading
+import time
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from langchain_core.messages import AIMessage, HumanMessage
 
 from atlas_local.api_service import AtlasBackendService, _estimate_thread_representation_tokens
+from atlas_local.config import load_config
 from atlas_local.graph.builder import execution_node_sequence, post_synthesis_node_sequence, pre_synthesis_node_sequence
 from atlas_local.llm import OllamaModelInfo
+from atlas_local.run_contract import RunHub
+from atlas_local.run_store import RunStore
 
 
 class ApiServiceCreateTests(unittest.TestCase):
@@ -261,6 +268,7 @@ class ContextCompactionTests(unittest.TestCase):
 
     def test_thread_history_inserts_context_compaction_marker_at_message_boundary(self) -> None:
         service = AtlasBackendService.__new__(AtlasBackendService)
+        service.run_store = SimpleNamespace(list_runs_for_thread=lambda **_: [])
         service._get_snapshot = lambda **_: SimpleNamespace(
             values={
                 "messages": [
@@ -279,6 +287,7 @@ class ContextCompactionTests(unittest.TestCase):
                         "newly_compacted_message_count": 2,
                         "thread_summary": "- first turn summary",
                         "detected_context_window": 4096,
+                        "compaction_reason": "auto",
                         "history_representation_tokens_before_compaction": 1800,
                         "history_representation_tokens_after_compaction": 640,
                     }
@@ -296,8 +305,377 @@ class ContextCompactionTests(unittest.TestCase):
         self.assertEqual(marker["kind"], "context_compacted")
         self.assertEqual(marker["run_id"], "run-2")
         self.assertEqual(marker["thread_summary"], "- first turn summary")
+        self.assertEqual(marker["compaction_reason"], "auto")
         self.assertEqual(marker["history_representation_tokens_before_compaction"], 1800)
         self.assertEqual(marker["history_representation_tokens_after_compaction"], 640)
+
+    def test_thread_history_inserts_run_lifecycle_events_from_run_artifacts(self) -> None:
+        service = AtlasBackendService.__new__(AtlasBackendService)
+        service.run_store = SimpleNamespace(
+            list_runs_for_thread=lambda **_: [
+                {
+                    "run_id": "run-chat",
+                    "mode": "chat",
+                    "chat_model": "gemma4:e4b",
+                    "temperature": 0.2,
+                    "history_after_message_count": 1,
+                    "events": [
+                        {"type": "run_started", "timestamp": "2026-04-11T00:00:00Z", "payload": {}},
+                    ],
+                },
+                {
+                    "run_id": "run-restart",
+                    "mode": "compact",
+                    "chat_model": "gemma4:e4b",
+                    "temperature": 0.0,
+                    "history_after_message_count": 2,
+                    "events": [
+                        {
+                            "type": "run_failed",
+                            "timestamp": "2026-04-11T00:00:01Z",
+                            "payload": {"error": "Atlas backend restarted while this run was active."},
+                        }
+                    ],
+                },
+            ]
+        )
+        service._get_snapshot = lambda **_: SimpleNamespace(
+            values={
+                "messages": [
+                    HumanMessage(content="first question"),
+                    AIMessage(content="first answer"),
+                ],
+                "timeline_events": [],
+            }
+        )
+
+        history = AtlasBackendService.get_thread_history(service, user_id="research_user", thread_id="main")
+
+        self.assertEqual(
+            [(item["role"], item.get("kind")) for item in history],
+            [
+                ("user", None),
+                ("system", "run_started"),
+                ("assistant", None),
+                ("system", "backend_restarted"),
+            ],
+        )
+        self.assertIn("started responding", history[1]["content"].lower())
+        self.assertIn("backend restarted", history[3]["content"].lower())
+
+
+class ManualCompactionTests(unittest.TestCase):
+    def test_manual_compact_context_summarizes_older_turns(self) -> None:
+        service = AtlasBackendService.__new__(AtlasBackendService)
+        summarized_batches: list[list[HumanMessage | AIMessage]] = []
+
+        def summarize_message_batch(*, model: str, existing_summary: str, messages: list[HumanMessage | AIMessage]) -> str:
+            summarized_batches.append(messages)
+            return "manual summary"
+
+        service._summarize_message_batch = summarize_message_batch
+        state = {
+            "messages": [
+                HumanMessage(content="u1" * 600),
+                AIMessage(content="a1" * 600),
+                HumanMessage(content="u2" * 600),
+                AIMessage(content="a2" * 600),
+                HumanMessage(content="u3"),
+                AIMessage(content="a3"),
+            ],
+            "thread_summary": "",
+            "compacted_message_count": 0,
+        }
+        runtime = SimpleNamespace(
+            context=SimpleNamespace(
+                effective_context_window=4096,
+                chat_model="gemma4:e4b",
+            )
+        )
+
+        result = AtlasBackendService._manual_compact_context(service, state=state, runtime=runtime)
+
+        self.assertEqual(result["thread_summary"], "manual summary")
+        self.assertGreater(result["compacted_message_count"], 0)
+        self.assertEqual(len(summarized_batches), 1)
+
+        before_tokens = _estimate_thread_representation_tokens(
+            messages=state["messages"],
+            thread_summary="",
+            compacted_message_count=0,
+        )
+        after_tokens = _estimate_thread_representation_tokens(
+            messages=state["messages"],
+            thread_summary=result["thread_summary"],
+            compacted_message_count=result["compacted_message_count"],
+        )
+        self.assertLess(after_tokens, before_tokens)
+
+    def test_execute_compact_run_persists_manual_timeline_event(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = load_config(project_root=Path(temp_dir), env={})
+            store = RunStore(config)
+            graph_updates: list[dict[str, object]] = []
+            service = AtlasBackendService(
+                config=config,
+                app=SimpleNamespace(
+                    llm_provider=SimpleNamespace(
+                        abort_active_requests=lambda: None,
+                        effective_context_window=lambda _model: 4096,
+                    ),
+                    graph=SimpleNamespace(update_state=lambda _config, payload, as_node=None: graph_updates.append(payload)),
+                    close=lambda: None,
+                ),
+                run_store=store,
+                run_hub=RunHub(),
+            )
+            service._summarize_message_batch = lambda **_: "manual summary"  # type: ignore[method-assign]
+            service._get_snapshot = lambda **_: SimpleNamespace(
+                values={
+                    "messages": [
+                        HumanMessage(content="u1" * 600),
+                        AIMessage(content="a1" * 600),
+                        HumanMessage(content="u2" * 600),
+                        AIMessage(content="a2" * 600),
+                        HumanMessage(content="u3"),
+                        AIMessage(content="a3"),
+                    ],
+                    "thread_summary": "",
+                    "compacted_message_count": 0,
+                    "timeline_events": [],
+                }
+            )
+
+            artifact = store.create_run(
+                mode="compact",
+                user_id="research_user",
+                thread_id="main",
+                chat_model="gemma4:e4b",
+                temperature=0.0,
+                prompt="",
+                status="running",
+            )
+
+            service._execute_compact_run(
+                run_id=artifact["run_id"],
+                user_id="research_user",
+                thread_id="main",
+                chat_model="gemma4:e4b",
+            )
+
+            stored = store.get_run(artifact["run_id"])
+            self.assertEqual(stored["status"], "completed")
+            self.assertEqual(stored["events"][-1]["type"], "run_completed")
+            context_event = next(event for event in stored["events"] if event["type"] == "context_compacted")
+            self.assertEqual(context_event["payload"]["compaction_reason"], "manual")
+            self.assertTrue(graph_updates)
+            self.assertEqual(graph_updates[-1]["timeline_events"][0]["compaction_reason"], "manual")
+
+    def test_execute_compact_run_fails_when_no_older_context_can_be_folded(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = load_config(project_root=Path(temp_dir), env={})
+            store = RunStore(config)
+            service = AtlasBackendService(
+                config=config,
+                app=SimpleNamespace(
+                    llm_provider=SimpleNamespace(
+                        abort_active_requests=lambda: None,
+                        effective_context_window=lambda _model: 4096,
+                    ),
+                    graph=SimpleNamespace(update_state=lambda *_args, **_kwargs: None),
+                    close=lambda: None,
+                ),
+                run_store=store,
+                run_hub=RunHub(),
+            )
+            service._get_snapshot = lambda **_: SimpleNamespace(
+                values={
+                    "messages": [
+                        HumanMessage(content="question"),
+                        AIMessage(content="answer"),
+                    ],
+                    "thread_summary": "",
+                    "compacted_message_count": 0,
+                    "timeline_events": [],
+                }
+            )
+
+            artifact = store.create_run(
+                mode="compact",
+                user_id="research_user",
+                thread_id="main",
+                chat_model="gemma4:e4b",
+                temperature=0.0,
+                prompt="",
+                status="running",
+            )
+
+            service._execute_compact_run(
+                run_id=artifact["run_id"],
+                user_id="research_user",
+                thread_id="main",
+                chat_model="gemma4:e4b",
+            )
+
+            stored = store.get_run(artifact["run_id"])
+            self.assertEqual(stored["status"], "failed")
+            self.assertIn("does not have enough older context", stored["error"])
+
+
+class QueuedExecutionTests(unittest.TestCase):
+    def _make_service(self, temp_dir: str, abort_calls: list[str]) -> AtlasBackendService:
+        config = load_config(project_root=Path(temp_dir), env={})
+        return AtlasBackendService(
+            config=config,
+            app=SimpleNamespace(
+                llm_provider=SimpleNamespace(abort_active_requests=lambda: abort_calls.append("abort")),
+                graph=SimpleNamespace(get_state=lambda *_args, **_kwargs: SimpleNamespace(values={"messages": []})),
+                close=lambda: None,
+            ),
+            run_store=RunStore(config),
+            run_hub=RunHub(),
+        )
+
+    def test_runs_execute_serially_through_single_worker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            abort_calls: list[str] = []
+            service = self._make_service(temp_dir, abort_calls)
+            started: list[str] = []
+            first_started = threading.Event()
+            second_started = threading.Event()
+            release_first = threading.Event()
+            release_second = threading.Event()
+
+            def fake_execute_run(**kwargs) -> None:
+                run_id = kwargs["run_id"]
+                started.append(run_id)
+                if len(started) == 1:
+                    first_started.set()
+                    self.assertTrue(release_first.wait(2.0))
+                else:
+                    second_started.set()
+                    self.assertTrue(release_second.wait(2.0))
+                service.run_store.complete_run(run_id, answer=f"done:{run_id}")
+                service._emit_event(run_id, "run_completed", {"answer": f"done:{run_id}"})
+
+            service._execute_run = fake_execute_run  # type: ignore[method-assign]
+            try:
+                first = service.start_chat(prompt="first", user_id="research_user", thread_id="one")
+                second = service.start_chat(prompt="second", user_id="research_user", thread_id="two")
+
+                self.assertEqual(first["status"], "queued")
+                self.assertEqual(second["status"], "queued")
+                self.assertTrue(first_started.wait(1.0))
+                time.sleep(0.05)
+                self.assertEqual(started, [first["run_id"]])
+                self.assertEqual(service.run_store.get_run(first["run_id"])["status"], "running")
+                self.assertEqual(service.run_store.get_run(second["run_id"])["status"], "queued")
+                self.assertEqual(service.run_store.get_run(second["run_id"])["events"][0]["type"], "run_queued")
+                self.assertTrue(service.status()["busy"])
+
+                release_first.set()
+                self.assertTrue(second_started.wait(1.0))
+                self.assertEqual(started, [first["run_id"], second["run_id"]])
+
+                release_second.set()
+                deadline = time.time() + 2.0
+                while time.time() < deadline:
+                    if service.run_store.get_run(second["run_id"])["status"] == "completed":
+                        break
+                    time.sleep(0.02)
+
+                self.assertEqual(service.run_store.get_run(first["run_id"])["status"], "completed")
+                self.assertEqual(service.run_store.get_run(second["run_id"])["status"], "completed")
+                deadline = time.time() + 2.0
+                while time.time() < deadline and service.status()["busy"]:
+                    time.sleep(0.02)
+                self.assertFalse(service.status()["busy"])
+                self.assertEqual(abort_calls, [])
+            finally:
+                service.close()
+
+    def test_cancel_run_removes_queued_job_before_it_starts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            abort_calls: list[str] = []
+            service = self._make_service(temp_dir, abort_calls)
+            started: list[str] = []
+            first_started = threading.Event()
+            second_started = threading.Event()
+            release_first = threading.Event()
+
+            def fake_execute_run(**kwargs) -> None:
+                run_id = kwargs["run_id"]
+                started.append(run_id)
+                if len(started) == 1:
+                    first_started.set()
+                    self.assertTrue(release_first.wait(2.0))
+                else:
+                    second_started.set()
+                service.run_store.complete_run(run_id, answer=f"done:{run_id}")
+                service._emit_event(run_id, "run_completed", {"answer": f"done:{run_id}"})
+
+            service._execute_run = fake_execute_run  # type: ignore[method-assign]
+            try:
+                first = service.start_chat(prompt="first", user_id="research_user", thread_id="one")
+                second = service.start_chat(prompt="second", user_id="research_user", thread_id="two")
+
+                self.assertTrue(first_started.wait(1.0))
+                response = service.cancel_run(second["run_id"])
+                self.assertEqual(response["status"], "cancelling")
+                cancelled = service.run_store.get_run(second["run_id"])
+                self.assertEqual(cancelled["status"], "failed")
+                self.assertEqual(cancelled["error"], "Run stopped by user.")
+                self.assertFalse(second_started.wait(0.2))
+
+                release_first.set()
+                deadline = time.time() + 2.0
+                while time.time() < deadline:
+                    if service.run_store.get_run(first["run_id"])["status"] == "completed":
+                        break
+                    time.sleep(0.02)
+
+                self.assertEqual(started, [first["run_id"]])
+                self.assertEqual(abort_calls, [])
+                self.assertEqual(cancelled["events"][-1]["type"], "run_failed")
+            finally:
+                service.close()
+
+    def test_cancel_run_marks_running_job_cancelling_and_aborts_provider(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            abort_calls: list[str] = []
+            service = self._make_service(temp_dir, abort_calls)
+            started = threading.Event()
+
+            def fake_execute_run(**kwargs) -> None:
+                run_id = kwargs["run_id"]
+                started.set()
+                deadline = time.time() + 2.0
+                while time.time() < deadline and not service._is_cancelled(run_id):
+                    time.sleep(0.01)
+                if service._is_cancelled(run_id):
+                    service.run_store.fail_run(run_id, error="Run stopped by user.")
+                    service._emit_event(run_id, "run_failed", {"error": "Run stopped by user."})
+                    return
+                service.run_store.complete_run(run_id, answer=f"done:{run_id}")
+                service._emit_event(run_id, "run_completed", {"answer": f"done:{run_id}"})
+
+            service._execute_run = fake_execute_run  # type: ignore[method-assign]
+            try:
+                run = service.start_chat(prompt="first", user_id="research_user", thread_id="one")
+                self.assertTrue(started.wait(1.0))
+                response = service.cancel_run(run["run_id"])
+
+                self.assertEqual(response["status"], "cancelling")
+                self.assertIn(service.run_store.get_run(run["run_id"])["status"], {"cancelling", "failed"})
+                deadline = time.time() + 2.0
+                while time.time() < deadline:
+                    if service.run_store.get_run(run["run_id"])["status"] == "failed":
+                        break
+                    time.sleep(0.02)
+                self.assertEqual(service.run_store.get_run(run["run_id"])["status"], "failed")
+                self.assertEqual(abort_calls, ["abort"])
+            finally:
+                service.close()
 
 
 if __name__ == "__main__":

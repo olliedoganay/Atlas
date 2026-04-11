@@ -1,12 +1,13 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-import type { ImageAttachment, ThemeMode } from "../lib/api";
+import type { ImageAttachment, RunMode, ThemeMode } from "../lib/api";
 
 type CompactionNotice = {
   runId: string;
   userId: string;
   threadId: string;
+  compactionReason?: string;
   compactedMessageCount: number;
   newlyCompactedMessageCount: number;
   threadSummary: string;
@@ -27,6 +28,7 @@ type AtlasState = {
   navCollapsed: boolean;
   settingsSidebarCollapsed: boolean;
   currentRunId: string | null;
+  currentRunMode: RunMode | null;
   activeRunUserId: string | null;
   activeRunThreadId: string | null;
   currentStage: string;
@@ -48,6 +50,7 @@ type AtlasState = {
   toggleSettingsSidebarCollapsed: () => void;
   beginRun: (
     runId: string,
+    mode: RunMode,
     prompt: string,
     userId: string,
     threadId: string,
@@ -78,6 +81,7 @@ export const useAtlasStore = create<AtlasState>()(
       navCollapsed: false,
       settingsSidebarCollapsed: false,
       currentRunId: null,
+      currentRunMode: null,
       activeRunUserId: null,
       activeRunThreadId: null,
       currentStage: "idle",
@@ -98,9 +102,10 @@ export const useAtlasStore = create<AtlasState>()(
       toggleNavCollapsed: () => set((state) => ({ navCollapsed: !state.navCollapsed })),
       toggleSettingsSidebarCollapsed: () =>
         set((state) => ({ settingsSidebarCollapsed: !state.settingsSidebarCollapsed })),
-      beginRun: (runId, prompt, userId, threadId, attachments = []) =>
+      beginRun: (runId, mode, prompt, userId, threadId, attachments = []) =>
         set({
           currentRunId: runId,
+          currentRunMode: mode,
           activeRunUserId: userId,
           activeRunThreadId: threadId,
           pendingPrompt: prompt,
@@ -116,6 +121,7 @@ export const useAtlasStore = create<AtlasState>()(
       completeRun: () =>
         set({
           currentRunId: null,
+          currentRunMode: null,
           activeRunUserId: null,
           activeRunThreadId: null,
           isStreaming: false,
@@ -129,6 +135,7 @@ export const useAtlasStore = create<AtlasState>()(
       failRun: (message) =>
         set({
           currentRunId: null,
+          currentRunMode: null,
           isStreaming: false,
           liveError: message,
           compactionNotice: null,
@@ -139,6 +146,7 @@ export const useAtlasStore = create<AtlasState>()(
       clearLiveRun: () =>
         set({
           currentRunId: null,
+          currentRunMode: null,
           activeRunUserId: null,
           activeRunThreadId: null,
           currentStage: "idle",

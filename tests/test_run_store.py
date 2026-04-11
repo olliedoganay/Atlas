@@ -45,6 +45,76 @@ class RunStoreTests(unittest.TestCase):
             self.assertIsNone(store.get_run(artifact["run_id"])["temperature"])
             self.assertIsNone(store.get_thread(user_id="research_user", thread_id="main")["temperature"])
 
+    def test_fail_incomplete_runs_marks_queued_and_running_runs_failed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = load_config(project_root=Path(temp_dir), env={})
+            store = RunStore(config)
+
+            queued = store.create_run(
+                mode="chat",
+                user_id="research_user",
+                thread_id="queued",
+                chat_model="gpt-oss:20b",
+                temperature=0.2,
+                prompt="queued",
+                status="queued",
+            )
+            running = store.create_run(
+                mode="chat",
+                user_id="research_user",
+                thread_id="running",
+                chat_model="gpt-oss:20b",
+                temperature=0.2,
+                prompt="running",
+            )
+            completed = store.create_run(
+                mode="chat",
+                user_id="research_user",
+                thread_id="completed",
+                chat_model="gpt-oss:20b",
+                temperature=0.2,
+                prompt="completed",
+            )
+            store.complete_run(completed["run_id"], answer="done")
+
+            recovered = store.fail_incomplete_runs(error="Atlas backend restarted while this run was active.")
+
+            self.assertCountEqual(recovered, [queued["run_id"], running["run_id"]])
+            self.assertEqual(store.get_run(queued["run_id"])["status"], "failed")
+            self.assertEqual(store.get_run(running["run_id"])["status"], "failed")
+            self.assertEqual(store.get_run(completed["run_id"])["status"], "completed")
+            self.assertEqual(store.get_run(queued["run_id"])["events"][-1]["type"], "run_failed")
+
+    def test_non_thread_touching_runs_do_not_overwrite_thread_lock_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = load_config(project_root=Path(temp_dir), env={})
+            store = RunStore(config)
+
+            chat_run = store.create_run(
+                mode="chat",
+                user_id="research_user",
+                thread_id="main",
+                chat_model="gpt-oss:20b",
+                temperature=0.7,
+                prompt="hello",
+            )
+            store.create_run(
+                mode="compact",
+                user_id="research_user",
+                thread_id="main",
+                chat_model="gpt-oss:20b",
+                temperature=0.0,
+                prompt="",
+                status="queued",
+                touch_thread=False,
+            )
+
+            thread = store.get_thread(user_id="research_user", thread_id="main")
+
+            self.assertEqual(thread["last_mode"], "chat")
+            self.assertEqual(thread["last_run_id"], chat_run["run_id"])
+            self.assertEqual(thread["temperature"], 0.7)
+
 
 if __name__ == "__main__":
     unittest.main()

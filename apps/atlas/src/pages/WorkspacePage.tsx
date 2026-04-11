@@ -12,6 +12,7 @@ import {
   getThreadHistory,
   getThreads,
   renameThread,
+  startCompact,
   startChat,
   type ImageAttachment,
   type ThreadMessage,
@@ -27,6 +28,7 @@ type ConversationMessage = {
   kind?: string;
   runId?: string;
   timestamp?: string;
+  compactionReason?: string;
   threadSummary?: string;
   compactedMessageCount?: number;
   newlyCompactedMessageCount?: number;
@@ -51,8 +53,10 @@ export function WorkspacePage() {
   const crossChatMemoryEnabled = useAtlasStore((state) => state.crossChatMemoryEnabled);
   const autoCompactLongChats = useAtlasStore((state) => state.autoCompactLongChats);
   const currentRunId = useAtlasStore((state) => state.currentRunId);
+  const currentRunMode = useAtlasStore((state) => state.currentRunMode);
   const activeRunUserId = useAtlasStore((state) => state.activeRunUserId);
   const activeRunThreadId = useAtlasStore((state) => state.activeRunThreadId);
+  const currentStage = useAtlasStore((state) => state.currentStage);
   const pendingPrompt = useAtlasStore((state) => state.pendingPrompt);
   const pendingAttachments = useAtlasStore((state) => state.pendingAttachments);
   const liveAnswer = useAtlasStore((state) => state.liveAnswer);
@@ -241,7 +245,7 @@ export function WorkspacePage() {
     },
     onSuccess: ({ run_id }, value) => {
       autoScrollToLatestRef.current = true;
-      beginRun(run_id, value, currentUserId, currentThreadId, attachments);
+      beginRun(run_id, "chat", value, currentUserId, currentThreadId, attachments);
       setPrompt("");
       setAttachments([]);
       if (fileInputRef.current) {
@@ -250,6 +254,22 @@ export function WorkspacePage() {
     },
     onError: (error) => {
       failRun(error instanceof Error ? error.message : "Atlas run failed.");
+    },
+  });
+
+  const startManualCompact = useMutation({
+    mutationFn: async () => {
+      if (!currentUserId) {
+        throw new Error("Create or select a user in Settings before compacting a chat.");
+      }
+      return startCompact(currentThreadId, currentUserId);
+    },
+    onSuccess: ({ run_id }) => {
+      autoScrollToLatestRef.current = true;
+      beginRun(run_id, "compact", "", currentUserId, currentThreadId, []);
+    },
+    onError: (error) => {
+      failRun(error instanceof Error ? error.message : "Atlas could not compact this thread.");
     },
   });
 
@@ -295,6 +315,7 @@ export function WorkspacePage() {
       kind: item.kind,
       runId: item.run_id,
       timestamp: item.timestamp,
+      compactionReason: item.compaction_reason,
       threadSummary: item.thread_summary,
       compactedMessageCount: item.compacted_message_count,
       newlyCompactedMessageCount: item.newly_compacted_message_count,
@@ -302,6 +323,16 @@ export function WorkspacePage() {
       historyRepresentationTokensBeforeCompaction: item.history_representation_tokens_before_compaction,
       historyRepresentationTokensAfterCompaction: item.history_representation_tokens_after_compaction,
     }));
+    if (currentThreadHasActiveRun) {
+      const liveLifecycle = buildLiveRunLifecycleMessage({
+        runId: currentRunId,
+        mode: currentRunMode,
+        stage: currentStage,
+      });
+      if (liveLifecycle) {
+        items.push(liveLifecycle);
+      }
+    }
     if (currentThreadHasActiveRun && (pendingPrompt || pendingAttachments.length)) {
       items.push({ role: "user", content: pendingPrompt, attachments: pendingAttachments, ephemeral: true });
     }
@@ -312,7 +343,7 @@ export function WorkspacePage() {
       items.push({ role: "assistant", content: liveAnswer, ephemeral: true });
     }
     return items;
-  }, [currentThreadCompactionNotice, currentThreadHasActiveRun, history, liveAnswer, pendingAttachments, pendingPrompt]);
+  }, [currentRunId, currentRunMode, currentStage, currentThreadCompactionNotice, currentThreadHasActiveRun, history, liveAnswer, pendingAttachments, pendingPrompt]);
 
   useEffect(() => {
     autoScrollToLatestRef.current = true;
@@ -508,7 +539,7 @@ export function WorkspacePage() {
                 </div>
               ) : null}
               {transcript.map((message, index) => (
-                isContextCompactionMessage(message) ? (
+                isTimelineSystemMessage(message) ? (
                   <article
                     className={`message-card system compact-context-message${message.ephemeral ? " active" : ""}`}
                     key={compactionMessageKey(message, index)}
@@ -516,17 +547,17 @@ export function WorkspacePage() {
                   >
                     <div className="message-meta compact-context-meta">
                       <span>{formatMessageRoleLabel("system")}</span>
-                      <span className="status-pill subtle compacted">
+                      <span className={`status-pill subtle ${timelineSystemBadgeClass(message)}`}>
                         <span className="status-dot" />
-                        Context compacted
+                        {timelineSystemBadgeLabel(message)}
                       </span>
-                      {message.ephemeral ? <span className="ephemeral-tag">during this response</span> : null}
+                      {message.ephemeral ? <span className="ephemeral-tag">{timelineEphemeralLabel(message)}</span> : null}
                     </div>
                     <div className="message-content compact-context-copy">
-                      <p>{formatCompactionMessageText(message)}</p>
+                      <p>{formatTimelineSystemMessageText(message)}</p>
                     </div>
                     <div className="compact-context-actions">
-                      {message.threadSummary ? (
+                      {isContextCompactionMessage(message) && message.threadSummary ? (
                         <button
                           className="ghost-button compact-summary-toggle"
                           onClick={() => toggleCompactionSummary(compactionMessageKey(message, index))}
@@ -546,7 +577,7 @@ export function WorkspacePage() {
                         </button>
                       ) : null}
                     </div>
-                    {message.threadSummary && expandedCompactionKeys[compactionMessageKey(message, index)] ? (
+                    {isContextCompactionMessage(message) && message.threadSummary && expandedCompactionKeys[compactionMessageKey(message, index)] ? (
                       <div className="stack-card compaction-summary-preview compact-context-summary">
                         <span className="compaction-summary-preview-label">Summary snapshot at this point</span>
                         <pre className="compaction-summary-preview-text">{message.threadSummary}</pre>
@@ -574,13 +605,13 @@ export function WorkspacePage() {
                   </article>
                 )
               ))}
-              {currentThreadHasActiveRun && isStreaming && !liveAnswer ? (
-                <article className="message-card assistant message-card-waiting">
+              {currentThreadHasActiveRun && isStreaming && !liveAnswer && !shouldSuppressWaitingCard(currentStage) ? (
+                <article className={`message-card ${currentRunMode === "compact" ? "system" : "assistant"} message-card-waiting`}>
                   <div className="message-meta">
-                    <span>{formatMessageRoleLabel("assistant")}</span>
+                    <span>{currentRunMode === "compact" ? "SYSTEM" : formatMessageRoleLabel("assistant")}</span>
                   </div>
                   <div className="stream-waiting-line" aria-live="polite">
-                    <span>Deciding</span>
+                    <span>{currentRunMode === "compact" ? "Compacting older context" : "Deciding"}</span>
                     <span className="stream-dots" aria-hidden="true">
                       <span />
                       <span />
@@ -643,9 +674,17 @@ export function WorkspacePage() {
             </>
           ) : null}
 
+          <button
+            className="ghost-button"
+            disabled={isStreaming || !currentUserId || !threadHasHistory || startManualCompact.isPending}
+            onClick={() => startManualCompact.mutate()}
+            type="button"
+          >
+            {startManualCompact.isPending || (isStreaming && currentRunMode === "compact") ? "Compacting..." : "Compact now"}
+          </button>
           <button className="primary-button" disabled={isStreaming || (!prompt.trim() && attachments.length === 0) || !selectedModel || !currentUserId} type="submit">
             <Send size={16} />
-            {isStreaming ? "Running..." : "Send"}
+            {isStreaming ? (currentRunMode === "compact" ? "Compacting..." : "Running...") : "Send"}
           </button>
           {isStreaming ? (
             <button
@@ -718,8 +757,53 @@ function isContextCompactionMessage(message: ConversationMessage) {
   return message.role === "system" && message.kind === "context_compacted";
 }
 
+function isTimelineSystemMessage(message: ConversationMessage) {
+  return message.role === "system" && Boolean(message.kind);
+}
+
+function buildLiveRunLifecycleMessage(input: {
+  runId: string | null;
+  mode: "chat" | "compact" | null;
+  stage: string;
+}): ConversationMessage | null {
+  if (!input.runId) {
+    return null;
+  }
+  if (input.stage === "queued") {
+    return {
+      role: "system",
+      kind: "run_queued",
+      content: input.mode === "compact"
+        ? "Manual compaction is queued and will start after the current task finishes."
+        : "Response queued and waiting for the current task to finish.",
+      ephemeral: true,
+      runId: input.runId,
+    };
+  }
+  if (input.stage === "starting") {
+    return {
+      role: "system",
+      kind: "run_started",
+      content: input.mode === "compact" ? "Manual compaction started." : "Atlas started responding.",
+      ephemeral: true,
+      runId: input.runId,
+    };
+  }
+  if (input.stage === "stopping") {
+    return {
+      role: "system",
+      kind: "run_stopped",
+      content: "Stopping this run.",
+      ephemeral: true,
+      runId: input.runId,
+    };
+  }
+  return null;
+}
+
 function buildLiveCompactionMessage(notice: {
   runId: string;
+  compactionReason?: string;
   compactedMessageCount: number;
   newlyCompactedMessageCount: number;
   threadSummary: string;
@@ -734,6 +818,7 @@ function buildLiveCompactionMessage(notice: {
     ephemeral: true,
     dismissible: true,
     runId: notice.runId,
+    compactionReason: notice.compactionReason,
     threadSummary: notice.threadSummary,
     compactedMessageCount: notice.compactedMessageCount,
     newlyCompactedMessageCount: notice.newlyCompactedMessageCount,
@@ -747,16 +832,24 @@ function compactionMessageKey(message: ConversationMessage, index: number) {
   return message.runId || message.timestamp || `context-compacted-${index}`;
 }
 
-function formatCompactionMessageText(message: ConversationMessage) {
+function formatTimelineSystemMessageText(message: ConversationMessage) {
+  if (!isContextCompactionMessage(message)) {
+    return message.content;
+  }
   const freshCount = Math.max(
     0,
     Number(message.newlyCompactedMessageCount ?? message.compactedMessageCount ?? 0),
   );
   const compactedCount = Math.max(0, Number(message.compactedMessageCount ?? 0));
   const countForCopy = freshCount > 0 ? freshCount : compactedCount;
+  const reason = String(message.compactionReason ?? "").toLowerCase();
   const lead = countForCopy > 0
-    ? `${countForCopy} earlier ${countForCopy === 1 ? "message was" : "messages were"} folded into a running summary.`
-    : "Earlier turns were folded into a running summary.";
+    ? `${countForCopy} earlier ${countForCopy === 1 ? "message was" : "messages were"} ${
+        reason === "manual" ? "manually folded" : "folded"
+      } into a running summary.`
+    : reason === "manual"
+      ? "Earlier turns were manually folded into a running summary."
+      : "Earlier turns were folded into a running summary.";
   const beforeTokens = Math.max(0, Number(message.historyRepresentationTokensBeforeCompaction ?? 0));
   const afterTokens = Math.max(0, Number(message.historyRepresentationTokensAfterCompaction ?? 0));
   const reductionCopy =
@@ -768,6 +861,48 @@ function formatCompactionMessageText(message: ConversationMessage) {
       ? ` Model window: ${message.detectedContextWindow.toLocaleString()} tokens.`
       : "";
   return `${lead}${reductionCopy} Future turns use this summary plus the most recent raw turns.${windowCopy}`;
+}
+
+function timelineSystemBadgeLabel(message: ConversationMessage) {
+  switch (message.kind) {
+    case "run_queued":
+      return "Queued";
+    case "run_started":
+      return "Started";
+    case "run_stopped":
+      return "Stopped";
+    case "backend_restarted":
+      return "Backend restarted";
+    case "run_failed":
+      return "Run failed";
+    case "context_compacted":
+      return "Context compacted";
+    default:
+      return "System";
+  }
+}
+
+function timelineSystemBadgeClass(message: ConversationMessage) {
+  switch (message.kind) {
+    case "run_failed":
+    case "backend_restarted":
+      return "warning";
+    case "run_stopped":
+      return "muted";
+    default:
+      return "compacted";
+  }
+}
+
+function timelineEphemeralLabel(message: ConversationMessage) {
+  if (message.kind === "context_compacted") {
+    return "during this response";
+  }
+  return "live";
+}
+
+function shouldSuppressWaitingCard(stage: string) {
+  return stage === "queued" || stage === "starting" || stage === "stopping";
 }
 
 async function fileToAttachment(file: File): Promise<ImageAttachment> {

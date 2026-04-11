@@ -16,7 +16,7 @@ let runtimePromise: Promise<BackendRuntime> | null = null;
 let lastRuntime: BackendRuntime | null = null;
 
 export type ThemeMode = "light" | "dark";
-export type RunMode = "chat";
+export type RunMode = "chat" | "compact";
 
 export type ThreadSummary = {
   user_id: string;
@@ -118,6 +118,7 @@ export type ThreadMessage = {
   detected_context_window?: number;
   history_representation_tokens_before_compaction?: number;
   history_representation_tokens_after_compaction?: number;
+  compaction_reason?: string;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -238,7 +239,7 @@ export function startChat(
   autoCompactLongChats = true,
   images: ImageAttachment[] = [],
 ) {
-  return request<{ run_id: string; status: string; chat_model: string; temperature: number | null }>("/chat", {
+  return request<{ run_id: string; status: string; mode: RunMode; chat_model: string; temperature: number | null }>("/chat", {
     method: "POST",
     body: JSON.stringify({
       prompt,
@@ -252,6 +253,16 @@ export function startChat(
       images,
     }),
   });
+}
+
+export function startCompact(threadId: string, userId: string) {
+  return request<{ run_id: string; status: string; mode: RunMode; chat_model: string; temperature: number | null }>(
+    `/threads/${encodeURIComponent(threadId)}/compact`,
+    {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId }),
+    },
+  );
 }
 
 export function resetThread(threadId: string, userId?: string) {

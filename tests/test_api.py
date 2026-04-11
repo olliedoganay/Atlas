@@ -100,6 +100,17 @@ class FakeService:
     def duplicate_thread(self, *, user_id: str, thread_id: str):
         return {"user_id": user_id, "thread_id": f"{thread_id}-copy", "title": "Main chat copy", "chat_model": "test-model", "temperature": 0.2}
 
+    def start_manual_compact(self, *, user_id: str, thread_id: str):
+        return {
+            "run_id": "run-compact-1",
+            "status": "queued",
+            "mode": "compact",
+            "chat_model": "test-model",
+            "temperature": 0.0,
+            "user_id": user_id,
+            "thread_id": thread_id,
+        }
+
     def cancel_run(self, run_id: str):
         return {"status": "cancelling", "run_id": run_id}
 
@@ -219,6 +230,12 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "cancelling")
         self.assertEqual(response.json()["run_id"], "run-1")
+
+    def test_manual_compact_run_creation(self) -> None:
+        response = self.client.post("/threads/main/compact", json={"user_id": "research_user"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["run_id"], "run-compact-1")
+        self.assertEqual(response.json()["mode"], "compact")
 
     def test_user_creation_and_thread_rename(self) -> None:
         created = self.client.post("/users", json={"user_id": "atlas_user"})

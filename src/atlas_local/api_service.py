@@ -28,35 +28,78 @@ from .text_normalization import MojibakeRepairStream
 
 
 @dataclass
+class _QueuedRunJob:
+    mode: str
+    run_id: str
+    prompt: str
+    user_id: str
+    thread_id: str
+    chat_model: str
+    temperature: float | None
+    cross_chat_memory: bool
+    auto_compact_long_chats: bool
+    images: list[dict[str, str]]
+
+
+@dataclass
 class AtlasBackendService:
     config: AppConfig
     app: AgentApplication
     run_store: RunStore
     run_hub: RunHub
-    _execution_lock: threading.Lock
     _control_lock: threading.Lock = field(default_factory=threading.Lock)
     _active_run_id: str | None = None
     _cancelled_runs: set[str] = field(default_factory=set)
+    _pending_runs: list[_QueuedRunJob] = field(default_factory=list)
+    _worker_wakeup: threading.Event = field(default_factory=threading.Event)
+    _worker_thread: threading.Thread | None = field(default=None, init=False, repr=False)
+    _shutdown_requested: bool = field(default=False, init=False, repr=False)
     _model_catalog_cache: tuple[float, list[OllamaModelInfo]] | None = field(default=None, init=False, repr=False)
 
     @classmethod
     def create(cls, config: AppConfig | None = None) -> "AtlasBackendService":
         resolved = config or load_config()
-        return cls(
+        service = cls(
             config=resolved,
             app=build_chat_application(resolved),
             run_store=RunStore(resolved),
             run_hub=RunHub(),
-            _execution_lock=threading.Lock(),
         )
+        service._recover_incomplete_runs()
+        service._ensure_worker_started()
+        return service
 
     def close(self) -> None:
+        self._ensure_runtime_state()
+        error_message = "Atlas backend restarted while this run was active."
+        active_run_id: str | None = None
+        pending_run_ids: list[str] = []
+        with self._control_lock:
+            self._shutdown_requested = True
+            active_run_id = self._active_run_id
+            pending_run_ids = [job.run_id for job in self._pending_runs]
+            self._pending_runs.clear()
+            if active_run_id:
+                self._cancelled_runs.add(active_run_id)
+        for run_id in pending_run_ids:
+            self.run_store.fail_run(run_id, error=error_message)
+            self._emit_event(run_id, "run_failed", {"error": error_message})
+        if active_run_id:
+            self.run_store.mark_run_cancelling(active_run_id)
+            self.app.llm_provider.abort_active_requests()
+        self._worker_wakeup.set()
+        worker = self._worker_thread
+        if worker is not None and worker.is_alive():
+            worker.join(timeout=2.0)
         self.app.close()
 
     def health(self) -> dict[str, Any]:
         return {"status": "ok", "product": "Atlas"}
 
     def status(self) -> dict[str, Any]:
+        self._ensure_runtime_state()
+        with self._control_lock:
+            busy = self._active_run_id is not None or bool(self._pending_runs)
         return {
             "status": "ok",
             "product_name": "Atlas",
@@ -68,8 +111,96 @@ class AtlasBackendService:
             "embed_model": self.config.embed_model,
             "ollama_url": self.config.ollama_url,
             "runtime_mode": "chat-only",
-            "busy": self._execution_lock.locked(),
+            "busy": busy,
         }
+
+    def _ensure_runtime_state(self) -> None:
+        if not hasattr(self, "_control_lock") or self._control_lock is None:
+            self._control_lock = threading.Lock()
+        if not hasattr(self, "_active_run_id"):
+            self._active_run_id = None
+        if not hasattr(self, "_cancelled_runs") or self._cancelled_runs is None:
+            self._cancelled_runs = set()
+        if not hasattr(self, "_pending_runs") or self._pending_runs is None:
+            self._pending_runs = []
+        if not hasattr(self, "_worker_wakeup") or self._worker_wakeup is None:
+            self._worker_wakeup = threading.Event()
+        if not hasattr(self, "_shutdown_requested"):
+            self._shutdown_requested = False
+        if not hasattr(self, "_model_catalog_cache"):
+            self._model_catalog_cache = None
+        if not hasattr(self, "_worker_thread"):
+            self._worker_thread = None
+
+    def _ensure_worker_started(self) -> None:
+        self._ensure_runtime_state()
+        with self._control_lock:
+            worker = self._worker_thread
+            if worker is not None and worker.is_alive():
+                return
+            self._shutdown_requested = False
+            self._worker_thread = threading.Thread(
+                target=self._worker_loop,
+                name="atlas-run-worker",
+                daemon=True,
+            )
+            self._worker_thread.start()
+
+    def _recover_incomplete_runs(self) -> None:
+        fail_incomplete_runs = getattr(self.run_store, "fail_incomplete_runs", None)
+        if callable(fail_incomplete_runs):
+            fail_incomplete_runs(error="Atlas backend restarted while this run was active.")
+
+    def _worker_loop(self) -> None:
+        while True:
+            self._worker_wakeup.wait()
+            self._worker_wakeup.clear()
+
+            while True:
+                job = self._claim_next_job()
+                if job is None:
+                    with self._control_lock:
+                        if self._shutdown_requested:
+                            return
+                    break
+
+                try:
+                    if job.mode == "chat":
+                        self._execute_run(
+                            run_id=job.run_id,
+                            prompt=job.prompt,
+                            user_id=job.user_id,
+                            thread_id=job.thread_id,
+                            chat_model=job.chat_model,
+                            temperature=job.temperature,
+                            cross_chat_memory=job.cross_chat_memory,
+                            auto_compact_long_chats=job.auto_compact_long_chats,
+                            images=job.images,
+                        )
+                    elif job.mode == "compact":
+                        self._execute_compact_run(
+                            run_id=job.run_id,
+                            user_id=job.user_id,
+                            thread_id=job.thread_id,
+                            chat_model=job.chat_model,
+                        )
+                    else:
+                        raise RuntimeError(f"Unsupported queued run mode: {job.mode}")
+                finally:
+                    with self._control_lock:
+                        if self._active_run_id == job.run_id:
+                            self._active_run_id = None
+                        self._cancelled_runs.discard(job.run_id)
+                    self._worker_wakeup.set()
+
+    def _claim_next_job(self) -> _QueuedRunJob | None:
+        with self._control_lock:
+            if self._shutdown_requested or self._active_run_id is not None or not self._pending_runs:
+                return None
+            job = self._pending_runs.pop(0)
+            self._active_run_id = job.run_id
+            self.run_store.mark_run_running(job.run_id)
+            return job
 
     def list_models(self) -> dict[str, Any]:
         catalog = self._get_model_catalog()
@@ -202,7 +333,9 @@ class AtlasBackendService:
     def get_thread_history(self, *, user_id: str | None, thread_id: str) -> list[dict[str, Any]]:
         snapshot = self._get_snapshot(user_id=user_id, thread_id=thread_id)
         history: list[dict[str, Any]] = []
-        timeline_events = _sorted_context_timeline_events(snapshot.values.get("timeline_events", []))
+        timeline_events = _sorted_thread_timeline_events(
+            list(snapshot.values.get("timeline_events", [])) + self._build_run_lifecycle_timeline_events(user_id=user_id, thread_id=thread_id)
+        )
         pending_events = list(timeline_events)
         for index, message in enumerate(snapshot.values.get("messages", []), start=1):
             role = "system"
@@ -214,7 +347,70 @@ class AtlasBackendService:
             history.append({"role": role, "content": content, "attachments": attachments})
             while pending_events and int(pending_events[0].get("after_message_count", 0) or 0) == index:
                 history.append(_timeline_event_to_history_item(pending_events.pop(0)))
+        while pending_events:
+            history.append(_timeline_event_to_history_item(pending_events.pop(0)))
         return history
+
+    def _build_run_lifecycle_timeline_events(self, *, user_id: str | None, thread_id: str) -> list[dict[str, Any]]:
+        list_runs_for_thread = getattr(self.run_store, "list_runs_for_thread", None)
+        if not callable(list_runs_for_thread):
+            return []
+
+        events: list[dict[str, Any]] = []
+        for artifact in list_runs_for_thread(user_id=user_id, thread_id=thread_id):
+            run_id = str(artifact.get("run_id", "") or "")
+            mode = str(artifact.get("mode", "chat") or "chat")
+            chat_model = str(artifact.get("chat_model", "") or "")
+            temperature = artifact.get("temperature")
+            after_message_count = int(artifact.get("history_after_message_count", 0) or 0)
+            for event in artifact.get("events", []):
+                if not isinstance(event, dict):
+                    continue
+                event_type = str(event.get("type", "") or "")
+                payload = event.get("payload", {}) if isinstance(event.get("payload"), dict) else {}
+                timestamp = str(event.get("timestamp", "") or "")
+                if event_type == "run_queued":
+                    events.append(
+                        {
+                            "type": "run_queued",
+                            "timestamp": timestamp,
+                            "run_id": run_id,
+                            "mode": mode,
+                            "chat_model": chat_model,
+                            "temperature": temperature,
+                            "queue_position": int(payload.get("queue_position", 0) or 0),
+                            "after_message_count": after_message_count,
+                        }
+                    )
+                elif event_type == "run_started":
+                    events.append(
+                        {
+                            "type": "run_started",
+                            "timestamp": timestamp,
+                            "run_id": run_id,
+                            "mode": mode,
+                            "chat_model": chat_model,
+                            "temperature": temperature,
+                            "after_message_count": after_message_count,
+                        }
+                    )
+                elif event_type == "run_failed":
+                    error = str(payload.get("error", "") or "")
+                    if not error:
+                        continue
+                    events.append(
+                        {
+                            "type": _classify_run_failure_type(error),
+                            "timestamp": timestamp,
+                            "run_id": run_id,
+                            "mode": mode,
+                            "chat_model": chat_model,
+                            "temperature": temperature,
+                            "error": error,
+                            "after_message_count": after_message_count,
+                        }
+                    )
+        return events
 
     def get_run(self, run_id: str) -> dict[str, Any]:
         artifact = self.run_store.get_run(run_id)
@@ -235,21 +431,40 @@ class AtlasBackendService:
         self.run_hub.unsubscribe(run_id, subscriber)
 
     def cancel_run(self, run_id: str) -> dict[str, Any]:
-        artifact = self.get_run(run_id)
-        if artifact.get("status") != "running":
-            return {
-                "status": artifact.get("status", "unknown"),
-                "run_id": run_id,
-                "detail": "Run is not active.",
-            }
+        self._ensure_worker_started()
+        artifact = self.run_store.get_run(run_id)
 
         with self._control_lock:
-            self._cancelled_runs.add(run_id)
+            queued_index = next(
+                (index for index, job in enumerate(self._pending_runs) if job.run_id == run_id),
+                None,
+            )
             active_match = self._active_run_id == run_id
 
+            if queued_index is not None and not active_match:
+                self._pending_runs.pop(queued_index)
+                self._cancelled_runs.discard(run_id)
+                queued_cancelled = True
+            elif artifact.get("status") in {"queued", "running", "cancelling"} or active_match:
+                self._cancelled_runs.add(run_id)
+                queued_cancelled = False
+            else:
+                return {
+                    "status": artifact.get("status", "unknown"),
+                    "run_id": run_id,
+                    "detail": "Run is not active.",
+                }
+
+        if queued_cancelled:
+            error_message = "Run stopped by user."
+            self.run_store.fail_run(run_id, error=error_message)
+            self._emit_stage(run_id, "stopping")
+            self._emit_event(run_id, "run_failed", {"error": error_message})
+            return {"status": "cancelling", "run_id": run_id}
+
+        self.run_store.mark_run_cancelling(run_id)
         if active_match:
             self.app.llm_provider.abort_active_requests()
-
         self._emit_stage(run_id, "stopping")
         return {"status": "cancelling", "run_id": run_id}
 
@@ -267,6 +482,7 @@ class AtlasBackendService:
         images: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         return self._start_run(
+            mode="chat",
             prompt=prompt,
             user_id=user_id,
             thread_id=thread_id,
@@ -276,6 +492,29 @@ class AtlasBackendService:
             cross_chat_memory=cross_chat_memory,
             auto_compact_long_chats=auto_compact_long_chats,
             images=images or [],
+        )
+
+    def start_manual_compact(
+        self,
+        *,
+        user_id: str,
+        thread_id: str,
+    ) -> dict[str, Any]:
+        thread = self.run_store.get_thread(user_id=user_id, thread_id=thread_id)
+        snapshot = self._get_snapshot(user_id=user_id, thread_id=thread_id)
+        if not list(snapshot.values.get("messages", [])) and (not thread or not thread.get("last_run_id")):
+            raise RuntimeError("This thread does not have enough history to compact yet.")
+        return self._start_run(
+            mode="compact",
+            prompt="",
+            user_id=user_id,
+            thread_id=thread_id,
+            chat_model=None,
+            temperature=None,
+            thread_title=str(thread.get("title", "") or thread_id),
+            cross_chat_memory=True,
+            auto_compact_long_chats=True,
+            images=[],
         )
 
     def list_memories(self, *, user_id: str, limit: int = 50) -> list[dict[str, Any]]:
@@ -327,6 +566,7 @@ class AtlasBackendService:
     def _start_run(
         self,
         *,
+        mode: str,
         prompt: str,
         user_id: str,
         thread_id: str,
@@ -337,19 +577,26 @@ class AtlasBackendService:
         auto_compact_long_chats: bool,
         images: list[dict[str, str]],
     ) -> dict[str, Any]:
-        if not self._execution_lock.acquire(blocking=False):
-            raise RuntimeError("Atlas is already running another task.")
+        self._ensure_worker_started()
+        history_after_message_count = self._thread_history_after_message_count(
+            mode=mode,
+            user_id=user_id,
+            thread_id=thread_id,
+        )
 
         resolved_chat_model = self._resolve_thread_model(
             user_id=user_id,
             thread_id=thread_id,
             requested_chat_model=chat_model,
         )
-        resolved_temperature = self._resolve_thread_temperature(
-            user_id=user_id,
-            thread_id=thread_id,
-            requested_temperature=temperature,
-        )
+        if mode == "compact":
+            resolved_temperature = 0.0
+        else:
+            resolved_temperature = self._resolve_thread_temperature(
+                user_id=user_id,
+                thread_id=thread_id,
+                requested_temperature=temperature,
+            )
         resolved_thread_title = self._resolve_thread_title(
             user_id=user_id,
             thread_id=thread_id,
@@ -358,39 +605,61 @@ class AtlasBackendService:
         )
 
         artifact = self.run_store.create_run(
-            mode="chat",
+            mode=mode,
             user_id=user_id,
             thread_id=thread_id,
             chat_model=resolved_chat_model,
             temperature=resolved_temperature,
             prompt=prompt,
             thread_title=resolved_thread_title,
+            status="queued",
+            touch_thread=mode == "chat",
+            history_after_message_count=history_after_message_count,
         )
+        queue_position = 0
         with self._control_lock:
-            self._active_run_id = artifact["run_id"]
             self._cancelled_runs.discard(artifact["run_id"])
-        worker = threading.Thread(
-            target=self._execute_run,
-            kwargs={
-                "run_id": artifact["run_id"],
-                "prompt": prompt,
-                "user_id": user_id,
-                "thread_id": thread_id,
-                "chat_model": resolved_chat_model,
-                "temperature": resolved_temperature,
-                "cross_chat_memory": cross_chat_memory,
-                "auto_compact_long_chats": auto_compact_long_chats,
-                "images": images,
-            },
-            daemon=True,
-        )
-        worker.start()
+            queue_position = len(self._pending_runs) + (1 if self._active_run_id else 0)
+            self._pending_runs.append(
+                _QueuedRunJob(
+                    mode=mode,
+                    run_id=artifact["run_id"],
+                    prompt=prompt,
+                    user_id=user_id,
+                    thread_id=thread_id,
+                    chat_model=resolved_chat_model,
+                    temperature=resolved_temperature,
+                    cross_chat_memory=cross_chat_memory,
+                    auto_compact_long_chats=auto_compact_long_chats,
+                    images=images,
+                )
+            )
+        if queue_position > 0:
+            self._emit_event(
+                artifact["run_id"],
+                "run_queued",
+                {
+                    "mode": mode,
+                    "thread_id": thread_id,
+                    "queue_position": queue_position,
+                },
+            )
+        self._emit_stage(artifact["run_id"], "queued")
+        self._worker_wakeup.set()
         return {
             "run_id": artifact["run_id"],
             "status": artifact["status"],
+            "mode": mode,
             "chat_model": resolved_chat_model,
             "temperature": resolved_temperature,
         }
+
+    def _thread_history_after_message_count(self, *, mode: str, user_id: str, thread_id: str) -> int:
+        snapshot = self._get_snapshot(user_id=user_id, thread_id=thread_id)
+        message_count = len(list(snapshot.values.get("messages", [])))
+        if mode == "chat":
+            return message_count + 1
+        return message_count
 
     def _execute_run(
         self,
@@ -475,27 +744,15 @@ class AtlasBackendService:
                     updated_compacted_count > prior_compacted_count
                     and representation_tokens_after < representation_tokens_before
                 ):
-                    compaction_event = self._emit_event(
-                        run_id,
-                        "context_compacted",
-                        {
-                            "compacted_message_count": updated_compacted_count,
-                            "newly_compacted_message_count": updated_compacted_count - prior_compacted_count,
-                            "thread_summary": str(state.get("thread_summary", "") or ""),
-                            "detected_context_window": int(state.get("detected_context_window", 0) or 0),
-                            "history_representation_tokens_before_compaction": representation_tokens_before,
-                            "history_representation_tokens_after_compaction": representation_tokens_after,
-                        },
+                    self._persist_compaction_event(
+                        run_id=run_id,
+                        state=state,
+                        prior_compacted_count=prior_compacted_count,
+                        representation_tokens_before=representation_tokens_before,
+                        representation_tokens_after=representation_tokens_after,
+                        after_message_count=len(prior_messages) + 1,
+                        reason="auto",
                     )
-                    state["timeline_events"] = list(state.get("timeline_events", [])) + [
-                        {
-                            "type": "context_compacted",
-                            "timestamp": compaction_event["timestamp"],
-                            "run_id": run_id,
-                            "after_message_count": len(prior_messages) + 1,
-                            **compaction_event["payload"],
-                        }
-                    ]
 
             self._emit_stage(run_id, "synthesis")
             answer = self._stream_answer(run_id=run_id, state=state, runtime=runtime)
@@ -547,12 +804,109 @@ class AtlasBackendService:
             error_message = "Run stopped by user." if self._is_cancelled(run_id) else str(exc)
             self.run_store.fail_run(run_id, error=error_message)
             self._emit_event(run_id, "run_failed", {"error": error_message})
-        finally:
-            with self._control_lock:
-                if self._active_run_id == run_id:
-                    self._active_run_id = None
-                self._cancelled_runs.discard(run_id)
-            self._execution_lock.release()
+
+    def _execute_compact_run(
+        self,
+        *,
+        run_id: str,
+        user_id: str,
+        thread_id: str,
+        chat_model: str,
+    ) -> None:
+        session_id = scoped_thread_id(user_id, thread_id)
+        config = {"configurable": {"thread_id": session_id}}
+        snapshot = self._get_snapshot(user_id=user_id, thread_id=thread_id)
+        all_messages = list(snapshot.values.get("messages", []))
+
+        effective_context_window = self.app.llm_provider.effective_context_window(chat_model)
+        state: dict[str, Any] = dict(snapshot.values)
+        state["messages"] = all_messages
+        state.setdefault("thread_summary", "")
+        state.setdefault("compacted_message_count", 0)
+        state["timeline_events"] = list(snapshot.values.get("timeline_events", []))
+        state["detected_context_window"] = effective_context_window
+        runtime = SimpleNamespace(
+            context=GraphContext(
+                user_id=user_id,
+                thread_id=thread_id,
+                session_id=session_id,
+                chat_model=chat_model,
+                chat_temperature=0.0,
+                cross_chat_memory=True,
+                auto_compact_long_chats=True,
+                effective_context_window=effective_context_window,
+            )
+        )
+
+        try:
+            if not all_messages:
+                raise RuntimeError("This thread does not have enough history to compact yet.")
+            self._raise_if_cancelled(run_id)
+            self._emit_event(
+                run_id,
+                "run_started",
+                {
+                    "mode": "compact",
+                    "thread_id": thread_id,
+                    "chat_model": chat_model,
+                    "temperature": 0.0,
+                },
+            )
+            self._emit_stage(run_id, "compaction")
+
+            prior_compacted_count = int(state.get("compacted_message_count", 0) or 0)
+            representation_tokens_before = _estimate_thread_representation_tokens(
+                messages=state.get("messages", []),
+                thread_summary=str(state.get("thread_summary", "") or ""),
+                compacted_message_count=prior_compacted_count,
+            )
+            compaction = self._manual_compact_context(state=state, runtime=runtime)
+            state.update(compaction)
+            updated_compacted_count = int(state.get("compacted_message_count", 0) or 0)
+            representation_tokens_after = _estimate_thread_representation_tokens(
+                messages=state.get("messages", []),
+                thread_summary=str(state.get("thread_summary", "") or ""),
+                compacted_message_count=updated_compacted_count,
+            )
+            if updated_compacted_count <= prior_compacted_count:
+                raise RuntimeError("This thread does not have enough older context to compact yet.")
+            if representation_tokens_after >= representation_tokens_before:
+                raise RuntimeError("Manual compact would not reduce the current thread context.")
+
+            self._persist_compaction_event(
+                run_id=run_id,
+                state=state,
+                prior_compacted_count=prior_compacted_count,
+                representation_tokens_before=representation_tokens_before,
+                representation_tokens_after=representation_tokens_after,
+                after_message_count=len(all_messages),
+                reason="manual",
+            )
+
+            self.app.graph.update_state(
+                config,
+                {
+                    "thread_summary": str(state.get("thread_summary", "") or ""),
+                    "compacted_message_count": int(state.get("compacted_message_count", 0) or 0),
+                    "detected_context_window": int(state.get("detected_context_window", 0) or 0),
+                    "timeline_events": list(state.get("timeline_events", [])),
+                },
+                as_node="persist",
+            )
+
+            artifact = self.run_store.complete_run(run_id, answer="")
+            self._emit_event(
+                run_id,
+                "run_completed",
+                {
+                    "answer": artifact.get("answer", ""),
+                    "result": "compacted",
+                },
+            )
+        except Exception as exc:  # pragma: no cover - integration path
+            error_message = "Run stopped by user." if self._is_cancelled(run_id) else str(exc)
+            self.run_store.fail_run(run_id, error=error_message)
+            self._emit_event(run_id, "run_failed", {"error": error_message})
 
     def _stream_answer(
         self,
@@ -623,6 +977,41 @@ class AtlasBackendService:
         if self._is_cancelled(run_id):
             raise RuntimeError("Run stopped by user.")
 
+    def _persist_compaction_event(
+        self,
+        *,
+        run_id: str,
+        state: dict[str, Any],
+        prior_compacted_count: int,
+        representation_tokens_before: int,
+        representation_tokens_after: int,
+        after_message_count: int,
+        reason: str,
+    ) -> None:
+        updated_compacted_count = int(state.get("compacted_message_count", 0) or 0)
+        compaction_event = self._emit_event(
+            run_id,
+            "context_compacted",
+            {
+                "compacted_message_count": updated_compacted_count,
+                "newly_compacted_message_count": max(0, updated_compacted_count - prior_compacted_count),
+                "thread_summary": str(state.get("thread_summary", "") or ""),
+                "detected_context_window": int(state.get("detected_context_window", 0) or 0),
+                "history_representation_tokens_before_compaction": representation_tokens_before,
+                "history_representation_tokens_after_compaction": representation_tokens_after,
+                "compaction_reason": reason,
+            },
+        )
+        state["timeline_events"] = list(state.get("timeline_events", [])) + [
+            {
+                "type": "context_compacted",
+                "timestamp": compaction_event["timestamp"],
+                "run_id": run_id,
+                "after_message_count": after_message_count,
+                **compaction_event["payload"],
+            }
+        ]
+
     def _maybe_compact_context(self, *, state: dict[str, Any], runtime: SimpleNamespace) -> dict[str, Any]:
         if not getattr(runtime.context, "auto_compact_long_chats", True):
             return {"detected_context_window": int(runtime.context.effective_context_window or 0)}
@@ -665,6 +1054,50 @@ class AtlasBackendService:
         return {
             "thread_summary": updated_summary,
             "compacted_message_count": compacted_count,
+            "detected_context_window": effective_context_window,
+        }
+
+    def _manual_compact_context(self, *, state: dict[str, Any], runtime: SimpleNamespace) -> dict[str, Any]:
+        effective_context_window = int(runtime.context.effective_context_window or 0)
+        all_messages = list(state.get("messages", []))
+        updated_summary = str(state.get("thread_summary", "") or "")
+        compacted_count = max(0, min(int(state.get("compacted_message_count", 0) or 0), len(all_messages)))
+        remaining_messages = all_messages[compacted_count:]
+        if len(remaining_messages) <= 2:
+            return {
+                "thread_summary": updated_summary,
+                "compacted_message_count": compacted_count,
+                "detected_context_window": effective_context_window,
+            }
+
+        recent_window = min(8, max(2, len(remaining_messages) // 2))
+        cutoff = len(all_messages) - recent_window
+        if cutoff <= compacted_count:
+            return {
+                "thread_summary": updated_summary,
+                "compacted_message_count": compacted_count,
+                "detected_context_window": effective_context_window,
+            }
+
+        batch_messages, consumed = _select_messages_for_compaction(
+            all_messages[compacted_count:cutoff],
+            max_chars=max(6000, int(max(effective_context_window, 1024) * 3)),
+        )
+        if not batch_messages or consumed <= 0:
+            return {
+                "thread_summary": updated_summary,
+                "compacted_message_count": compacted_count,
+                "detected_context_window": effective_context_window,
+            }
+
+        updated_summary = self._summarize_message_batch(
+            model=runtime.context.chat_model,
+            existing_summary=updated_summary,
+            messages=batch_messages,
+        )
+        return {
+            "thread_summary": updated_summary,
+            "compacted_message_count": compacted_count + consumed,
             "detected_context_window": effective_context_window,
         }
 
@@ -1128,13 +1561,13 @@ def _temperature_dropdown_values() -> list[float]:
     return [round(step / 10, 1) for step in range(21)]
 
 
-def _sorted_context_timeline_events(items: list[dict[str, Any]] | Any) -> list[dict[str, Any]]:
+def _sorted_thread_timeline_events(items: list[dict[str, Any]] | Any) -> list[dict[str, Any]]:
     if not isinstance(items, list):
         return []
     filtered = [
         item
         for item in items
-        if isinstance(item, dict) and str(item.get("type", "")).strip() == "context_compacted"
+        if isinstance(item, dict) and str(item.get("type", "")).strip()
     ]
     return sorted(
         filtered,
@@ -1146,21 +1579,72 @@ def _sorted_context_timeline_events(items: list[dict[str, Any]] | Any) -> list[d
 
 
 def _timeline_event_to_history_item(item: dict[str, Any]) -> dict[str, Any]:
-    compacted_message_count = int(item.get("compacted_message_count", 0) or 0)
-    detected_context_window = int(item.get("detected_context_window", 0) or 0)
-    representation_before = int(item.get("history_representation_tokens_before_compaction", 0) or 0)
-    representation_after = int(item.get("history_representation_tokens_after_compaction", 0) or 0)
+    item_type = str(item.get("type", "") or "")
+    if item_type == "context_compacted":
+        compacted_message_count = int(item.get("compacted_message_count", 0) or 0)
+        detected_context_window = int(item.get("detected_context_window", 0) or 0)
+        representation_before = int(item.get("history_representation_tokens_before_compaction", 0) or 0)
+        representation_after = int(item.get("history_representation_tokens_after_compaction", 0) or 0)
+        return {
+            "role": "system",
+            "kind": "context_compacted",
+            "content": "Context compacted",
+            "attachments": [],
+            "run_id": str(item.get("run_id", "") or ""),
+            "timestamp": str(item.get("timestamp", "") or ""),
+            "thread_summary": str(item.get("thread_summary", "") or ""),
+            "compaction_reason": str(item.get("compaction_reason", "") or ""),
+            "compacted_message_count": compacted_message_count,
+            "newly_compacted_message_count": int(item.get("newly_compacted_message_count", 0) or 0),
+            "detected_context_window": detected_context_window,
+            "history_representation_tokens_before_compaction": representation_before,
+            "history_representation_tokens_after_compaction": representation_after,
+        }
+
+    content = _format_thread_lifecycle_event(item)
     return {
         "role": "system",
-        "kind": "context_compacted",
-        "content": "Context compacted",
+        "kind": item_type,
+        "content": content,
         "attachments": [],
         "run_id": str(item.get("run_id", "") or ""),
         "timestamp": str(item.get("timestamp", "") or ""),
-        "thread_summary": str(item.get("thread_summary", "") or ""),
-        "compacted_message_count": compacted_message_count,
-        "newly_compacted_message_count": int(item.get("newly_compacted_message_count", 0) or 0),
-        "detected_context_window": detected_context_window,
-        "history_representation_tokens_before_compaction": representation_before,
-        "history_representation_tokens_after_compaction": representation_after,
     }
+
+
+def _format_thread_lifecycle_event(item: dict[str, Any]) -> str:
+    item_type = str(item.get("type", "") or "")
+    mode = str(item.get("mode", "chat") or "chat")
+    chat_model = str(item.get("chat_model", "") or "").strip()
+    if item_type == "run_queued":
+        queue_position = max(0, int(item.get("queue_position", 0) or 0))
+        if mode == "compact":
+            return (
+                f"Manual compaction queued behind {queue_position} active "
+                f"{'task' if queue_position == 1 else 'tasks'}."
+            )
+        return (
+            f"Response queued behind {queue_position} active "
+            f"{'task' if queue_position == 1 else 'tasks'}."
+        )
+    if item_type == "run_started":
+        if mode == "compact":
+            return f"Manual compaction started{f' with {chat_model}' if chat_model else ''}."
+        return f"Atlas started responding{f' with {chat_model}' if chat_model else ''}."
+    if item_type == "run_stopped":
+        return "Run stopped."
+    if item_type == "backend_restarted":
+        return "Backend restarted while this run was active."
+    if item_type == "run_failed":
+        error = str(item.get("error", "") or "").strip()
+        return f"Run failed: {error}" if error else "Run failed."
+    return "System event"
+
+
+def _classify_run_failure_type(error: str) -> str:
+    normalized = error.strip().lower()
+    if normalized == "run stopped by user.":
+        return "run_stopped"
+    if "backend restarted while this run was active" in normalized:
+        return "backend_restarted"
+    return "run_failed"

@@ -1016,6 +1016,18 @@ pre {
   background: var(--accent-soft);
 }
 
+.status-pill.warning {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 28%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface) 90%);
+}
+
+.status-pill.muted {
+  color: var(--muted-strong);
+  border-color: color-mix(in srgb, var(--muted) 24%, transparent);
+  background: color-mix(in srgb, var(--surface-muted) 86%, var(--surface) 14%);
+}
+
 .compact-summary-toggle {
   min-height: 34px;
   padding-inline: 12px;

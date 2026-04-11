@@ -7,6 +7,7 @@ import { useAtlasStore } from "../store/useAtlasStore";
 export function RunStreamCoordinator() {
   const queryClient = useQueryClient();
   const currentRunId = useAtlasStore((state) => state.currentRunId);
+  const currentRunMode = useAtlasStore((state) => state.currentRunMode);
   const activeRunUserId = useAtlasStore((state) => state.activeRunUserId);
   const activeRunThreadId = useAtlasStore((state) => state.activeRunThreadId);
   const isStreaming = useAtlasStore((state) => state.isStreaming);
@@ -105,7 +106,7 @@ export function RunStreamCoordinator() {
   };
 
   useEffect(() => {
-    if (!currentRunId || !activeRunUserId || !activeRunThreadId || !isStreaming) {
+    if (!currentRunId || !currentRunMode || !activeRunUserId || !activeRunThreadId || !isStreaming) {
       clearTokenFlushTimer();
       teardownRef.current?.();
       teardownRef.current = null;
@@ -121,7 +122,7 @@ export function RunStreamCoordinator() {
 
     attachedRunIdRef.current = currentRunId;
     teardownRef.current = streamRun(
-      "chat",
+      currentRunMode,
       currentRunId,
       (event) => {
         switch (event.type) {
@@ -142,6 +143,7 @@ export function RunStreamCoordinator() {
             const newlyCompactedMessageCount = Number(event.payload.newly_compacted_message_count ?? 0);
             const threadSummary = String(event.payload.thread_summary ?? "");
             const detectedContextWindow = Number(event.payload.detected_context_window ?? 0);
+            const compactionReason = String(event.payload.compaction_reason ?? "");
             const historyRepresentationTokensBeforeCompaction = Number(
               event.payload.history_representation_tokens_before_compaction ?? 0,
             );
@@ -152,6 +154,7 @@ export function RunStreamCoordinator() {
               runId: currentRunId,
               userId: activeRunUserId,
               threadId: activeRunThreadId,
+              compactionReason,
               compactedMessageCount,
               newlyCompactedMessageCount: Number.isFinite(newlyCompactedMessageCount)
                 ? Math.max(0, Math.trunc(newlyCompactedMessageCount))
@@ -209,6 +212,7 @@ export function RunStreamCoordinator() {
     appendToken,
     completeRun,
     currentRunId,
+    currentRunMode,
     failRun,
     isStreaming,
     queryClient,
