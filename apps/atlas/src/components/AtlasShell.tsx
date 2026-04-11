@@ -1,6 +1,7 @@
 import * as ScrollArea from "@radix-ui/react-scroll-area";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Activity,
   ChevronLeft,
   ChevronRight,
   Copy,
@@ -22,6 +23,7 @@ import { useAtlasStore } from "../store/useAtlasStore";
 
 const navigation = [
   { to: "/workspace", label: "Workspace", icon: Workflow },
+  { to: "/advanced", label: "Advanced", icon: Activity },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -426,7 +428,7 @@ export function AtlasShell() {
         currentThreadTitle={currentThreadTitle}
         currentUserId={currentUserId}
         onOpenChange={setIsSearchOpen}
-        onPick={(result, query) => {
+        onPick={(result, query, meta) => {
           const existingThread = threadItems.find((item) => item.thread_id === result.thread_id);
           const targetThread: ThreadSummary = existingThread ?? {
             user_id: currentUserId,
@@ -444,6 +446,8 @@ export function AtlasShell() {
             userId: currentUserId,
             threadId: result.thread_id,
             historyIndex: typeof result.history_index === "number" ? result.history_index : null,
+            historyIndices: meta?.historyIndices,
+            activePosition: meta?.activePosition,
             query,
           });
           setIsSearchOpen(false);

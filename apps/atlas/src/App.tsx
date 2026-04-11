@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { AtlasShell } from "./components/AtlasShell";
+import { AdvancedPage } from "./pages/AdvancedPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { WorkspacePage } from "./pages/WorkspacePage";
 import { useAtlasStore } from "./store/useAtlasStore";
@@ -29,6 +30,7 @@ function App() {
           <Route element={<AtlasShell />} path="/">
             <Route element={<Navigate replace to="/workspace" />} index />
             <Route element={<WorkspacePage />} path="workspace" />
+            <Route element={<AdvancedPage />} path="advanced" />
             <Route element={<SettingsPage />} path="settings" />
             <Route element={<Navigate replace to="/workspace" />} path="*" />
           </Route>

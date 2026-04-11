@@ -20,6 +20,8 @@ type SearchJumpTarget = {
   userId: string;
   threadId: string;
   historyIndex: number | null;
+  historyIndices?: number[];
+  activePosition?: number;
   query: string;
 };
 
@@ -46,6 +48,7 @@ type AtlasState = {
   liveError: string;
   compactionNotice: CompactionNotice | null;
   searchJumpTarget: SearchJumpTarget | null;
+  recentSearchQueries: string[];
   isStreaming: boolean;
   setTheme: (theme: ThemeMode) => void;
   setCurrentUserId: (value: string) => void;
@@ -73,7 +76,9 @@ type AtlasState = {
   showCompactionNotice: (notice: CompactionNotice) => void;
   clearCompactionNotice: () => void;
   setSearchJumpTarget: (target: SearchJumpTarget | null) => void;
+  stepSearchJumpTarget: (delta: number) => void;
   clearSearchJumpTarget: () => void;
+  addRecentSearchQuery: (query: string) => void;
   clearLiveRun: () => void;
 };
 
@@ -104,6 +109,7 @@ export const useAtlasStore = create<AtlasState>()(
       liveError: "",
       compactionNotice: null,
       searchJumpTarget: null,
+      recentSearchQueries: [],
       isStreaming: false,
       setTheme: (theme) => set({ theme }),
       setCurrentUserId: (value) => set({ currentUserId: value }),
@@ -167,7 +173,38 @@ export const useAtlasStore = create<AtlasState>()(
       showCompactionNotice: (notice) => set({ compactionNotice: notice }),
       clearCompactionNotice: () => set({ compactionNotice: null }),
       setSearchJumpTarget: (target) => set({ searchJumpTarget: target }),
+      stepSearchJumpTarget: (delta) =>
+        set((state) => {
+          const current = state.searchJumpTarget;
+          if (!current?.historyIndices?.length) {
+            return {};
+          }
+          const maxIndex = current.historyIndices.length - 1;
+          const currentPosition = Math.max(0, Math.min(maxIndex, current.activePosition ?? 0));
+          const nextPosition = Math.max(0, Math.min(maxIndex, currentPosition + delta));
+          return {
+            searchJumpTarget: {
+              ...current,
+              activePosition: nextPosition,
+              historyIndex: current.historyIndices[nextPosition] ?? current.historyIndex ?? null,
+            },
+          };
+        }),
       clearSearchJumpTarget: () => set({ searchJumpTarget: null }),
+      addRecentSearchQuery: (query) =>
+        set((state) => {
+          const normalized = query.trim();
+          if (!normalized) {
+            return {};
+          }
+          const deduped = [
+            normalized,
+            ...state.recentSearchQueries.filter(
+              (item) => item.toLocaleLowerCase() !== normalized.toLocaleLowerCase(),
+            ),
+          ].slice(0, 6);
+          return { recentSearchQueries: deduped };
+        }),
       clearLiveRun: () =>
         set({
           currentRunId: null,
@@ -187,7 +224,7 @@ export const useAtlasStore = create<AtlasState>()(
     }),
     {
       name: "atlas-ui-state",
-      version: 5,
+      version: 6,
       migrate: (persistedState, version) => {
         if (!persistedState || typeof persistedState !== "object") {
           return persistedState as AtlasState;
@@ -204,6 +241,9 @@ export const useAtlasStore = create<AtlasState>()(
         if (version < 4) {
           migrated.currentUserId = typeof migrated.currentUserId === "string" ? migrated.currentUserId : "";
         }
+        if (version < 6) {
+          migrated.recentSearchQueries = [];
+        }
         return migrated as AtlasState;
       },
       partialize: (state) => ({
@@ -217,6 +257,7 @@ export const useAtlasStore = create<AtlasState>()(
         autoCompactLongChats: state.autoCompactLongChats,
         navCollapsed: state.navCollapsed,
         settingsSidebarCollapsed: state.settingsSidebarCollapsed,
+        recentSearchQueries: state.recentSearchQueries,
       }),
       storage: createJSONStorage(() => localStorage),
     },

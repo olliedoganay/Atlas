@@ -510,11 +510,13 @@ class AtlasBackendService:
         user_id = str(artifact.get("user_id", "") or "").strip() or None
         thread_id = str(artifact.get("thread_id", "") or "").strip()
         if not thread_id:
+            artifact["diagnostics"] = _build_run_diagnostics(artifact)
             return artifact
         snapshot = self._get_snapshot(user_id=user_id, thread_id=thread_id)
         artifact["thread_summary"] = str(snapshot.values.get("thread_summary", "") or "")
         artifact["compacted_message_count"] = int(snapshot.values.get("compacted_message_count", 0) or 0)
         artifact["detected_context_window"] = int(snapshot.values.get("detected_context_window", 0) or 0)
+        artifact["diagnostics"] = _build_run_diagnostics(artifact)
         return artifact
 
     def _search_thread_matches(
@@ -1869,6 +1871,70 @@ def _sort_search_results(items: list[dict[str, Any]], *, current_thread: bool) -
         ),
         reverse=True,
     )
+
+
+def _build_run_diagnostics(artifact: dict[str, Any]) -> dict[str, Any]:
+    started_at = _parse_iso_timestamp(str(artifact.get("started_at", "") or ""))
+    completed_at = _parse_iso_timestamp(str(artifact.get("completed_at", "") or ""))
+    first_token_at = None
+    total_compaction_gain = 0
+    compaction_events = 0
+
+    for event in artifact.get("events", []):
+        if not isinstance(event, dict):
+            continue
+        event_type = str(event.get("type", "") or "")
+        if event_type == "token" and first_token_at is None:
+            first_token_at = _parse_iso_timestamp(str(event.get("timestamp", "") or ""))
+        if event_type == "context_compacted":
+            payload = event.get("payload", {}) if isinstance(event.get("payload"), dict) else {}
+            before_tokens = int(payload.get("history_representation_tokens_before_compaction", 0) or 0)
+            after_tokens = int(payload.get("history_representation_tokens_after_compaction", 0) or 0)
+            if before_tokens > after_tokens > 0:
+                total_compaction_gain += before_tokens - after_tokens
+            compaction_events += 1
+
+    answer = str(artifact.get("answer", "") or "")
+    output_tokens_estimate = _estimate_text_tokens(answer)
+    first_token_latency_ms = _duration_ms(started_at, first_token_at)
+    total_duration_ms = _duration_ms(started_at, completed_at)
+    generation_duration_ms = _duration_ms(first_token_at, completed_at)
+    output_tokens_per_second_estimate = None
+    if generation_duration_ms and generation_duration_ms > 0 and output_tokens_estimate > 0:
+        output_tokens_per_second_estimate = round(output_tokens_estimate / (generation_duration_ms / 1000.0), 2)
+
+    return {
+        "first_token_latency_ms": first_token_latency_ms,
+        "total_duration_ms": total_duration_ms,
+        "generation_duration_ms": generation_duration_ms,
+        "output_tokens_estimate": output_tokens_estimate,
+        "output_tokens_per_second_estimate": output_tokens_per_second_estimate,
+        "compaction_gain_tokens_estimate": total_compaction_gain or None,
+        "compaction_events_count": compaction_events,
+    }
+
+
+def _parse_iso_timestamp(value: str) -> datetime | None:
+    normalized = value.strip()
+    if not normalized:
+        return None
+    try:
+        return datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _duration_ms(start: datetime | None, end: datetime | None) -> int | None:
+    if start is None or end is None:
+        return None
+    return max(0, int((end - start).total_seconds() * 1000))
+
+
+def _estimate_text_tokens(value: str) -> int:
+    cleaned = value.strip()
+    if not cleaned:
+        return 0
+    return max(1, len(cleaned) // 4)
 
 
 def _persistent_thread_timeline_events(items: list[dict[str, Any]] | Any) -> list[dict[str, Any]]:

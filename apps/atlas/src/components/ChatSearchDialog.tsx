@@ -3,14 +3,24 @@ import { Search, X } from "lucide-react";
 import { type ReactNode, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import { searchChats, type ChatSearchResult } from "../lib/api";
+import { useAtlasStore } from "../store/useAtlasStore";
 
 type ChatSearchDialogProps = {
   currentThreadId: string;
   currentThreadTitle: string;
   currentUserId: string;
   onOpenChange: (open: boolean) => void;
-  onPick: (result: ChatSearchResult, query: string) => void;
+  onPick: (
+    result: ChatSearchResult,
+    query: string,
+    meta?: { historyIndices?: number[]; activePosition?: number },
+  ) => void;
   open: boolean;
+};
+
+type SearchResultRef = {
+  result: ChatSearchResult;
+  scope: "current" | "other";
 };
 
 export function ChatSearchDialog({
@@ -23,7 +33,10 @@ export function ChatSearchDialog({
 }: ChatSearchDialogProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
+  const [activeResultIndex, setActiveResultIndex] = useState(0);
   const deferredQuery = useDeferredValue(query.trim());
+  const recentSearchQueries = useAtlasStore((state) => state.recentSearchQueries);
+  const addRecentSearchQuery = useAtlasStore((state) => state.addRecentSearchQuery);
   const canSearch = open && Boolean(currentUserId) && deferredQuery.length >= 2;
 
   const { data, isFetching } = useQuery({
@@ -36,30 +49,58 @@ export function ChatSearchDialog({
   useEffect(() => {
     if (!open) {
       setQuery("");
+      setActiveResultIndex(0);
       return;
     }
     const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 16);
     return () => window.clearTimeout(focusTimer);
   }, [open]);
 
-  useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onOpenChange(false);
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onOpenChange, open]);
-
   const currentResults = data?.current_thread_results ?? [];
   const otherResults = data?.other_thread_results ?? [];
   const totalResults = currentResults.length + otherResults.length;
+  const currentThreadHistoryIndices = useMemo(
+    () =>
+      currentResults
+        .map((result) => result.history_index)
+        .filter((value): value is number => typeof value === "number"),
+    [currentResults],
+  );
   const currentThreadLabel = currentThreadTitle || currentThreadId || "Current chat";
+  const flatResults = useMemo<SearchResultRef[]>(
+    () => [
+      ...currentResults.map((result) => ({ result, scope: "current" as const })),
+      ...otherResults.map((result) => ({ result, scope: "other" as const })),
+    ],
+    [currentResults, otherResults],
+  );
+  const otherResultGroups = useMemo(() => {
+    const groups = new Map<
+      string,
+      {
+        threadId: string;
+        threadTitle: string;
+        chatModel?: string;
+        updatedAt?: string;
+        results: ChatSearchResult[];
+      }
+    >();
+    otherResults.forEach((result) => {
+      const existing = groups.get(result.thread_id);
+      if (existing) {
+        existing.results.push(result);
+        return;
+      }
+      groups.set(result.thread_id, {
+        threadId: result.thread_id,
+        threadTitle: result.thread_title,
+        chatModel: result.chat_model,
+        updatedAt: result.updated_at,
+        results: [result],
+      });
+    });
+    return Array.from(groups.values());
+  }, [otherResults]);
   const statusCopy = useMemo(() => {
     if (!currentUserId) {
       return "Select a user before searching chats.";
@@ -79,9 +120,71 @@ export function ChatSearchDialog({
     return `${totalResults} match${totalResults === 1 ? "" : "es"} across local chats.`;
   }, [currentUserId, deferredQuery.length, isFetching, totalResults]);
 
+  useEffect(() => {
+    setActiveResultIndex(0);
+  }, [deferredQuery, open, totalResults]);
+
+  const pickResult = (selected: SearchResultRef) => {
+    const normalizedQuery = deferredQuery || query.trim();
+    const result = selected.result;
+    const meta =
+      selected.scope === "current" && typeof result.history_index === "number"
+        ? {
+            historyIndices: currentThreadHistoryIndices,
+            activePosition: Math.max(0, currentThreadHistoryIndices.indexOf(result.history_index)),
+          }
+        : undefined;
+    addRecentSearchQuery(normalizedQuery);
+    onPick(result, normalizedQuery, meta);
+  };
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onOpenChange(false);
+        return;
+      }
+      if (!flatResults.length || deferredQuery.length < 2) {
+        return;
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setActiveResultIndex((current) => Math.min(flatResults.length - 1, current + 1));
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setActiveResultIndex((current) => Math.max(0, current - 1));
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        const selected = flatResults[activeResultIndex];
+        if (selected) {
+          pickResult(selected);
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activeResultIndex, deferredQuery.length, flatResults, onOpenChange, open]);
+
   if (!open) {
     return null;
   }
+
+  const activeCurrentHistoryIndex =
+    flatResults[activeResultIndex]?.scope === "current"
+      ? flatResults[activeResultIndex]?.result.history_index ?? null
+      : null;
+  const activeOtherThreadId =
+    flatResults[activeResultIndex]?.scope === "other"
+      ? flatResults[activeResultIndex]?.result.thread_id ?? null
+      : null;
 
   return (
     <div
@@ -136,22 +239,42 @@ export function ChatSearchDialog({
 
         <p className="search-status-copy">{statusCopy}</p>
 
+        {!deferredQuery && recentSearchQueries.length > 0 ? (
+          <div className="search-recent-row">
+            <span className="search-recent-label">Recent</span>
+            <div className="search-recent-chips">
+              {recentSearchQueries.map((item) => (
+                <button
+                  className="ghost-button search-recent-chip"
+                  key={item}
+                  onClick={() => setQuery(item)}
+                  type="button"
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         <div className="search-dialog-sections">
           <SearchSection
+            activeHistoryIndex={activeCurrentHistoryIndex}
             emptyLabel={deferredQuery.length >= 2 ? "No hits in this chat." : "Start typing to search inside this chat."}
+            onPick={(result) => pickResult({ result, scope: "current" })}
             query={deferredQuery}
             results={currentResults}
             sectionLabel="This chat"
             sectionTitle={currentThreadLabel}
-            onPick={(result) => onPick(result, deferredQuery)}
           />
-          <SearchSection
+          <GroupedSearchSection
+            activeThreadId={activeOtherThreadId}
             emptyLabel={deferredQuery.length >= 2 ? "No hits in other chats." : "Search will also scan your other local chats."}
+            groups={otherResultGroups}
+            onPick={(result) => pickResult({ result, scope: "other" })}
             query={deferredQuery}
-            results={otherResults}
             sectionLabel="All chats"
             sectionTitle="Other conversations"
-            onPick={(result) => onPick(result, deferredQuery)}
           />
         </div>
       </div>
@@ -160,6 +283,7 @@ export function ChatSearchDialog({
 }
 
 type SearchSectionProps = {
+  activeHistoryIndex?: number | null;
   emptyLabel: string;
   onPick: (result: ChatSearchResult) => void;
   query: string;
@@ -169,6 +293,7 @@ type SearchSectionProps = {
 };
 
 function SearchSection({
+  activeHistoryIndex,
   emptyLabel,
   onPick,
   query,
@@ -190,7 +315,7 @@ function SearchSection({
         <div className="search-result-list">
           {results.map((result, index) => (
             <button
-              className="search-result-card"
+              className={`search-result-card${activeHistoryIndex === result.history_index ? " active" : ""}`}
               key={`${result.thread_id}-${result.match_type}-${result.history_index ?? "thread"}-${index}`}
               onClick={() => onPick(result)}
               type="button"
@@ -214,6 +339,88 @@ function SearchSection({
                 <span>{result.history_index === null || result.history_index === undefined ? "Open chat" : "Jump to match"}</span>
               </div>
             </button>
+          ))}
+        </div>
+      ) : (
+        <div className="search-empty-state">{emptyLabel}</div>
+      )}
+    </section>
+  );
+}
+
+type GroupedSearchSectionProps = {
+  activeThreadId?: string | null;
+  emptyLabel: string;
+  groups: Array<{
+    threadId: string;
+    threadTitle: string;
+    chatModel?: string;
+    updatedAt?: string;
+    results: ChatSearchResult[];
+  }>;
+  onPick: (result: ChatSearchResult) => void;
+  query: string;
+  sectionLabel: string;
+  sectionTitle: string;
+};
+
+function GroupedSearchSection({
+  activeThreadId,
+  emptyLabel,
+  groups,
+  onPick,
+  query,
+  sectionLabel,
+  sectionTitle,
+}: GroupedSearchSectionProps) {
+  return (
+    <section className="search-section">
+      <div className="search-section-head">
+        <div>
+          <p className="workspace-section-label">{sectionLabel}</p>
+          <h3>{sectionTitle}</h3>
+        </div>
+        <span className="search-section-count">{groups.length}</span>
+      </div>
+
+      {groups.length > 0 ? (
+        <div className="search-result-list">
+          {groups.map((group) => (
+            <div className={`search-thread-group${activeThreadId === group.threadId ? " active" : ""}`} key={group.threadId}>
+              <div className="search-thread-group-head">
+                <div className="search-thread-group-copy">
+                  <strong>{highlightSearchText(group.threadTitle, query)}</strong>
+                  <span>{group.chatModel || "Local model"}</span>
+                </div>
+                <span className="search-result-meta">{formatSearchDate(group.updatedAt)}</span>
+              </div>
+              <div className="search-thread-group-results">
+                {group.results.map((result, index) => (
+                  <button
+                    className="search-result-card grouped"
+                    key={`${group.threadId}-${result.match_type}-${result.history_index ?? "thread"}-${index}`}
+                    onClick={() => onPick(result)}
+                    type="button"
+                  >
+                    <div className="search-result-top">
+                      <div className="search-result-title-block">
+                        <span className="search-result-badge">
+                          {result.match_type === "thread"
+                            ? "Chat"
+                            : result.role === "assistant"
+                              ? "Model"
+                              : "User"}
+                        </span>
+                      </div>
+                    </div>
+                    <p className="search-result-snippet">{highlightSearchText(result.snippet, query)}</p>
+                    <div className="search-result-foot">
+                      <span>{result.history_index === null || result.history_index === undefined ? "Open chat" : "Jump to match"}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       ) : (

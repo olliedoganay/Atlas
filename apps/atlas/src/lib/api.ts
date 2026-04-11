@@ -101,6 +101,7 @@ export type RunSummary = {
   mode: string;
   user_id: string;
   thread_id: string;
+  thread_title?: string;
   chat_model?: string;
   temperature?: number | null;
   prompt: string;
@@ -113,6 +114,15 @@ export type RunSummary = {
   thread_summary?: string;
   compacted_message_count?: number;
   detected_context_window?: number;
+  diagnostics?: {
+    first_token_latency_ms?: number | null;
+    total_duration_ms?: number | null;
+    generation_duration_ms?: number | null;
+    output_tokens_estimate?: number | null;
+    output_tokens_per_second_estimate?: number | null;
+    compaction_gain_tokens_estimate?: number | null;
+    compaction_events_count?: number | null;
+  };
 };
 
 export type ThreadMessage = {

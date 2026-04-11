@@ -375,6 +375,20 @@ class ContextCompactionTests(unittest.TestCase):
                 "user_id": "research_user",
                 "thread_id": "main",
                 "status": "completed",
+                "started_at": "2026-04-11T10:00:00+00:00",
+                "completed_at": "2026-04-11T10:00:04+00:00",
+                "answer": "hello world" * 20,
+                "events": [
+                    {"type": "token", "timestamp": "2026-04-11T10:00:01+00:00", "payload": {"text": "hello"}},
+                    {
+                        "type": "context_compacted",
+                        "timestamp": "2026-04-11T10:00:02+00:00",
+                        "payload": {
+                            "history_representation_tokens_before_compaction": 1800,
+                            "history_representation_tokens_after_compaction": 900,
+                        },
+                    },
+                ],
             }
         )
         service._get_snapshot = lambda **_: SimpleNamespace(
@@ -390,6 +404,9 @@ class ContextCompactionTests(unittest.TestCase):
         self.assertEqual(artifact["thread_summary"], "summary")
         self.assertEqual(artifact["compacted_message_count"], 4)
         self.assertEqual(artifact["detected_context_window"], 4096)
+        self.assertEqual(artifact["diagnostics"]["first_token_latency_ms"], 1000)
+        self.assertEqual(artifact["diagnostics"]["total_duration_ms"], 4000)
+        self.assertEqual(artifact["diagnostics"]["compaction_gain_tokens_estimate"], 900)
 
     def test_thread_history_inserts_context_compaction_marker_at_message_boundary(self) -> None:
         service = AtlasBackendService.__new__(AtlasBackendService)

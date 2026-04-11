@@ -1,6 +1,6 @@
 import * as ScrollArea from "@radix-ui/react-scroll-area";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, ChevronUp, Copy, CornerUpLeft, Edit3, GitBranch, ImagePlus, Lock, RotateCcw, Send, Square, X } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Copy, CornerUpLeft, Edit3, GitBranch, ImagePlus, Lock, RotateCcw, Search, Send, Square, X } from "lucide-react";
 import { ChangeEvent, FormEvent, KeyboardEvent, UIEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { MessageContent } from "../components/MessageContent";
@@ -88,6 +88,7 @@ export function WorkspacePage() {
   const failRun = useAtlasStore((state) => state.failRun);
   const clearCompactionNotice = useAtlasStore((state) => state.clearCompactionNotice);
   const searchJumpTarget = useAtlasStore((state) => state.searchJumpTarget);
+  const stepSearchJumpTarget = useAtlasStore((state) => state.stepSearchJumpTarget);
   const clearSearchJumpTarget = useAtlasStore((state) => state.clearSearchJumpTarget);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
@@ -295,6 +296,25 @@ export function WorkspacePage() {
     }
     return compactionNotice;
   }, [compactionNotice, currentThreadId, currentUserId]);
+  const activeSearchNavigator = useMemo(() => {
+    if (!searchJumpTarget) {
+      return null;
+    }
+    if (searchJumpTarget.userId !== currentUserId || searchJumpTarget.threadId !== currentThreadId) {
+      return null;
+    }
+    const historyIndices = (searchJumpTarget.historyIndices ?? []).filter((value): value is number => typeof value === "number");
+    if (!historyIndices.length) {
+      return null;
+    }
+    const activePosition = Math.max(0, Math.min(historyIndices.length - 1, searchJumpTarget.activePosition ?? 0));
+    return {
+      query: searchJumpTarget.query,
+      historyIndices,
+      activePosition,
+      historyIndex: historyIndices[activePosition] ?? null,
+    };
+  }, [currentThreadId, currentUserId, searchJumpTarget]);
 
   useEffect(() => {
     setDraftTitle(currentThread?.title || currentThreadTitle || currentThreadId || "");
@@ -557,7 +577,9 @@ export function WorkspacePage() {
       return;
     }
     if (searchJumpTarget.historyIndex === null || searchJumpTarget.historyIndex === undefined) {
-      clearSearchJumpTarget();
+      if (!searchJumpTarget.historyIndices?.length) {
+        clearSearchJumpTarget();
+      }
       return;
     }
     const targetHistoryIndex = searchJumpTarget.historyIndex;
@@ -570,7 +592,6 @@ export function WorkspacePage() {
     autoScrollToLatestRef.current = false;
     targetElement.scrollIntoView({ behavior: "smooth", block: "center" });
     setHighlightedHistoryIndex(targetHistoryIndex);
-    clearSearchJumpTarget();
   }, [clearSearchJumpTarget, currentThreadId, currentUserId, searchJumpTarget, transcript]);
 
   useEffect(() => {
@@ -580,6 +601,24 @@ export function WorkspacePage() {
     const timer = window.setTimeout(() => setHighlightedHistoryIndex(null), 2400);
     return () => window.clearTimeout(timer);
   }, [highlightedHistoryIndex]);
+
+  useEffect(() => {
+    if (!activeSearchNavigator) {
+      return undefined;
+    }
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "F3") {
+        event.preventDefault();
+        stepSearchJumpTarget(event.shiftKey ? -1 : 1);
+        return;
+      }
+      if (event.key === "Escape") {
+        clearSearchJumpTarget();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activeSearchNavigator, clearSearchJumpTarget, stepSearchJumpTarget]);
 
   useEffect(() => {
     if (!copiedMessageKey) {
@@ -780,6 +819,46 @@ export function WorkspacePage() {
       </div>
 
       <div className="conversation-shell">
+        {activeSearchNavigator ? (
+          <div className="search-inline-navigator">
+            <div className="search-inline-copy">
+              <span className="status-pill subtle muted">
+                <Search size={13} />
+                Find in chat
+              </span>
+              <strong>{activeSearchNavigator.query}</strong>
+              <span className="muted-text">
+                {activeSearchNavigator.activePosition + 1} / {activeSearchNavigator.historyIndices.length}
+              </span>
+            </div>
+            <div className="search-inline-actions">
+              <button
+                className="ghost-button icon-button"
+                disabled={activeSearchNavigator.activePosition <= 0}
+                onClick={() => stepSearchJumpTarget(-1)}
+                type="button"
+              >
+                <ChevronLeft size={15} />
+              </button>
+              <button
+                className="ghost-button icon-button"
+                disabled={activeSearchNavigator.activePosition >= activeSearchNavigator.historyIndices.length - 1}
+                onClick={() => stepSearchJumpTarget(1)}
+                type="button"
+              >
+                <ChevronRight size={15} />
+              </button>
+              <button
+                className="ghost-button compact-button"
+                onClick={() => clearSearchJumpTarget()}
+                type="button"
+              >
+                <X size={14} />
+                Close
+              </button>
+            </div>
+          </div>
+        ) : null}
         <ScrollArea.Root className="conversation-scroll">
           <ScrollArea.Viewport
             className="conversation-viewport"
