@@ -39,6 +39,7 @@ class LLMProvider:
             options: dict[str, Any] = {
                 "model": resolved_model,
                 "base_url": self.config.ollama_url,
+                "reasoning": True,
                 "validate_model_on_init": True,
             }
             if resolved_temperature is not None:

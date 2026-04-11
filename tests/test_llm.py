@@ -20,6 +20,7 @@ class LLMProviderTemperatureTests(unittest.TestCase):
         provider.chat("gpt-oss:20b", temperature=None)
 
         _, kwargs = chat_ollama_mock.call_args
+        self.assertTrue(kwargs["reasoning"])
         self.assertNotIn("temperature", kwargs)
 
     @patch("atlas_local.llm.ChatOllama")
@@ -29,6 +30,7 @@ class LLMProviderTemperatureTests(unittest.TestCase):
         provider.chat("gpt-oss:20b", temperature=0.7)
 
         _, kwargs = chat_ollama_mock.call_args
+        self.assertTrue(kwargs["reasoning"])
         self.assertEqual(kwargs["temperature"], 0.7)
 
 
