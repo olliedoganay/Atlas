@@ -185,7 +185,7 @@ export function SettingsPage() {
         ? "Runtime defaults, temperature behavior, and local model inventory."
         : section === "data"
           ? "Backend lifecycle controls and durable local state."
-          : "Runtime facts and desktop version information.";
+          : "Product identity and local-first privacy details.";
 
   return (
     <div className="settings-page">
@@ -458,22 +458,22 @@ export function SettingsPage() {
             <div className="settings-rows">
               <div className="settings-row">
                 <div className="settings-row-copy">
-                  <strong>Runtime</strong>
-                  <p>The managed local service currently connected to the desktop shell.</p>
+                  <strong>Product</strong>
+                  <p>Atlas is a private local AI workspace built as a desktop app.</p>
                 </div>
-                <span>{status?.backend ?? "Atlas local runtime"}</span>
+                <span>Local-first desktop app</span>
               </div>
               <div className="settings-row">
                 <div className="settings-row-copy">
-                  <strong>Runtime mode</strong>
-                  <p>The backend is intentionally reduced to the chat-only runtime.</p>
+                  <strong>Privacy</strong>
+                  <p>Chats, saved runs, and persistent memory stay on this device by default.</p>
                 </div>
-                <span>{status?.runtime_mode ?? "chat-only"}</span>
+                <span>Stored locally</span>
               </div>
               <div className="settings-row">
                 <div className="settings-row-copy">
                   <strong>Version</strong>
-                  <p>Desktop shell and local runtime identity.</p>
+                  <p>Installed desktop shell version.</p>
                 </div>
                 <span>Atlas Desktop v0.1.0</span>
               </div>

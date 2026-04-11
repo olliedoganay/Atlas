@@ -333,9 +333,7 @@ class AtlasBackendService:
     def get_thread_history(self, *, user_id: str | None, thread_id: str) -> list[dict[str, Any]]:
         snapshot = self._get_snapshot(user_id=user_id, thread_id=thread_id)
         history: list[dict[str, Any]] = []
-        timeline_events = _sorted_thread_timeline_events(
-            list(snapshot.values.get("timeline_events", [])) + self._build_run_lifecycle_timeline_events(user_id=user_id, thread_id=thread_id)
-        )
+        timeline_events = _sorted_thread_timeline_events(list(snapshot.values.get("timeline_events", [])))
         pending_events = list(timeline_events)
         for index, message in enumerate(snapshot.values.get("messages", []), start=1):
             role = "system"
@@ -350,67 +348,6 @@ class AtlasBackendService:
         while pending_events:
             history.append(_timeline_event_to_history_item(pending_events.pop(0)))
         return history
-
-    def _build_run_lifecycle_timeline_events(self, *, user_id: str | None, thread_id: str) -> list[dict[str, Any]]:
-        list_runs_for_thread = getattr(self.run_store, "list_runs_for_thread", None)
-        if not callable(list_runs_for_thread):
-            return []
-
-        events: list[dict[str, Any]] = []
-        for artifact in list_runs_for_thread(user_id=user_id, thread_id=thread_id):
-            run_id = str(artifact.get("run_id", "") or "")
-            mode = str(artifact.get("mode", "chat") or "chat")
-            chat_model = str(artifact.get("chat_model", "") or "")
-            temperature = artifact.get("temperature")
-            after_message_count = int(artifact.get("history_after_message_count", 0) or 0)
-            for event in artifact.get("events", []):
-                if not isinstance(event, dict):
-                    continue
-                event_type = str(event.get("type", "") or "")
-                payload = event.get("payload", {}) if isinstance(event.get("payload"), dict) else {}
-                timestamp = str(event.get("timestamp", "") or "")
-                if event_type == "run_queued":
-                    events.append(
-                        {
-                            "type": "run_queued",
-                            "timestamp": timestamp,
-                            "run_id": run_id,
-                            "mode": mode,
-                            "chat_model": chat_model,
-                            "temperature": temperature,
-                            "queue_position": int(payload.get("queue_position", 0) or 0),
-                            "after_message_count": after_message_count,
-                        }
-                    )
-                elif event_type == "run_started":
-                    events.append(
-                        {
-                            "type": "run_started",
-                            "timestamp": timestamp,
-                            "run_id": run_id,
-                            "mode": mode,
-                            "chat_model": chat_model,
-                            "temperature": temperature,
-                            "after_message_count": after_message_count,
-                        }
-                    )
-                elif event_type == "run_failed":
-                    error = str(payload.get("error", "") or "")
-                    if not error:
-                        continue
-                    events.append(
-                        {
-                            "type": _classify_run_failure_type(error),
-                            "timestamp": timestamp,
-                            "run_id": run_id,
-                            "mode": mode,
-                            "chat_model": chat_model,
-                            "temperature": temperature,
-                            "error": error,
-                            "after_message_count": after_message_count,
-                        }
-                    )
-        return events
 
     def get_run(self, run_id: str) -> dict[str, Any]:
         artifact = self.run_store.get_run(run_id)
@@ -1688,12 +1625,3 @@ def _format_thread_lifecycle_event(item: dict[str, Any]) -> str:
         error = str(item.get("error", "") or "").strip()
         return f"Run failed: {error}" if error else "Run failed."
     return "System event"
-
-
-def _classify_run_failure_type(error: str) -> str:
-    normalized = error.strip().lower()
-    if normalized == "run stopped by user.":
-        return "run_stopped"
-    if "backend restarted while this run was active" in normalized:
-        return "backend_restarted"
-    return "run_failed"

@@ -331,16 +331,6 @@ export function WorkspacePage() {
       historyRepresentationTokensBeforeCompaction: item.history_representation_tokens_before_compaction,
       historyRepresentationTokensAfterCompaction: item.history_representation_tokens_after_compaction,
     }));
-    if (currentThreadHasActiveRun) {
-      const liveLifecycle = buildLiveRunLifecycleMessage({
-        runId: currentRunId,
-        mode: currentRunMode,
-        stage: currentStage,
-      });
-      if (liveLifecycle) {
-        items.push(liveLifecycle);
-      }
-    }
     if (currentThreadHasActiveRun && (pendingPrompt || pendingAttachments.length)) {
       items.push({ role: "user", content: pendingPrompt, attachments: pendingAttachments, ephemeral: true });
     }
@@ -351,7 +341,7 @@ export function WorkspacePage() {
       items.push({ role: "assistant", content: liveAnswer, ephemeral: true });
     }
     return items;
-  }, [currentRunId, currentRunMode, currentStage, currentThreadCompactionNotice, currentThreadHasActiveRun, history, liveAnswer, pendingAttachments, pendingPrompt]);
+  }, [currentThreadCompactionNotice, currentThreadHasActiveRun, history, liveAnswer, pendingAttachments, pendingPrompt]);
 
   useEffect(() => {
     autoScrollToLatestRef.current = true;
@@ -628,14 +618,14 @@ export function WorkspacePage() {
                   </article>
                 )
               ))}
-              {currentThreadHasActiveRun && isStreaming && !liveAnswer && !shouldSuppressWaitingCard(currentStage) ? (
+              {currentThreadHasActiveRun && isStreaming && !liveAnswer ? (
                 <article className={`message-card ${currentRunMode === "compact" ? "system" : "assistant"} message-card-waiting`}>
                   <div className="message-meta">
                     <span>{currentRunMode === "compact" ? "SYSTEM" : formatMessageRoleLabel("assistant")}</span>
                   </div>
                   {currentRunMode === "compact" ? (
                     <div className="stream-waiting-line" aria-live="polite">
-                      <span>Compacting older context</span>
+                      <span>{compactWaitingLabel(currentStage)}</span>
                       <span className="stream-dots" aria-hidden="true">
                         <span />
                         <span />
@@ -656,7 +646,7 @@ export function WorkspacePage() {
                         type="button"
                       >
                         <span className="stream-waiting-line" aria-live="polite">
-                          <span>Deciding</span>
+                          <span>{chatWaitingLabel(currentStage)}</span>
                           <span className="stream-dots" aria-hidden="true">
                             <span />
                             <span />
@@ -817,46 +807,6 @@ function isTimelineSystemMessage(message: ConversationMessage) {
   return message.role === "system" && Boolean(message.kind);
 }
 
-function buildLiveRunLifecycleMessage(input: {
-  runId: string | null;
-  mode: "chat" | "compact" | null;
-  stage: string;
-}): ConversationMessage | null {
-  if (!input.runId) {
-    return null;
-  }
-  if (input.stage === "queued") {
-    return {
-      role: "system",
-      kind: "run_queued",
-      content: input.mode === "compact"
-        ? "Manual compaction is queued and will start after the current task finishes."
-        : "Response queued and waiting for the current task to finish.",
-      ephemeral: true,
-      runId: input.runId,
-    };
-  }
-  if (input.stage === "starting") {
-    return {
-      role: "system",
-      kind: "run_started",
-      content: input.mode === "compact" ? "Manual compaction started." : "Atlas started responding.",
-      ephemeral: true,
-      runId: input.runId,
-    };
-  }
-  if (input.stage === "stopping") {
-    return {
-      role: "system",
-      kind: "run_stopped",
-      content: "Stopping this run.",
-      ephemeral: true,
-      runId: input.runId,
-    };
-  }
-  return null;
-}
-
 function buildLiveCompactionMessage(notice: {
   runId: string;
   compactionReason?: string;
@@ -920,45 +870,35 @@ function formatTimelineSystemMessageText(message: ConversationMessage) {
 }
 
 function timelineSystemBadgeLabel(message: ConversationMessage) {
-  switch (message.kind) {
-    case "run_queued":
-      return "Queued";
-    case "run_started":
-      return "Started";
-    case "run_stopped":
-      return "Stopped";
-    case "backend_restarted":
-      return "Backend restarted";
-    case "run_failed":
-      return "Run failed";
-    case "context_compacted":
-      return "Context compacted";
-    default:
-      return "System";
-  }
+  return message.kind === "context_compacted" ? "Context compacted" : "System";
 }
 
 function timelineSystemBadgeClass(message: ConversationMessage) {
-  switch (message.kind) {
-    case "run_failed":
-    case "backend_restarted":
-      return "warning";
-    case "run_stopped":
-      return "muted";
-    default:
-      return "compacted";
-  }
+  return message.kind === "context_compacted" ? "compacted" : "muted";
 }
 
 function timelineEphemeralLabel(message: ConversationMessage) {
-  if (message.kind === "context_compacted") {
-    return "during this response";
-  }
-  return "live";
+  return message.kind === "context_compacted" ? "during this response" : "live";
 }
 
-function shouldSuppressWaitingCard(stage: string) {
-  return stage === "queued" || stage === "starting" || stage === "stopping";
+function chatWaitingLabel(stage: string) {
+  if (stage === "queued") {
+    return "Queued";
+  }
+  if (stage === "stopping") {
+    return "Stopping";
+  }
+  return "Deciding";
+}
+
+function compactWaitingLabel(stage: string) {
+  if (stage === "queued") {
+    return "Compaction queued";
+  }
+  if (stage === "stopping") {
+    return "Stopping compaction";
+  }
+  return "Compacting older context";
 }
 
 async function fileToAttachment(file: File): Promise<ImageAttachment> {

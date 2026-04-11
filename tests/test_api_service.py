@@ -316,7 +316,7 @@ class ContextCompactionTests(unittest.TestCase):
         self.assertEqual(marker["history_representation_tokens_before_compaction"], 1800)
         self.assertEqual(marker["history_representation_tokens_after_compaction"], 640)
 
-    def test_thread_history_inserts_run_lifecycle_events_from_run_artifacts(self) -> None:
+    def test_thread_history_ignores_run_lifecycle_events_from_run_artifacts(self) -> None:
         service = AtlasBackendService.__new__(AtlasBackendService)
         service.run_store = SimpleNamespace(
             list_runs_for_thread=lambda **_: [
@@ -362,13 +362,9 @@ class ContextCompactionTests(unittest.TestCase):
             [(item["role"], item.get("kind")) for item in history],
             [
                 ("user", None),
-                ("system", "run_started"),
                 ("assistant", None),
-                ("system", "backend_restarted"),
             ],
         )
-        self.assertIn("started responding", history[1]["content"].lower())
-        self.assertIn("backend restarted", history[3]["content"].lower())
 
 
 class ManualCompactionTests(unittest.TestCase):
