@@ -54,9 +54,26 @@ class ResetAllRequest(BaseModel):
     confirmation: str
 
 
+DEFAULT_ALLOWED_ORIGINS = (
+    "http://localhost:1420",
+    "http://127.0.0.1:1420",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+    "tauri://localhost",
+)
+
+
 def create_api_app(service: AtlasBackendService | None = None) -> FastAPI:
     managed_service = service
     required_token = os.environ.get("ATLAS_INSTANCE_TOKEN", "").strip()
+    allow_insecure_localhost = _allow_insecure_localhost()
+    allowed_origins = _allowed_origins()
+
+    if not required_token and not allow_insecure_localhost and service is None:
+        raise RuntimeError(
+            "ATLAS_INSTANCE_TOKEN is required for the Atlas API. "
+            "Set ATLAS_ALLOW_INSECURE_LOCALHOST=1 only for explicit local development overrides."
+        )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -73,16 +90,19 @@ def create_api_app(service: AtlasBackendService | None = None) -> FastAPI:
     app = FastAPI(title="Atlas API", version="0.1.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=list(allowed_origins),
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "X-Atlas-Instance-Token"],
     )
     if managed_service is not None:
         app.state.service = managed_service
 
     @app.middleware("http")
     async def require_instance_token(request: Request, call_next):
+        origin = request.headers.get("origin", "").strip()
+        if origin and not allow_insecure_localhost and origin not in allowed_origins:
+            return JSONResponse(status_code=403, content={"detail": "Atlas backend rejected this origin."})
         if request.method.upper() == "OPTIONS":
             return await call_next(request)
         if required_token:
@@ -256,11 +276,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--host", default=os.environ.get("ATLAS_API_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("ATLAS_API_PORT", "8765")))
     args = parser.parse_args(argv)
-    uvicorn.run("atlas_local.api:app", host=args.host, port=args.port, factory=False)
+    uvicorn.run("atlas_local.api:create_api_app", host=args.host, port=args.port, factory=True)
     return 0
 
 
-app = create_api_app()
+def _allow_insecure_localhost() -> bool:
+    return os.environ.get("ATLAS_ALLOW_INSECURE_LOCALHOST", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _allowed_origins() -> tuple[str, ...]:
+    raw = os.environ.get("ATLAS_ALLOWED_ORIGINS", "").strip()
+    if not raw:
+        return DEFAULT_ALLOWED_ORIGINS
+    values = tuple(origin.strip() for origin in raw.split(",") if origin.strip())
+    return values or DEFAULT_ALLOWED_ORIGINS
 
 
 if __name__ == "__main__":

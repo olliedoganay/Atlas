@@ -6,12 +6,6 @@ type BackendRuntime = {
   token: string;
 };
 
-const FALLBACK_RUNTIME: BackendRuntime = {
-  host: "127.0.0.1",
-  port: 8765,
-  token: "",
-};
-
 let runtimePromise: Promise<BackendRuntime> | null = null;
 let lastRuntime: BackendRuntime | null = null;
 
@@ -373,8 +367,11 @@ async function resolveBackendRuntime(): Promise<BackendRuntime> {
     const runtime = await invoke<BackendRuntime>("backend_runtime");
     lastRuntime = runtime;
     return runtime;
-  } catch {
-    return lastRuntime ?? FALLBACK_RUNTIME;
+  } catch (error) {
+    if (lastRuntime) {
+      return lastRuntime;
+    }
+    throw error instanceof Error ? error : new Error("Atlas backend runtime is unavailable.");
   }
 }
 

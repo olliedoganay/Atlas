@@ -50,7 +50,6 @@ fn backend_runtime(state: State<'_, BackendState>) -> Result<BackendRuntime, Str
 pub fn run() {
     tauri::Builder::default()
         .manage(BackendState::default())
-        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();

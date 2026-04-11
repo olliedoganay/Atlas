@@ -2,6 +2,7 @@ import json
 import os
 import queue
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -280,10 +281,35 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(reset_user.status_code, 200)
         self.assertEqual(reset_all.status_code, 200)
 
+    def test_create_api_app_requires_instance_token_without_explicit_insecure_override(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "ATLAS_INSTANCE_TOKEN is required"):
+                create_api_app()
+
+    def test_requests_require_instance_token_when_configured(self) -> None:
+        with patch.dict(os.environ, {"ATLAS_INSTANCE_TOKEN": "test-token"}, clear=False):
+            client = TestClient(create_api_app(FakeService()))
+            unauthorized = client.get("/status")
+            authorized = client.get("/status", headers={"X-Atlas-Instance-Token": "test-token"})
+
+        self.assertEqual(unauthorized.status_code, 401)
+        self.assertEqual(authorized.status_code, 200)
+
+    def test_requests_reject_untrusted_origins(self) -> None:
+        with patch.dict(os.environ, {"ATLAS_INSTANCE_TOKEN": "test-token"}, clear=False):
+            client = TestClient(create_api_app(FakeService()))
+            response = client.get(
+                "/status",
+                headers={
+                    "Origin": "https://evil.example",
+                    "X-Atlas-Instance-Token": "test-token",
+                },
+            )
+
+        self.assertEqual(response.status_code, 403)
+
     def test_options_preflight_bypasses_instance_token(self) -> None:
-        original = os.environ.get("ATLAS_INSTANCE_TOKEN")
-        os.environ["ATLAS_INSTANCE_TOKEN"] = "test-token"
-        try:
+        with patch.dict(os.environ, {"ATLAS_INSTANCE_TOKEN": "test-token"}, clear=False):
             client = TestClient(create_api_app(FakeService()))
             response = client.options(
                 "/status",
@@ -293,11 +319,7 @@ class ApiTests(unittest.TestCase):
                     "Access-Control-Request-Headers": "x-atlas-instance-token,content-type",
                 },
             )
-        finally:
-            if original is None:
-                os.environ.pop("ATLAS_INSTANCE_TOKEN", None)
-            else:
-                os.environ["ATLAS_INSTANCE_TOKEN"] = original
+
         self.assertNotEqual(response.status_code, 401)
 
 
