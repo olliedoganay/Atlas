@@ -276,54 +276,54 @@ export function SettingsPage() {
         ? "Runtime defaults, temperature behavior, and local model inventory."
         : section === "data"
           ? "Backend lifecycle controls and durable local state."
-          : "Product identity and local-first privacy details.";
+          : "Version, local storage, and basic usage.";
   const aboutHowToSteps = [
     {
-      title: "1. Create or select a profile",
+      title: "Create or select a profile",
       body: "Open Settings, go to Users, then create a profile or switch to an existing one before starting chats.",
     },
     {
-      title: "2. Start a new chat",
+      title: "Start a new chat",
       body: "Go to Workspace and click the plus button in the Chats column to open a fresh thread.",
     },
     {
-      title: "3. Choose the model",
+      title: "Choose the model",
       body: "Use the Model picker at the top right before sending the first message. After the first message, that thread keeps its model.",
     },
     {
-      title: "4. Choose the temperature",
+      title: "Choose the temperature",
       body: "Use the Temp picker next to the model picker before the first message. Pick Model default or an exact value.",
     },
     {
-      title: "5. Send a message",
+      title: "Send a message",
       body: "Type in the composer at the bottom and click Send. Atlas starts answering in the active thread.",
     },
     {
-      title: "6. Stop a running answer",
+      title: "Stop a running answer",
       body: "Click Stop while the model is still responding. This ends the current run for that thread.",
     },
     {
-      title: "7. Open model thinking",
+      title: "Open model thinking",
       body: "While the model is deciding, click the Deciding card to expand the available thinking stream when the model provides it.",
     },
     {
-      title: "8. Search your chats",
+      title: "Search your chats",
       body: "Click Search chats in the sidebar or press Ctrl+K. You can search inside the current chat or across all local chats.",
     },
     {
-      title: "9. Compact a long chat",
+      title: "Compact a long chat",
       body: "Click Compact now to summarize older context in the current thread. Atlas also does this automatically if auto compact is on.",
     },
     {
-      title: "10. Duplicate or delete a chat",
+      title: "Duplicate or delete a chat",
       body: "Use the duplicate and delete buttons on each chat card in the sidebar to copy a thread or remove it.",
     },
     {
-      title: "11. Manage memories",
+      title: "Manage memories",
       body: "Open Settings, go to Data, then use Remember to save a manual memory or Forget to remove one for the current profile.",
     },
     {
-      title: "12. Lock or unlock protected profiles",
+      title: "Lock or unlock protected profiles",
       body: "If a profile has a password, use Lock in Users to close it for the session and Unlock to open it again.",
     },
   ];
@@ -433,7 +433,7 @@ export function SettingsPage() {
                 </div>
                 <span>
                   {currentUser
-                    ? `${currentUser.user_id} · ${describeUserProtection(currentUser)}`
+                    ? `${currentUser.user_id} | ${describeUserProtection(currentUser)}`
                     : "No profile selected"}
                 </span>
               </div>
@@ -630,6 +630,13 @@ export function SettingsPage() {
             <div className="settings-rows">
               <div className="settings-row">
                 <div className="settings-row-copy">
+                  <strong>Ollama connection</strong>
+                  <p>Atlas checks the local Ollama runtime before it opens a new chat.</p>
+                </div>
+                <span>{models?.ollama_online ? "Connected" : "Unavailable"}</span>
+              </div>
+              <div className="settings-row">
+                <div className="settings-row-copy">
                   <strong>Default chat model</strong>
                   <p>New chats start with this model unless you choose a different one before the first message.</p>
                 </div>
@@ -651,17 +658,16 @@ export function SettingsPage() {
               </div>
               <div className="settings-row">
                 <div className="settings-row-copy">
-                  <strong>Runtime mode</strong>
-                  <p>The current backend runtime shape exposed to the desktop shell.</p>
+                  <strong>Local chat models</strong>
+                  <p>These are the installed local chat models Atlas can bind to a new thread.</p>
                 </div>
-                <span>{status?.runtime_mode ?? "chat-only"}</span>
-              </div>
-              <div className="settings-row">
-                <div className="settings-row-copy">
-                  <strong>Local Ollama models</strong>
-                  <p>These are the locally available chat models Atlas can bind to a new thread.</p>
-                </div>
-                <span>{models?.models?.join(", ") || "..."}</span>
+                <span>
+                  {models?.ollama_online
+                    ? models?.has_local_models
+                      ? models.models.join(", ")
+                      : "No local models found"
+                    : "Waiting for Ollama"}
+                </span>
               </div>
             </div>
           ) : null}
@@ -761,14 +767,14 @@ export function SettingsPage() {
               <div className="settings-row">
                 <div className="settings-row-copy">
                   <strong>Product</strong>
-                  <p>Atlas is a private local AI workspace built as a desktop app.</p>
+                  <p>Atlas is a desktop app for working with local Ollama models.</p>
                 </div>
                 <span>Local-first desktop app</span>
               </div>
               <div className="settings-row">
                 <div className="settings-row-copy">
                   <strong>Privacy</strong>
-                  <p>Chats, saved runs, and persistent memory stay on this device by default.</p>
+                  <p>Chats, memory, and run state stay on this device by default.</p>
                 </div>
                 <span>Stored locally</span>
               </div>
@@ -779,7 +785,7 @@ export function SettingsPage() {
                 </div>
                 <span>{`Atlas Desktop v${appVersion}`}</span>
               </div>
-              <div className="settings-row settings-row-block">
+              <div className="settings-row settings-row-block settings-row-detail">
                 <button
                   aria-expanded={aboutHowToOpen}
                   className="settings-howto-toggle"
@@ -788,7 +794,7 @@ export function SettingsPage() {
                 >
                   <div className="settings-row-copy">
                     <strong>How to use</strong>
-                    <p>These are the main actions you can take in Atlas and where to find them.</p>
+                    <p>Open this for the main actions available in Atlas.</p>
                   </div>
                   <span className="settings-howto-toggle-meta">
                     <span>{aboutHowToOpen ? "Hide" : "Show"}</span>
@@ -796,14 +802,16 @@ export function SettingsPage() {
                   </span>
                 </button>
                 {aboutHowToOpen ? (
-                  <div className="settings-howto-list">
+                  <ol className="settings-howto-list">
                     {aboutHowToSteps.map((step) => (
-                      <div className="stack-card settings-howto-step" key={step.title}>
-                        <strong>{step.title}</strong>
-                        <p>{step.body}</p>
-                      </div>
+                      <li className="settings-howto-step" key={step.title}>
+                        <div className="settings-howto-step-copy">
+                          <strong>{step.title}</strong>
+                          <p>{step.body}</p>
+                        </div>
+                      </li>
                     ))}
-                  </div>
+                  </ol>
                 ) : null}
               </div>
             </div>
@@ -865,7 +873,7 @@ function formatTemperature(value?: number) {
 
 function describeUserProtection(user: { protection?: string; locked?: boolean }) {
   if (user.protection === "password") {
-    return user.locked ? "Password protected · Locked" : "Password protected";
+    return user.locked ? "Password protected - Locked" : "Password protected";
   }
   return "Passwordless";
 }

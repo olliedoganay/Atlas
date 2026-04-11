@@ -20,7 +20,7 @@ from .graph.builder import AgentApplication, build_chat_application
 from .graph.builder import post_synthesis_node_sequence, pre_synthesis_node_sequence
 from .graph.context import GraphContext
 from .graph.nodes import _build_answer_messages, _finalize_answer_text, _latest_user_text
-from .llm import OllamaModelInfo, list_local_ollama_model_info
+from .llm import OllamaCatalogSnapshot, OllamaModelInfo, inspect_local_ollama_models
 from .memory.models import MemoryRecord
 from .run_contract import RunEvent, RunHub, TERMINAL_EVENT_TYPES
 from .run_store import PASSWORD_PROTECTED, RunStore
@@ -56,7 +56,7 @@ class AtlasBackendService:
     _worker_wakeup: threading.Event = field(default_factory=threading.Event)
     _worker_thread: threading.Thread | None = field(default=None, init=False, repr=False)
     _shutdown_requested: bool = field(default=False, init=False, repr=False)
-    _model_catalog_cache: tuple[float, list[OllamaModelInfo]] | None = field(default=None, init=False, repr=False)
+    _model_catalog_cache: tuple[float, OllamaCatalogSnapshot] | None = field(default=None, init=False, repr=False)
     _unlocked_users: set[str] = field(default_factory=set)
 
     @classmethod
@@ -231,8 +231,11 @@ class AtlasBackendService:
                 {"label": f"{value:.1f}", "value": value}
                 for value in _temperature_dropdown_values()
             ],
-            "models": [item.name for item in catalog],
-            "model_details": [item.to_dict() for item in catalog],
+            "ollama_online": catalog.ollama_online,
+            "has_local_models": catalog.has_local_models,
+            "catalog_source": catalog.source,
+            "models": [item.name for item in catalog.models],
+            "model_details": [item.to_dict() for item in catalog.models],
         }
 
     def list_users(self) -> list[dict[str, Any]]:
@@ -390,6 +393,47 @@ class AtlasBackendService:
             temperature=self._record_temperature(source_thread, fallback_on_missing=self.config.chat_temperature),
             last_mode=str(source_thread.get("last_mode", "chat") or "chat"),
             last_prompt=str(source_thread.get("last_prompt", "") or ""),
+        )
+
+    def branch_thread(self, *, user_id: str, thread_id: str, after_message_count: int) -> dict[str, Any]:
+        if not user_id.strip():
+            raise RuntimeError("User id is required.")
+        if not thread_id.strip():
+            raise RuntimeError("Thread id is required.")
+        self._ensure_user_unlocked(user_id)
+        source_thread = self.run_store.get_thread(user_id=user_id, thread_id=thread_id)
+        if not source_thread:
+            raise RuntimeError(f"Thread not found: {thread_id}")
+
+        snapshot = self._get_snapshot(user_id=user_id, thread_id=thread_id)
+        history_messages = list(snapshot.values.get("messages", []))
+        branch_count = max(0, min(int(after_message_count or 0), len(history_messages)))
+        branch_messages = history_messages[:branch_count]
+        branch_thread_id = f"atlas-{datetime.now(UTC).strftime('%Y-%m-%d-%H-%M-%S')}-{uuid4().hex[:4]}"
+        branch_title = _branch_thread_title(source_thread.get("title") or thread_id)
+        branch_session_id = scoped_thread_id(user_id, branch_thread_id)
+
+        if branch_messages:
+            self.app.graph.update_state(
+                {"configurable": {"thread_id": branch_session_id}},
+                {
+                    "messages": branch_messages,
+                    "thread_summary": "",
+                    "compacted_message_count": 0,
+                    "detected_context_window": 0,
+                    "timeline_events": [],
+                },
+                as_node="persist",
+            )
+
+        return self.run_store.upsert_thread(
+            user_id=user_id,
+            thread_id=branch_thread_id,
+            title=branch_title,
+            chat_model=str(source_thread.get("chat_model", "") or self.config.chat_model),
+            temperature=self._record_temperature(source_thread, fallback_on_missing=self.config.chat_temperature),
+            last_mode="chat",
+            last_prompt=_latest_user_text({"messages": branch_messages}) if branch_messages else "",
         )
 
     def get_thread_history(self, *, user_id: str | None, thread_id: str) -> list[dict[str, Any]]:
@@ -1465,17 +1509,17 @@ class AtlasBackendService:
         return scoped_snapshot
 
     def _model_supports_images(self, model_name: str) -> bool:
-        for item in self._get_model_catalog():
+        for item in self._get_model_catalog().models:
             if item.name == model_name:
                 return item.supports_images
         return False
 
-    def _get_model_catalog(self, *, ttl_seconds: float = 10.0) -> list[OllamaModelInfo]:
+    def _get_model_catalog(self, *, ttl_seconds: float = 10.0) -> OllamaCatalogSnapshot:
         cached = self._model_catalog_cache
         now = monotonic()
         if cached and now - cached[0] < ttl_seconds:
             return cached[1]
-        catalog = list_local_ollama_model_info(self.config)
+        catalog = inspect_local_ollama_models(self.config)
         self._model_catalog_cache = (now, catalog)
         return catalog
 
@@ -1765,6 +1809,13 @@ def _duplicate_thread_title(value: str) -> str:
     if base.lower().endswith(" copy"):
         return base
     return f"{base} copy"
+
+
+def _branch_thread_title(value: str) -> str:
+    base = value.strip() or "New chat"
+    if base.lower().endswith(" branch"):
+        return base
+    return f"{base} branch"
 
 
 def _temperature_dropdown_values() -> list[float]:

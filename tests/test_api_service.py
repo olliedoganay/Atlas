@@ -11,7 +11,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from atlas_local.api_service import AtlasBackendService, _estimate_thread_representation_tokens
 from atlas_local.config import load_config
 from atlas_local.graph.builder import execution_node_sequence, post_synthesis_node_sequence, pre_synthesis_node_sequence
-from atlas_local.llm import OllamaModelInfo
+from atlas_local.llm import OllamaCatalogSnapshot, OllamaModelInfo
 from atlas_local.run_contract import RunHub
 from atlas_local.run_store import RunStore
 from atlas_local.security import sqlcipher_enabled
@@ -162,11 +162,16 @@ class GraphExecutionSequenceTests(unittest.TestCase):
 
 
 class ModelCatalogCachingTests(unittest.TestCase):
-    @patch("atlas_local.api_service.list_local_ollama_model_info")
+    @patch("atlas_local.api_service.inspect_local_ollama_models")
     @patch("atlas_local.api_service.monotonic")
     def test_model_catalog_is_cached_across_calls(self, monotonic_mock, model_info_mock) -> None:
         monotonic_mock.side_effect = [10.0, 11.0]
-        model_info_mock.return_value = [OllamaModelInfo(name="qwen", supports_images=True)]
+        model_info_mock.return_value = OllamaCatalogSnapshot(
+            models=(OllamaModelInfo(name="qwen", supports_images=True),),
+            ollama_online=True,
+            has_local_models=True,
+            source="ollama",
+        )
 
         service = AtlasBackendService.__new__(AtlasBackendService)
         service.config = SimpleNamespace(chat_model="qwen", chat_temperature=0.2)
@@ -176,8 +181,26 @@ class ModelCatalogCachingTests(unittest.TestCase):
         supports_images = AtlasBackendService._model_supports_images(service, "qwen")
 
         self.assertEqual(payload["models"], ["qwen"])
+        self.assertTrue(payload["ollama_online"])
+        self.assertTrue(payload["has_local_models"])
+        self.assertEqual(payload["catalog_source"], "ollama")
         self.assertTrue(supports_images)
         self.assertEqual(model_info_mock.call_count, 1)
+
+    @patch("atlas_local.api_service.inspect_local_ollama_models")
+    def test_model_catalog_reports_ollama_offline_without_local_models(self, model_info_mock) -> None:
+        model_info_mock.return_value = OllamaCatalogSnapshot()
+
+        service = AtlasBackendService.__new__(AtlasBackendService)
+        service.config = SimpleNamespace(chat_model="qwen", chat_temperature=0.2)
+        service._model_catalog_cache = None
+
+        payload = AtlasBackendService.list_models(service)
+
+        self.assertFalse(payload["ollama_online"])
+        self.assertFalse(payload["has_local_models"])
+        self.assertEqual(payload["catalog_source"], "fallback")
+        self.assertEqual(payload["models"], [])
 
 
 class ThreadTemperatureResolutionTests(unittest.TestCase):
@@ -496,6 +519,59 @@ class ContextCompactionTests(unittest.TestCase):
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0]["kind"], "context_compacted")
         self.assertEqual(history[0]["run_id"], "run-compact")
+
+    def test_branch_thread_keeps_only_selected_prefix_and_resets_compaction_state(self) -> None:
+        service = AtlasBackendService.__new__(AtlasBackendService)
+        graph_updates: list[dict[str, object]] = []
+        service.config = SimpleNamespace(chat_model="gemma4:e4b", chat_temperature=0.2)
+        service.run_store = SimpleNamespace(
+            get_thread=lambda **_: {
+                "thread_id": "main",
+                "title": "Novel outline",
+                "chat_model": "gemma4:e4b",
+                "temperature": 0.2,
+                "last_mode": "chat",
+                "last_prompt": "latest prompt",
+            },
+            upsert_thread=lambda **kwargs: kwargs,
+        )
+        service.app = SimpleNamespace(
+            graph=SimpleNamespace(update_state=lambda _config, payload, as_node=None: graph_updates.append(payload)),
+        )
+        service._ensure_user_unlocked = lambda _user_id: None
+        service._get_snapshot = lambda **_: SimpleNamespace(
+            values={
+                "messages": [
+                    HumanMessage(content="u1"),
+                    AIMessage(content="a1"),
+                    HumanMessage(content="u2"),
+                    AIMessage(content="a2"),
+                ],
+                "thread_summary": "- summary",
+                "compacted_message_count": 2,
+                "timeline_events": [
+                    {
+                        "type": "context_compacted",
+                        "after_message_count": 3,
+                    }
+                ],
+            }
+        )
+
+        branched = AtlasBackendService.branch_thread(
+            service,
+            user_id="research_user",
+            thread_id="main",
+            after_message_count=2,
+        )
+
+        self.assertEqual(branched["title"], "Novel outline branch")
+        self.assertEqual(branched["last_prompt"], "u1")
+        self.assertTrue(graph_updates)
+        self.assertEqual(len(graph_updates[0]["messages"]), 2)
+        self.assertEqual(graph_updates[0]["thread_summary"], "")
+        self.assertEqual(graph_updates[0]["compacted_message_count"], 0)
+        self.assertEqual(graph_updates[0]["timeline_events"], [])
 
 
 class SearchTests(unittest.TestCase):

@@ -50,6 +50,11 @@ class ThreadTitleRequest(BaseModel):
     title: str = Field(..., min_length=1)
 
 
+class ThreadBranchRequest(BaseModel):
+    user_id: str = Field(..., min_length=1)
+    after_message_count: int = Field(..., ge=0)
+
+
 class ResetThreadRequest(BaseModel):
     thread_id: str
     user_id: str | None = None
@@ -197,6 +202,16 @@ def create_api_app(service: AtlasBackendService | None = None) -> FastAPI:
     @app.post("/threads/{thread_id}/duplicate")
     def duplicate_thread(thread_id: str, request: UserRequest) -> dict[str, Any]:
         return _handle_runtime(lambda: backend().duplicate_thread(user_id=request.user_id, thread_id=thread_id))
+
+    @app.post("/threads/{thread_id}/branch")
+    def branch_thread(thread_id: str, request: ThreadBranchRequest) -> dict[str, Any]:
+        return _handle_runtime(
+            lambda: backend().branch_thread(
+                user_id=request.user_id,
+                thread_id=thread_id,
+                after_message_count=request.after_message_count,
+            )
+        )
 
     @app.post("/threads/{thread_id}/compact")
     def compact_thread(thread_id: str, request: UserRequest) -> dict[str, Any]:

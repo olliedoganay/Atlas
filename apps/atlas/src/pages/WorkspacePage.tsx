@@ -1,11 +1,13 @@
 import * as ScrollArea from "@radix-ui/react-scroll-area";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, ChevronUp, Edit3, ImagePlus, Lock, Send, Square, X } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Copy, CornerUpLeft, Edit3, GitBranch, ImagePlus, Lock, RotateCcw, Send, Square, X } from "lucide-react";
 import { ChangeEvent, FormEvent, KeyboardEvent, UIEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { MessageContent } from "../components/MessageContent";
 import {
   cancelRun,
+  branchThread,
+  createUser,
   getRun,
   getModels,
   getStatus,
@@ -17,6 +19,8 @@ import {
   startChat,
   type ImageAttachment,
   type ThreadMessage,
+  type UserSummary,
+  unlockUser,
 } from "../lib/api";
 import { useAtlasStore } from "../store/useAtlasStore";
 
@@ -39,13 +43,21 @@ type ConversationMessage = {
   historyIndex?: number;
 };
 
+type UserProtectionMode = "passwordless" | "password";
+
 export function WorkspacePage() {
   const queryClient = useQueryClient();
   const conversationViewportRef = useRef<HTMLDivElement | null>(null);
   const autoScrollToLatestRef = useRef(true);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const promptInputRef = useRef<HTMLTextAreaElement | null>(null);
   const [prompt, setPrompt] = useState("");
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
+  const [onboardingUserId, setOnboardingUserId] = useState("");
+  const [onboardingUserProtection, setOnboardingUserProtection] = useState<UserProtectionMode>("passwordless");
+  const [onboardingUserPassword, setOnboardingUserPassword] = useState("");
+  const [unlockTargetUserId, setUnlockTargetUserId] = useState<string | null>(null);
+  const [unlockPassword, setUnlockPassword] = useState("");
 
   const currentUserId = useAtlasStore((state) => state.currentUserId);
   const currentThreadId = useAtlasStore((state) => state.currentThreadId);
@@ -66,6 +78,7 @@ export function WorkspacePage() {
   const liveError = useAtlasStore((state) => state.liveError);
   const compactionNotice = useAtlasStore((state) => state.compactionNotice);
   const isStreaming = useAtlasStore((state) => state.isStreaming);
+  const setCurrentUserId = useAtlasStore((state) => state.setCurrentUserId);
   const setCurrentThreadId = useAtlasStore((state) => state.setCurrentThreadId);
   const setCurrentThreadTitle = useAtlasStore((state) => state.setCurrentThreadTitle);
   const setDraftThreadModel = useAtlasStore((state) => state.setDraftThreadModel);
@@ -81,6 +94,7 @@ export function WorkspacePage() {
   const [expandedCompactionKeys, setExpandedCompactionKeys] = useState<Record<string, boolean>>({});
   const [isThinkingExpanded, setIsThinkingExpanded] = useState(false);
   const [highlightedHistoryIndex, setHighlightedHistoryIndex] = useState<number | null>(null);
+  const [copiedMessageKey, setCopiedMessageKey] = useState<string | null>(null);
 
   const { data: status } = useQuery({
     queryKey: ["status"],
@@ -99,7 +113,18 @@ export function WorkspacePage() {
     retry: 1,
     refetchOnWindowFocus: false,
   });
-  const currentUserLocked = Boolean(users.find((user) => user.user_id === currentUserId)?.locked);
+  const visibleUsers = useMemo(() => {
+    const seen = new Set<string>();
+    return users.filter((user) => {
+      if (!user.user_id || seen.has(user.user_id)) {
+        return false;
+      }
+      seen.add(user.user_id);
+      return true;
+    });
+  }, [users]);
+  const currentUserProfile = visibleUsers.find((user) => user.user_id === currentUserId) ?? null;
+  const currentUserLocked = Boolean(currentUserProfile?.locked);
   const { data: threads = [] } = useQuery({
     queryKey: ["threads", currentUserId],
     queryFn: () => getThreads(currentUserId),
@@ -129,7 +154,10 @@ export function WorkspacePage() {
     models?.default_model || status?.default_chat_model || status?.chat_model || draftThreadModel || "";
   const defaultTemperature =
     models?.default_temperature ?? status?.default_chat_temperature ?? status?.chat_temperature ?? 0.2;
-  const availableModels = (models?.models ?? [defaultModel]).filter(Boolean);
+  const modelCatalogLoaded = Boolean(models);
+  const availableModels = (models?.models ?? []).filter(Boolean);
+  const ollamaOnline = Boolean(models?.ollama_online);
+  const hasLocalModels = Boolean(models?.has_local_models);
 
   const currentThread = useMemo(() => {
     const existing = threadItems.find((item) => item.thread_id === currentThreadId);
@@ -188,7 +216,19 @@ export function WorkspacePage() {
     }
     return defaultTemperature;
   }, [currentThread, defaultTemperature, runDetails, threadHasHistory]);
-  const selectedModel = lockedThreadModel || draftThreadModel || defaultModel;
+  const preferredDraftModel = useMemo(() => {
+    if (threadHasHistory && lockedThreadModel) {
+      return lockedThreadModel;
+    }
+    if (draftThreadModel && availableModels.includes(draftThreadModel)) {
+      return draftThreadModel;
+    }
+    if (defaultModel && availableModels.includes(defaultModel)) {
+      return defaultModel;
+    }
+    return availableModels[0] || "";
+  }, [availableModels, defaultModel, draftThreadModel, lockedThreadModel, threadHasHistory]);
+  const selectedModel = lockedThreadModel || preferredDraftModel || draftThreadModel || defaultModel;
   const selectedTemperature = lockedThreadTemperature !== undefined ? lockedThreadTemperature : draftThreadTemperature;
   const selectedModelDetails = useMemo(
     () => models?.model_details?.find((item) => item.name === selectedModel),
@@ -198,27 +238,54 @@ export function WorkspacePage() {
   const headerSummary = !status
     ? "Local runtime offline. Restart Atlas from the sidebar to continue."
     : !currentUserId
-      ? "Create or select a user before starting a chat."
+      ? "Choose a profile before starting the first chat."
+    : !modelCatalogLoaded
+      ? "Checking the local Ollama model list."
+    : !ollamaOnline
+      ? "Atlas is online, but Ollama is not responding yet."
+    : !hasLocalModels
+      ? "Ollama is running, but there are no local chat models installed yet."
     : selectedModel
       ? "Model and temperature lock after the first message in this thread."
       : "Choose a local model and temperature before the first message.";
-  const idleTitle = !status ? "Backend offline" : !currentUserId ? "No user selected" : "Start the next thread";
+  const idleTitle = !status ? "Backend offline" : !currentUserId || !modelCatalogLoaded || !ollamaOnline || !hasLocalModels ? "Finish setup" : "Start the next thread";
   const idleDescription = !status
     ? "Atlas cannot load chats or models until the managed backend comes back online. Use the restart control in the sidebar when the runtime is ready."
     : !currentUserId
-      ? "Open Settings and create a user, or switch to an existing one, before sending the first message."
-    : selectedModelSupportsImages
+      ? "Choose a profile first. Atlas keeps chats, memory, and search scoped to the active profile."
+    : !modelCatalogLoaded
+      ? "Atlas is checking the local Ollama model list before the first message."
+    : !ollamaOnline
+      ? "Start Ollama on this machine, then refresh the local model list before sending the first message."
+    : !hasLocalModels
+      ? "Pull at least one local chat model with Ollama, then refresh Atlas to use it in new chats."
+      : selectedModelSupportsImages
       ? "Ask a question, upload a photo for context, or use this thread as a clean branch for a new line of thinking."
       : "Use this thread to compare ideas, condense notes, or sketch the next move.";
-  const composerPlaceholder = !selectedModel
-    ? !status
-      ? "Backend offline. Restart the local runtime to continue."
-      : !currentUserId
-        ? "Create or select a user in Settings first."
-      : "Choose a local model to start this chat."
-    : selectedModelSupportsImages
-      ? "Drop a photo, a rough brief, or the first line."
-      : "Start with a question, a draft, or the next move.";
+  const composerPlaceholder = !status
+    ? "Backend offline. Restart the local runtime to continue."
+    : !currentUserId
+      ? "Choose a profile before sending the first message."
+      : !modelCatalogLoaded
+        ? "Checking the local Ollama model list."
+      : !ollamaOnline
+        ? "Start Ollama on this machine first."
+        : !hasLocalModels
+          ? "Pull a local Ollama model before sending the first message."
+          : !selectedModel
+            ? "Choose a local model to start this chat."
+            : selectedModelSupportsImages
+              ? "Drop a photo, a rough brief, or the first line."
+              : "Start with a question, a draft, or the next move.";
+  const canStartChat = Boolean(
+    status &&
+      currentUserId &&
+      !currentUserLocked &&
+      modelCatalogLoaded &&
+      ollamaOnline &&
+      hasLocalModels &&
+      selectedModel,
+  );
   const currentThreadCompactionNotice = useMemo(() => {
     if (!compactionNotice) {
       return null;
@@ -245,7 +312,13 @@ export function WorkspacePage() {
   const startRun = useMutation({
     mutationFn: async (value: string) => {
       if (!currentUserId) {
-        throw new Error("Create or select a user in Settings before starting a chat.");
+        throw new Error("Choose a profile before starting the first chat.");
+      }
+      if (!ollamaOnline) {
+        throw new Error("Start Ollama on this machine before starting the first chat.");
+      }
+      if (!hasLocalModels) {
+        throw new Error("Pull a local chat model with Ollama before starting the first chat.");
       }
       const modelForRun = lockedThreadModel || selectedModel;
       if (!modelForRun) {
@@ -309,6 +382,109 @@ export function WorkspacePage() {
     },
   });
 
+  const branchMessage = useMutation({
+    mutationFn: async (payload: { afterMessageCount: number }) => {
+      if (!currentUserId) {
+        throw new Error("Choose a profile before branching this chat.");
+      }
+      return branchThread(currentThreadId, currentUserId, payload.afterMessageCount);
+    },
+    onSuccess: async (thread) => {
+      setCurrentThreadId(thread.thread_id);
+      setCurrentThreadTitle(thread.title || thread.thread_id);
+      setDraftThreadModel(thread.chat_model || defaultModel);
+      setDraftThreadTemperature(readStoredTemperature(thread) ?? null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["threads", currentUserId] }),
+        queryClient.invalidateQueries({ queryKey: ["thread-history", currentUserId] }),
+      ]);
+    },
+  });
+
+  const retryAssistantTurn = useMutation({
+    mutationFn: async (payload: { afterMessageCount: number; prompt: string; attachments: ImageAttachment[] }) => {
+      if (!currentUserId) {
+        throw new Error("Choose a profile before retrying a response.");
+      }
+      const thread = await branchThread(currentThreadId, currentUserId, payload.afterMessageCount);
+      const run = await startChat(
+        payload.prompt,
+        currentUserId,
+        thread.thread_id,
+        thread.chat_model || selectedModel,
+        readStoredTemperature(thread) ?? selectedTemperature ?? null,
+        thread.title || thread.thread_id,
+        crossChatMemoryEnabled,
+        autoCompactLongChats,
+        payload.attachments,
+      );
+      return { thread, run, prompt: payload.prompt, attachments: payload.attachments };
+    },
+    onSuccess: async ({ thread, run, prompt: retryPrompt, attachments: retryAttachments }) => {
+      autoScrollToLatestRef.current = true;
+      setCurrentThreadId(thread.thread_id);
+      setCurrentThreadTitle(thread.title || thread.thread_id);
+      setDraftThreadModel(thread.chat_model || defaultModel);
+      setDraftThreadTemperature(readStoredTemperature(thread) ?? null);
+      beginRun(run.run_id, "chat", retryPrompt, currentUserId, thread.thread_id, retryAttachments);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["threads", currentUserId] }),
+        queryClient.invalidateQueries({ queryKey: ["thread-history", currentUserId] }),
+      ]);
+    },
+    onError: (error) => {
+      failRun(error instanceof Error ? error.message : "Atlas could not retry this response.");
+    },
+  });
+
+  const activateUser = async (user: UserSummary) => {
+    setCurrentUserId(user.user_id);
+    setCurrentThreadId("main");
+    setCurrentThreadTitle("main");
+    setDraftThreadTemperature(null);
+    if (preferredDraftModel) {
+      setDraftThreadModel(preferredDraftModel);
+    }
+    setUnlockPassword("");
+    setUnlockTargetUserId(null);
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["users"] }),
+      queryClient.invalidateQueries({ queryKey: ["threads"] }),
+      queryClient.invalidateQueries({ queryKey: ["thread-history"] }),
+      queryClient.invalidateQueries({ queryKey: ["models"] }),
+    ]);
+  };
+
+  const createOnboardingUser = useMutation({
+    mutationFn: async () =>
+      createUser(
+        onboardingUserId.trim(),
+        onboardingUserProtection === "password" ? onboardingUserPassword.trim() : undefined,
+      ),
+    onSuccess: async (user) => {
+      setOnboardingUserId("");
+      setOnboardingUserProtection("passwordless");
+      setOnboardingUserPassword("");
+      await activateUser(user);
+    },
+  });
+
+  const unlockOnboardingUser = useMutation({
+    mutationFn: async (payload: { userId: string; password?: string }) =>
+      unlockUser(payload.userId, payload.password),
+    onSuccess: async (user) => {
+      await activateUser(user);
+    },
+  });
+
+  const refreshModels = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["status"] }),
+      queryClient.invalidateQueries({ queryKey: ["models"] }),
+      queryClient.invalidateQueries({ queryKey: ["threads"] }),
+    ]);
+  };
+
   useEffect(() => {
     if (!currentThreadId && threadItems.length) {
       setCurrentThreadId(threadItems[0].thread_id);
@@ -316,10 +492,16 @@ export function WorkspacePage() {
   }, [currentThreadId, setCurrentThreadId, threadItems]);
 
   useEffect(() => {
-    if (!draftThreadModel && defaultModel) {
-      setDraftThreadModel(defaultModel);
+    if (threadHasHistory) {
+      return;
     }
-  }, [defaultModel, draftThreadModel, setDraftThreadModel]);
+    if (!preferredDraftModel) {
+      return;
+    }
+    if (draftThreadModel !== preferredDraftModel) {
+      setDraftThreadModel(preferredDraftModel);
+    }
+  }, [draftThreadModel, preferredDraftModel, setDraftThreadModel, threadHasHistory]);
 
   useEffect(() => {
     const resolvedTitle = currentThread?.title || currentThreadId || "";
@@ -356,6 +538,12 @@ export function WorkspacePage() {
     }
     return items;
   }, [currentThreadCompactionNotice, currentThreadHasActiveRun, history, liveAnswer, pendingAttachments, pendingPrompt]);
+  const shouldShowOnboarding = Boolean(
+    status &&
+      modelCatalogLoaded &&
+      transcript.length === 0 &&
+      (!currentUserId || !ollamaOnline || !hasLocalModels),
+  );
 
   useEffect(() => {
     autoScrollToLatestRef.current = true;
@@ -394,6 +582,14 @@ export function WorkspacePage() {
   }, [highlightedHistoryIndex]);
 
   useEffect(() => {
+    if (!copiedMessageKey) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setCopiedMessageKey(null), 1600);
+    return () => window.clearTimeout(timer);
+  }, [copiedMessageKey]);
+
+  useEffect(() => {
     const viewport = conversationViewportRef.current;
     if (!viewport) {
       return;
@@ -408,9 +604,27 @@ export function WorkspacePage() {
     autoScrollToLatestRef.current = isNearBottom(event.currentTarget);
   };
 
+  const handleCopyMessage = async (message: ConversationMessage, index: number) => {
+    const key = messageActionKey(message, index, "copy");
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(message.content);
+      }
+      setCopiedMessageKey(key);
+    } catch {
+      // Ignore clipboard failures silently. The action should stay non-blocking.
+    }
+  };
+
+  const handleQuoteMessage = (message: ConversationMessage) => {
+    const quoted = buildQuotedPrompt(message.content);
+    setPrompt((current) => (current.trim() ? `${current.trim()}\n\n${quoted}` : quoted));
+    promptInputRef.current?.focus();
+  };
+
   const submitPrompt = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if ((!prompt.trim() && attachments.length === 0) || isStreaming || !selectedModel || !currentUserId) {
+    if ((!prompt.trim() && attachments.length === 0) || isStreaming || !canStartChat) {
       return;
     }
     startRun.mutate(prompt.trim());
@@ -419,7 +633,7 @@ export function WorkspacePage() {
   const handlePromptKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey) {
       event.preventDefault();
-      if ((!prompt.trim() && attachments.length === 0) || isStreaming || !selectedModel || !currentUserId) {
+      if ((!prompt.trim() && attachments.length === 0) || isStreaming || !canStartChat) {
         return;
       }
       startRun.mutate(prompt.trim());
@@ -502,63 +716,65 @@ export function WorkspacePage() {
               </>
             )}
           </div>
-          <p>{headerSummary}</p>
+          <p className="workspace-title-summary">{headerSummary}</p>
         </div>
 
         <div className="workspace-header-controls">
-          <div className="workspace-model-group">
-            <span className="workspace-model-label">Model</span>
-            {lockedThreadModel ? (
-              <div className="workspace-model-lock" title="This chat already started with this model.">
-                <Lock size={14} />
-                <span>{formatModelLabel(lockedThreadModel)}</span>
-              </div>
-            ) : (
-              <label className="workspace-model-picker">
-                <select
-                  className="select-input workspace-model-select"
-                  disabled={availableModels.length === 0}
-                  onChange={(event) => setDraftThreadModel(event.currentTarget.value)}
-                  value={selectedModel}
-                >
-                  {availableModels.length > 0 ? (
-                    availableModels.map((model) => (
-                      <option key={model} value={model}>
-                        {formatModelLabel(model)}
-                      </option>
-                    ))
-                  ) : (
-                    <option value="">No model available</option>
-                  )}
-                </select>
-              </label>
-            )}
-          </div>
+          <div className="workspace-header-control-strip">
+            <div className="workspace-model-group">
+              <span className="workspace-model-label">Model</span>
+              {lockedThreadModel ? (
+                <div className="workspace-model-lock" title="This chat already started with this model.">
+                  <Lock size={14} />
+                  <span>{formatModelLabel(lockedThreadModel)}</span>
+                </div>
+              ) : (
+                <label className="workspace-model-picker">
+                  <select
+                    className="select-input workspace-model-select"
+                    disabled={availableModels.length === 0}
+                    onChange={(event) => setDraftThreadModel(event.currentTarget.value)}
+                    value={selectedModel}
+                  >
+                    {availableModels.length > 0 ? (
+                      availableModels.map((model) => (
+                        <option key={model} value={model}>
+                          {formatModelLabel(model)}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">No model available</option>
+                    )}
+                  </select>
+                </label>
+              )}
+            </div>
 
-          <div className="workspace-model-group">
-            <span className="workspace-model-label">Temp</span>
-            {lockedThreadTemperature !== undefined ? (
-              <div className="workspace-model-lock" title="This chat already started with this temperature.">
-                <Lock size={14} />
-                <span>{formatTemperatureLabel(lockedThreadTemperature)}</span>
-              </div>
-            ) : (
-              <label className="workspace-model-picker workspace-temperature-picker">
-                <select
-                  className="select-input workspace-model-select"
-                  disabled={availableModels.length === 0}
-                  onChange={(event) => setDraftThreadTemperature(parseTemperatureValue(event.currentTarget.value))}
-                  value={formatTemperatureSelectValue(selectedTemperature)}
-                >
-                  <option value={MODEL_DEFAULT_TEMPERATURE_VALUE}>Model default</option>
-                  {TEMPERATURE_OPTIONS.map((value) => (
-                    <option key={value} value={value.toFixed(1)}>
-                      {value.toFixed(1)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
+            <div className="workspace-model-group">
+              <span className="workspace-model-label">Temp</span>
+              {lockedThreadTemperature !== undefined ? (
+                <div className="workspace-model-lock" title="This chat already started with this temperature.">
+                  <Lock size={14} />
+                  <span>{formatTemperatureLabel(lockedThreadTemperature)}</span>
+                </div>
+              ) : (
+                <label className="workspace-model-picker workspace-temperature-picker">
+                  <select
+                    className="select-input workspace-model-select"
+                    disabled={availableModels.length === 0}
+                    onChange={(event) => setDraftThreadTemperature(parseTemperatureValue(event.currentTarget.value))}
+                    value={formatTemperatureSelectValue(selectedTemperature)}
+                  >
+                    <option value={MODEL_DEFAULT_TEMPERATURE_VALUE}>Model default</option>
+                    {TEMPERATURE_OPTIONS.map((value) => (
+                      <option key={value} value={value.toFixed(1)}>
+                        {value.toFixed(1)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -573,17 +789,251 @@ export function WorkspacePage() {
             <div className="conversation-stack">
               {transcript.length === 0 ? (
                 <div className="workspace-idle">
-                  <div className="workspace-idle-card">
+                  <div className={`workspace-idle-card${shouldShowOnboarding ? " workspace-onboarding-card" : ""}`}>
                     <div className="workspace-idle-mark">
                       <img alt="Atlas" className="workspace-idle-logo workspace-idle-logo-large" src="/AtlasLogo.png" />
                     </div>
+                    <span className="workspace-idle-kicker">
+                      {shouldShowOnboarding ? "First-run setup" : selectedModel ? formatModelLabel(selectedModel) : "New thread"}
+                    </span>
                     <h2>{idleTitle}</h2>
                     <p>{idleDescription}</p>
+                    {shouldShowOnboarding ? (
+                      <div className="workspace-onboarding-steps">
+                        <section className={`workspace-onboarding-step ${currentUserId ? "complete" : "active"}`}>
+                          <div className="workspace-onboarding-step-head">
+                            <span className="workspace-onboarding-step-index">1</span>
+                            <div className="workspace-onboarding-step-copy">
+                              <strong>Create or select a profile</strong>
+                              <p>Chats, memory, and search stay scoped to the active local profile.</p>
+                            </div>
+                            <span className="workspace-onboarding-step-state">{currentUserId ? "Ready" : "Needed"}</span>
+                          </div>
+                          {currentUserId ? (
+                            <div className="workspace-onboarding-summary">
+                              Using <strong>{currentUserId}</strong>{currentUserProfile ? ` - ${describeUserProtection(currentUserProfile)}` : ""}.
+                            </div>
+                          ) : (
+                            <div className="workspace-onboarding-step-body">
+                              {visibleUsers.length > 0 ? (
+                                <div className="workspace-onboarding-profile-list">
+                                  {visibleUsers.map((user) => {
+                                    const isProtected = user.protection === "password";
+                                    const isLocked = Boolean(user.locked);
+                                    const isUnlocking = unlockTargetUserId === user.user_id;
+                                    return (
+                                      <div className="workspace-onboarding-profile-card" key={user.user_id}>
+                                        <div className="workspace-onboarding-profile-copy">
+                                          <strong>{user.user_id}</strong>
+                                          <span>{describeUserProtection(user)}</span>
+                                        </div>
+                                        {!isLocked ? (
+                                          <button
+                                            className="ghost-button compact-button"
+                                            onClick={() => {
+                                              void activateUser(user);
+                                            }}
+                                            type="button"
+                                          >
+                                            Use profile
+                                          </button>
+                                        ) : (
+                                          <button
+                                            className="ghost-button compact-button"
+                                            onClick={() => {
+                                              setUnlockTargetUserId(user.user_id);
+                                              setUnlockPassword("");
+                                            }}
+                                            type="button"
+                                          >
+                                            Unlock
+                                          </button>
+                                        )}
+                                        {isProtected && isLocked && isUnlocking ? (
+                                          <div className="workspace-onboarding-inline-form">
+                                            <input
+                                              className="text-input"
+                                              onChange={(event) => setUnlockPassword(event.currentTarget.value)}
+                                              placeholder="Profile password"
+                                              type="password"
+                                              value={unlockPassword}
+                                            />
+                                            <button
+                                              className="primary-button compact-button"
+                                              disabled={!unlockPassword.trim() || unlockOnboardingUser.isPending}
+                                              onClick={() =>
+                                                unlockOnboardingUser.mutate({
+                                                  userId: user.user_id,
+                                                  password: unlockPassword.trim(),
+                                                })
+                                              }
+                                              type="button"
+                                            >
+                                              {unlockOnboardingUser.isPending ? "Unlocking..." : "Unlock"}
+                                            </button>
+                                          </div>
+                                        ) : null}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              ) : (
+                                <div className="workspace-onboarding-summary">
+                                  No profiles exist yet. Create the first one here.
+                                </div>
+                              )}
+
+                              <div className="workspace-onboarding-create">
+                                <div className="workspace-onboarding-inline-form">
+                                  <input
+                                    className="text-input"
+                                    onChange={(event) => setOnboardingUserId(event.currentTarget.value)}
+                                    placeholder="new_profile"
+                                    value={onboardingUserId}
+                                  />
+                                  <div className="segmented-control">
+                                    <button
+                                      className={`segmented-button ${onboardingUserProtection === "passwordless" ? "active" : ""}`}
+                                      onClick={() => setOnboardingUserProtection("passwordless")}
+                                      type="button"
+                                    >
+                                      Passwordless
+                                    </button>
+                                    <button
+                                      className={`segmented-button ${onboardingUserProtection === "password" ? "active" : ""}`}
+                                      onClick={() => setOnboardingUserProtection("password")}
+                                      type="button"
+                                    >
+                                      Password
+                                    </button>
+                                  </div>
+                                </div>
+                                {onboardingUserProtection === "password" ? (
+                                  <div className="workspace-onboarding-inline-form">
+                                    <input
+                                      className="text-input"
+                                      onChange={(event) => setOnboardingUserPassword(event.currentTarget.value)}
+                                      placeholder="Profile password"
+                                      type="password"
+                                      value={onboardingUserPassword}
+                                    />
+                                  </div>
+                                ) : null}
+                                <div className="workspace-onboarding-inline-form">
+                                  <button
+                                    className="primary-button compact-button"
+                                    disabled={
+                                      !onboardingUserId.trim() ||
+                                      createOnboardingUser.isPending ||
+                                      (onboardingUserProtection === "password" && !onboardingUserPassword.trim())
+                                    }
+                                    onClick={() => createOnboardingUser.mutate()}
+                                    type="button"
+                                  >
+                                    {createOnboardingUser.isPending ? "Creating..." : "Create profile"}
+                                  </button>
+                                </div>
+                                {createOnboardingUser.isError ? (
+                                  <div className="error-inline">{getMutationErrorMessage(createOnboardingUser.error)}</div>
+                                ) : null}
+                                {unlockOnboardingUser.isError ? (
+                                  <div className="error-inline">{getMutationErrorMessage(unlockOnboardingUser.error)}</div>
+                                ) : null}
+                              </div>
+                            </div>
+                          )}
+                        </section>
+
+                        <section
+                          className={`workspace-onboarding-step ${
+                            !currentUserId ? "blocked" : ollamaOnline && hasLocalModels ? "complete" : "active"
+                          }`}
+                        >
+                          <div className="workspace-onboarding-step-head">
+                            <span className="workspace-onboarding-step-index">2</span>
+                            <div className="workspace-onboarding-step-copy">
+                              <strong>Confirm local model access</strong>
+                              <p>Atlas needs Ollama running and at least one installed chat model before the first turn.</p>
+                            </div>
+                            <span className="workspace-onboarding-step-state">
+                              {ollamaOnline && hasLocalModels ? "Ready" : !currentUserId ? "Waiting" : "Needed"}
+                            </span>
+                          </div>
+                          <div className="workspace-onboarding-step-body">
+                            {!currentUserId ? (
+                              <div className="workspace-onboarding-summary">Finish step 1 first.</div>
+                            ) : !ollamaOnline ? (
+                              <>
+                                <div className="workspace-onboarding-summary">
+                                  Atlas is online, but Ollama is not responding at <strong>{status?.ollama_url}</strong>.
+                                </div>
+                                <div className="workspace-onboarding-inline-form">
+                                  <code className="workspace-onboarding-command">ollama serve</code>
+                                  <button className="ghost-button compact-button" onClick={() => void refreshModels()} type="button">
+                                    Refresh
+                                  </button>
+                                </div>
+                              </>
+                            ) : !hasLocalModels ? (
+                              <>
+                                <div className="workspace-onboarding-summary">
+                                  Ollama is running, but there are no local chat models installed yet.
+                                </div>
+                                <div className="workspace-onboarding-inline-form">
+                                  <code className="workspace-onboarding-command">ollama pull qwen3.5:9b</code>
+                                  <button className="ghost-button compact-button" onClick={() => void refreshModels()} type="button">
+                                    Refresh
+                                  </button>
+                                </div>
+                              </>
+                            ) : (
+                              <div className="workspace-onboarding-summary">
+                                Ready with <strong>{formatModelLabel(selectedModel)}</strong> at{" "}
+                                <strong>{formatTemperatureLabel(selectedTemperature)}</strong>. You can still change both in the header before the first message.
+                              </div>
+                            )}
+                          </div>
+                        </section>
+
+                        <section className={`workspace-onboarding-step ${canStartChat ? "complete" : "blocked"}`}>
+                          <div className="workspace-onboarding-step-head">
+                            <span className="workspace-onboarding-step-index">3</span>
+                            <div className="workspace-onboarding-step-copy">
+                              <strong>Start the first chat</strong>
+                              <p>Once the profile and model are ready, use the composer below to send the first message.</p>
+                            </div>
+                            <span className="workspace-onboarding-step-state">{canStartChat ? "Ready" : "Waiting"}</span>
+                          </div>
+                          <div className="workspace-onboarding-step-body">
+                            {canStartChat ? (
+                              <div className="workspace-onboarding-inline-form">
+                                <button
+                                  className="primary-button compact-button"
+                                  onClick={() => promptInputRef.current?.focus()}
+                                  type="button"
+                                >
+                                  Focus composer
+                                </button>
+                                <span className="muted-text">Type the first prompt below and click Send.</span>
+                              </div>
+                            ) : (
+                              <div className="workspace-onboarding-summary">
+                                Complete the first two steps to unlock the composer.
+                              </div>
+                            )}
+                          </div>
+                        </section>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               ) : null}
-              {transcript.map((message, index) => (
-                isContextCompactionMessage(message) ? (
+              {transcript.map((message, index) => {
+                const branchAfterMessageCount = countConversationMessagesThroughIndex(transcript, index);
+                const canBranchMessage = isBranchableMessage(message) && branchAfterMessageCount > 0 && Boolean(currentUserId);
+                const retryContext = getRetryContext(transcript, index);
+
+                return isContextCompactionMessage(message) ? (
                   <article
                     className={`message-card system compact-context-message${message.ephemeral ? " active" : ""}`}
                     key={compactionMessageKey(message, index)}
@@ -649,8 +1099,54 @@ export function WorkspacePage() {
                     data-history-index={message.historyIndex}
                     key={`${message.role}-${index}-${message.content.length}`}
                   >
-                    <div className="message-meta">
+                    <div className="message-meta message-meta-row">
                       <span>{formatMessageRoleLabel(message.role)}</span>
+                      <div className="message-actions" aria-label="Message actions">
+                        <button
+                          className="ghost-button icon-button compact-button"
+                          onClick={() => void handleCopyMessage(message, index)}
+                          type="button"
+                        >
+                          <Copy size={14} />
+                          <span>{copiedMessageKey === messageActionKey(message, index, "copy") ? "Copied" : "Copy"}</span>
+                        </button>
+                        <button
+                          className="ghost-button icon-button compact-button"
+                          onClick={() => handleQuoteMessage(message)}
+                          type="button"
+                        >
+                          <CornerUpLeft size={14} />
+                          <span>Quote</span>
+                        </button>
+                        {canBranchMessage ? (
+                          <button
+                            className="ghost-button icon-button compact-button"
+                            disabled={branchMessage.isPending || retryAssistantTurn.isPending}
+                            onClick={() => branchMessage.mutate({ afterMessageCount: branchAfterMessageCount })}
+                            type="button"
+                          >
+                            <GitBranch size={14} />
+                            <span>{branchMessage.isPending ? "Branching..." : "Branch"}</span>
+                          </button>
+                        ) : null}
+                        {retryContext ? (
+                          <button
+                            className="ghost-button icon-button compact-button"
+                            disabled={retryAssistantTurn.isPending || branchMessage.isPending || isStreaming}
+                            onClick={() =>
+                              retryAssistantTurn.mutate({
+                                afterMessageCount: retryContext.afterMessageCount,
+                                prompt: retryContext.prompt,
+                                attachments: retryContext.attachments,
+                              })
+                            }
+                            type="button"
+                          >
+                            <RotateCcw size={14} />
+                            <span>{retryAssistantTurn.isPending ? "Retrying..." : "Retry"}</span>
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
                     {message.attachments?.length ? (
                       <div className="message-attachments">
@@ -666,8 +1162,8 @@ export function WorkspacePage() {
                     ) : null}
                     <MessageContent content={message.content} streaming={Boolean(message.ephemeral && message.role === "assistant")} />
                   </article>
-                )
-              ))}
+                );
+              })}
               {currentThreadHasActiveRun && isStreaming && !liveAnswer ? (
                 <article className={`message-card ${currentRunMode === "compact" ? "system" : "assistant"} message-card-waiting`}>
                   <div className="message-meta">
@@ -749,6 +1245,7 @@ export function WorkspacePage() {
           onChange={(event) => setPrompt(event.currentTarget.value)}
           onKeyDown={handlePromptKeyDown}
           placeholder={composerPlaceholder}
+          ref={promptInputRef}
           rows={3}
           value={prompt}
         />
@@ -778,7 +1275,7 @@ export function WorkspacePage() {
           >
             {startManualCompact.isPending || (isStreaming && currentRunMode === "compact") ? "Compacting..." : "Compact now"}
           </button>
-          <button className="primary-button" disabled={isStreaming || (!prompt.trim() && attachments.length === 0) || !selectedModel || !currentUserId} type="submit">
+          <button className="primary-button" disabled={isStreaming || (!prompt.trim() && attachments.length === 0) || !canStartChat} type="submit">
             <Send size={16} />
             {isStreaming ? (currentRunMode === "compact" ? "Compacting..." : "Running...") : "Send"}
           </button>
@@ -949,6 +1446,64 @@ function compactWaitingLabel(stage: string) {
     return "Stopping compaction";
   }
   return "Compacting older context";
+}
+
+function isBranchableMessage(message: ConversationMessage) {
+  return (message.role === "user" || message.role === "assistant") && !message.ephemeral && !message.kind;
+}
+
+function countConversationMessagesThroughIndex(transcript: ConversationMessage[], index: number) {
+  return transcript.slice(0, index + 1).filter((item) => isBranchableMessage(item)).length;
+}
+
+function getRetryContext(transcript: ConversationMessage[], index: number) {
+  const message = transcript[index];
+  if (message.role !== "assistant" || message.ephemeral || message.kind) {
+    return null;
+  }
+  const laterAssistant = transcript
+    .slice(index + 1)
+    .some((item) => item.role === "assistant" && !item.ephemeral && !item.kind);
+  if (laterAssistant) {
+    return null;
+  }
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const candidate = transcript[cursor];
+    if (candidate.role !== "user" || candidate.ephemeral || candidate.kind) {
+      continue;
+    }
+    return {
+      afterMessageCount: countConversationMessagesThroughIndex(transcript, cursor),
+      prompt: candidate.content,
+      attachments: candidate.attachments ?? [],
+    };
+  }
+  return null;
+}
+
+function buildQuotedPrompt(content: string) {
+  return content
+    .split(/\r?\n/)
+    .map((line) => `> ${line}`)
+    .join("\n");
+}
+
+function messageActionKey(message: ConversationMessage, index: number, action: string) {
+  return `${action}:${message.runId || message.timestamp || message.historyIndex || index}:${message.role}`;
+}
+
+function describeUserProtection(user: { protection?: string; locked?: boolean }) {
+  if (user.protection === "password") {
+    return user.locked ? "Password protected - Locked" : "Password protected";
+  }
+  return "Passwordless";
+}
+
+function getMutationErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return "The request did not complete.";
 }
 
 async function fileToAttachment(file: File): Promise<ImageAttachment> {

@@ -244,7 +244,7 @@ export function AtlasShell() {
       <aside className={`global-nav ${navCollapsed ? "collapsed" : ""}`}>
         <div className="brand-lockup">
           <div className="brand-lockup-main">
-            <img alt="Atlas" className="brand-logo" src="/AtlasLogo.png" />
+            {navCollapsed ? <img alt="Atlas" className="brand-logo" src="/AtlasLogo.png" /> : null}
             <div className="brand-copy">
               <strong>Atlas</strong>
               <span>Local Workstation</span>
@@ -282,7 +282,7 @@ export function AtlasShell() {
                   >
                     <Search size={16} />
                   </button>
-                  <button className="primary-button icon-button" onClick={createThread} type="button">
+                  <button className="primary-button icon-button" disabled={!currentUserId} onClick={createThread} type="button">
                     <Plus size={16} />
                   </button>
                   {displayThreadItems.map((thread) => (
@@ -302,9 +302,9 @@ export function AtlasShell() {
                   <div className="workspace-section-head">
                     <div>
                       <p className="workspace-section-label">Chats</p>
-                      <p className="muted-text">{displayThreadItems.length} visible chats</p>
+                      <p className="muted-text">{formatChatCount(displayThreadItems.length)}</p>
                     </div>
-                    <button className="primary-button icon-button" onClick={createThread} type="button">
+                    <button className="primary-button icon-button" disabled={!currentUserId} onClick={createThread} type="button">
                       <Plus size={16} />
                     </button>
                   </div>
@@ -362,10 +362,10 @@ export function AtlasShell() {
                         ))}
                         {displayThreadItems.length === 0 ? (
                           <div className="thread-empty">
-                            <p>No saved chats for this user yet.</p>
-                            <button className="ghost-button compact-button" onClick={createThread} type="button">
+                            <p>{currentUserId ? "No chats yet for this profile." : "Choose a profile in the workspace first."}</p>
+                            <button className="ghost-button compact-button" disabled={!currentUserId} onClick={createThread} type="button">
                               <Plus size={15} />
-                              Create first chat
+                              {currentUserId ? "Create first chat" : "Create chat"}
                             </button>
                           </div>
                         ) : null}
@@ -386,7 +386,7 @@ export function AtlasShell() {
             <div className="nav-user-avatar">{userLabel.slice(0, 1).toUpperCase()}</div>
             <div className="nav-user-copy">
               <strong>{userLabel}</strong>
-              <span>Current operator</span>
+              <span>Active profile</span>
             </div>
           </div>
           <div className={`status-pill ${backendOnline ? "online" : "offline"}`}>
@@ -472,6 +472,10 @@ function formatDate(value?: string) {
 
 function formatModelLabel(value: string) {
   return value || "Select model";
+}
+
+function formatChatCount(count: number) {
+  return `${count} ${count === 1 ? "chat" : "chats"}`;
 }
 
 function resolveThreadTemperature(thread: ThreadSummary | null | undefined, fallback: number): number | null {

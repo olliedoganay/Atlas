@@ -105,17 +105,29 @@ class OllamaModelInfo:
         return payload
 
 
+@dataclass(frozen=True)
+class OllamaCatalogSnapshot:
+    models: tuple[OllamaModelInfo, ...] = ()
+    ollama_online: bool = False
+    has_local_models: bool = False
+    source: str = "fallback"
+
+
 def list_local_ollama_models(config: AppConfig, *, timeout_seconds: float = 3.0) -> list[str]:
     return [item.name for item in list_local_ollama_model_info(config, timeout_seconds=timeout_seconds)]
 
 
 def list_local_ollama_model_info(config: AppConfig, *, timeout_seconds: float = 3.0) -> list[OllamaModelInfo]:
+    return list(inspect_local_ollama_models(config, timeout_seconds=timeout_seconds).models)
+
+
+def inspect_local_ollama_models(config: AppConfig, *, timeout_seconds: float = 3.0) -> OllamaCatalogSnapshot:
     endpoint = urljoin(f"{config.ollama_url.rstrip('/')}/", "api/tags")
     try:
         with request.urlopen(endpoint, timeout=timeout_seconds) as response:
             payload: dict[str, Any] = json.loads(response.read().decode("utf-8"))
     except (error.URLError, TimeoutError, json.JSONDecodeError, OSError):
-        return [OllamaModelInfo(name=config.chat_model)]
+        return OllamaCatalogSnapshot()
 
     models = payload.get("models", [])
     entries: list[OllamaModelInfo] = []
@@ -140,9 +152,12 @@ def list_local_ollama_model_info(config: AppConfig, *, timeout_seconds: float = 
         )
 
     entries.sort(key=lambda item: item.name)
-    if config.chat_model not in {item.name for item in entries}:
-        entries.insert(0, OllamaModelInfo(name=config.chat_model))
-    return entries
+    return OllamaCatalogSnapshot(
+        models=tuple(entries),
+        ollama_online=True,
+        has_local_models=bool(entries),
+        source="ollama",
+    )
 
 
 def resolve_effective_context_window(

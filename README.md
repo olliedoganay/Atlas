@@ -16,7 +16,8 @@ Chats, memories, and run state stay on your machine.
 
 For normal use, install a packaged release instead of running the repo in dev mode.
 
-1. Open the repository `Releases` page on GitHub.
+1. Open the latest release on GitHub:
+   `https://github.com/olliedoganay/Atlas/releases/latest`
 2. Download the latest Windows installer or packaged `.exe`.
 3. Install and launch `Atlas`.
 

@@ -51,6 +51,9 @@ class FakeService:
         return {
             "default_model": "test-model",
             "default_temperature": 0.2,
+            "ollama_online": True,
+            "has_local_models": True,
+            "catalog_source": "ollama",
             "temperature_presets": [
                 {"label": "0.0", "value": 0.0},
                 {"label": "0.1", "value": 0.1},
@@ -128,6 +131,16 @@ class FakeService:
 
     def duplicate_thread(self, *, user_id: str, thread_id: str):
         return {"user_id": user_id, "thread_id": f"{thread_id}-copy", "title": "Main chat copy", "chat_model": "test-model", "temperature": 0.2}
+
+    def branch_thread(self, *, user_id: str, thread_id: str, after_message_count: int):
+        return {
+            "user_id": user_id,
+            "thread_id": f"{thread_id}-branch",
+            "title": "Main chat branch",
+            "chat_model": "test-model",
+            "temperature": 0.2,
+            "after_message_count": after_message_count,
+        }
 
     def start_manual_compact(self, *, user_id: str, thread_id: str):
         return {
@@ -238,6 +251,8 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(health.json()["product"], "Atlas")
         self.assertEqual(models.json()["models"], ["test-model", "model-b"])
         self.assertEqual(models.json()["default_temperature"], 0.2)
+        self.assertTrue(models.json()["ollama_online"])
+        self.assertTrue(models.json()["has_local_models"])
         self.assertTrue(models.json()["model_details"][1]["supports_images"])
         self.assertEqual(users.json()[0]["user_id"], "research_user")
         self.assertEqual(memories.json()[0]["memory_id"], "mem-1")
@@ -316,17 +331,20 @@ class ApiTests(unittest.TestCase):
             json={"user_id": "research_user", "title": "Research notes"},
         )
         duplicated = self.client.post("/threads/main/duplicate", json={"user_id": "research_user"})
+        branched = self.client.post("/threads/main/branch", json={"user_id": "research_user", "after_message_count": 2})
         self.assertEqual(created.status_code, 200)
         self.assertEqual(unlocked.status_code, 200)
         self.assertEqual(locked.status_code, 200)
         self.assertEqual(renamed.status_code, 200)
         self.assertEqual(duplicated.status_code, 200)
+        self.assertEqual(branched.status_code, 200)
         self.assertEqual(created.json()["user_id"], "atlas_user")
         self.assertEqual(created.json()["protection"], "password")
         self.assertFalse(created.json()["locked"])
         self.assertTrue(locked.json()["locked"])
         self.assertEqual(renamed.json()["title"], "Research notes")
         self.assertEqual(duplicated.json()["thread_id"], "main-copy")
+        self.assertEqual(branched.json()["thread_id"], "main-branch")
 
     def test_user_delete(self) -> None:
         deleted = self.client.delete("/users/research_user", params={"confirmation_user_id": "research_user"})

@@ -77,6 +77,9 @@ export type TemperaturePreset = {
 export type ModelCatalog = {
   default_model: string;
   default_temperature: number;
+  ollama_online: boolean;
+  has_local_models: boolean;
+  catalog_source: "ollama" | "fallback";
   temperature_presets: TemperaturePreset[];
   models: string[];
   model_details: Array<{
@@ -248,6 +251,13 @@ export function duplicateThread(threadId: string, userId: string) {
   return request<ThreadSummary>(`/threads/${encodeURIComponent(threadId)}/duplicate`, {
     method: "POST",
     body: JSON.stringify({ user_id: userId }),
+  });
+}
+
+export function branchThread(threadId: string, userId: string, afterMessageCount: number) {
+  return request<ThreadSummary>(`/threads/${encodeURIComponent(threadId)}/branch`, {
+    method: "POST",
+    body: JSON.stringify({ user_id: userId, after_message_count: afterMessageCount }),
   });
 }
 
