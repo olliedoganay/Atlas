@@ -33,6 +33,8 @@ export type ImageAttachment = {
 export type UserSummary = {
   user_id: string;
   updated_at?: string;
+  protection?: "passwordless" | "password";
+  locked?: boolean;
 };
 
 export type StoredMemory = {
@@ -54,6 +56,17 @@ export type BackendStatus = {
   ollama_url: string;
   runtime_mode: string;
   busy: boolean;
+  security: {
+    profile_key_protection: string;
+    run_artifacts_encrypted_at_rest: boolean;
+    run_index_encrypted_at_rest: boolean;
+    packaged_logs_default: string;
+    sqlite_encrypted_at_rest: boolean;
+    sqlite_paths: string[];
+    vector_store: string;
+    vector_store_encrypted_at_rest: boolean;
+    vector_store_path: string;
+  };
 };
 
 export type TemperaturePreset = {
@@ -175,10 +188,23 @@ export function getUsers() {
   return request<UserSummary[]>("/users");
 }
 
-export function createUser(userId: string) {
+export function createUser(userId: string, password?: string) {
   return request<UserSummary>("/users", {
     method: "POST",
-    body: JSON.stringify({ user_id: userId }),
+    body: JSON.stringify({ user_id: userId, password: password || null }),
+  });
+}
+
+export function unlockUser(userId: string, password?: string) {
+  return request<UserSummary>(`/users/${encodeURIComponent(userId)}/unlock`, {
+    method: "POST",
+    body: JSON.stringify({ password: password || null }),
+  });
+}
+
+export function lockUser(userId: string) {
+  return request<UserSummary>(`/users/${encodeURIComponent(userId)}/lock`, {
+    method: "POST",
   });
 }
 

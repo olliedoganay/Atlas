@@ -11,6 +11,7 @@ import {
   getStatus,
   getThreadHistory,
   getThreads,
+  getUsers,
   renameThread,
   startCompact,
   startChat,
@@ -91,16 +92,24 @@ export function WorkspacePage() {
     queryFn: getModels,
     staleTime: 10000,
   });
+  const { data: users = [] } = useQuery({
+    queryKey: ["users"],
+    queryFn: getUsers,
+    staleTime: 5000,
+    retry: 1,
+    refetchOnWindowFocus: false,
+  });
+  const currentUserLocked = Boolean(users.find((user) => user.user_id === currentUserId)?.locked);
   const { data: threads = [] } = useQuery({
     queryKey: ["threads", currentUserId],
     queryFn: () => getThreads(currentUserId),
-    enabled: Boolean(currentUserId),
+    enabled: Boolean(currentUserId) && !currentUserLocked,
     staleTime: 2000,
   });
   const { data: history = [] } = useQuery({
     queryKey: ["thread-history", currentUserId, currentThreadId],
     queryFn: () => getThreadHistory(currentThreadId, currentUserId),
-    enabled: Boolean(currentUserId && currentThreadId),
+    enabled: Boolean(currentUserId && currentThreadId) && !currentUserLocked,
     staleTime: 2000,
   });
 

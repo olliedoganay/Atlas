@@ -1,26 +1,37 @@
 # Atlas
 
-Atlas is a desktop app for chatting with local Ollama models.
+Atlas is a Windows desktop app for chatting with local Ollama models.
 
-It keeps chats, memory, and thread state on your machine.
+Chats, memories, and run state stay on your machine.
 
-## Current Scope
+## Scope
 
-- chat workspace for long-running local conversations
+- local chat workspace for long-running conversations
+- per-user profiles with passwordless or password-protected access
 - search across the current chat and all local chats
 - automatic and manual context compaction for long threads
-- optional local memory retrieval with manual memory controls
+- optional cross-chat memory retrieval with manual memory controls
 
-## Stack
+## Install from Release
 
-- desktop shell: Tauri, React, Vite
-- backend: Python, FastAPI, LangGraph
-- model runtime: Ollama
-- local storage: `.data/`, local Qdrant, sqlite checkpoints
+If you want the normal desktop app, use a packaged release instead of the repo dev launcher.
 
-## Requirements
+1. Open the repository `Releases` page on GitHub.
+2. Download the latest Windows installer or packaged `.exe`.
+3. Install and launch `Atlas`.
 
-- Windows 10 or 11 with PowerShell
+The packaged app runs without the extra PowerShell window used by `tauri dev`.
+
+Release standard:
+
+- manifest version: `X.Y.Z`
+- git tag: `vX.Y.Z`
+- GitHub release title: `Atlas vX.Y.Z`
+
+## Requirements for Source Builds
+
+- Windows 10 or 11
+- PowerShell
 - Python 3.11+
 - Node.js 20+
 - Rust stable toolchain with Cargo
@@ -28,11 +39,7 @@ It keeps chats, memory, and thread state on your machine.
 - a chat model such as `gpt-oss:20b`
 - an embedding model such as `nomic-embed-text:latest`
 
-## Platform Notes
-
-The repo scripts, launcher wrappers, verification flow, and packaging steps are Windows-first. The source tree is mostly portable, but the documented commands assume Windows paths, PowerShell, and `.exe` entrypoints.
-
-## Install
+## Install from Source
 
 1. Create and activate the Python environment.
 
@@ -69,9 +76,7 @@ npm install
 Set-Location ..\..
 ```
 
-If `cargo` is not available on `PATH`, install the Rust stable toolchain before running any Tauri dev or verification command.
-
-## Run
+## Run from Source
 
 Start the desktop app from source:
 
@@ -86,58 +91,38 @@ On first launch:
 3. Return to `Workspace`
 4. Pick a model and start the first chat
 
-## Other Commands
-
 If you open a new terminal later, reactivate the repo environment first:
 
 ```powershell
 .venv\Scripts\Activate.ps1
 ```
 
-Run only the backend:
+Useful source commands:
 
 ```powershell
 .venv\Scripts\atlas-backend.exe
-```
-
-Open the CLI chat:
-
-```powershell
 .venv\Scripts\atlas.exe --user-id your_user
-```
-
-Run a single local turn:
-
-```powershell
 .venv\Scripts\atlas.exe --user-id your_user --ask "What should I build next?"
-```
-
-Repo-local wrappers also work:
-
-```powershell
 python atlas.py --user-id your_user
 python atlas.py --user-id your_user --ask "What should I build next?"
 python -m atlas_local.api
 ```
 
-## Search and Compaction
+## Security Model
 
-`Search` lets you search inside the current chat and across all local chats, then jump directly to the matched thread or message.
+Atlas is designed for local use:
 
-`Auto compact long chats` summarizes older turns when the represented context gets too large for the active model window.
+- the desktop app talks to a local backend
+- Ollama is expected to run on the same machine
+- Windows builds protect the run index and saved run artifacts with DPAPI
+- password-protected profiles wrap their profile key behind the profile password
+- packaged backend logs stay off by default unless you explicitly enable them
 
-`Compact now` triggers the same summary flow on demand when you want to shrink prompt pressure before the next turn.
+Current limitation:
 
-Compaction does not delete visible messages from the chat UI. It changes how older context is represented when Atlas builds the next model prompt.
+- LangGraph checkpoints, Mem0 history, and local Qdrant storage are still persisted as local files and are not encrypted at rest yet
 
-## Memory Model
-
-Atlas keeps memory simple:
-
-- manual notes can be added or deleted in `Settings`
-- semantic retrieval can pull relevant memories from other chats for the same user
-- lightweight heuristic extraction persists durable user facts from chat into memory
-- extracted memory is intentionally limited to profile, preference, and constraint-style notes
+Atlas is local-first and partially hardened, but it is not yet a full encrypted vault.
 
 ## Verify the Repo
 
@@ -147,33 +132,34 @@ Run the repo verification script:
 .\scripts\verify_repo.ps1
 ```
 
-That script currently runs:
+That script runs:
 
 - Python unit tests under `tests/`
 - `npm run build:release` in `apps/atlas`
-- `cargo check` in `apps/atlas\src-tauri`
+- `cargo check` in `apps\atlas\src-tauri`
 
 Optional flags:
 
 - `-SkipBackend`
 - `-SkipFrontend`
 
-## Clean Generated Artifacts
+Build a Windows release bundle locally:
 
 ```powershell
-.\scripts\clean_repo.ps1
+.\scripts\build_atlas_release.ps1
 ```
 
-Optional flags:
+That writes installer artifacts under:
 
-- `-IncludeVenv`
-- `-IncludeData`
+```text
+apps\atlas\src-tauri\target\release\bundle\
+```
 
 ## Repository Layout
 
-- `src/atlas_local`: Python runtime, API, graph execution, memory integration, and CLI entrypoints
-- `apps/atlas`: desktop shell built with Tauri, React, and Vite
-- `prompts`: prompt templates used by the backend
+- `src/atlas_local`: Python runtime, API, graph execution, memory integration, security helpers, and CLI entrypoints
+- `apps/atlas`: Tauri, React, and Vite desktop shell
+- `prompts`: backend prompt templates
 - `scripts`: dev, verify, package, and cleanup helpers
 - `tests`: backend and API test suite
 
@@ -184,32 +170,9 @@ Atlas writes runtime data under `.data/`:
 - `langgraph/checkpoints.sqlite`: thread checkpoint state
 - `mem0_history.sqlite`: Mem0 history database
 - `qdrant/`: local vector storage for semantic memory
-- `runs/`: saved run artifacts and event streams
+- `runs/`: saved run artifacts and run index
 
 These paths should stay out of Git. The repo ignore rules already cover them.
-
-## Privacy Notes
-
-Atlas is designed for local use:
-
-- the desktop app talks to a local backend
-- Ollama is expected to run on the same machine
-- thread history, summaries, and memory stay on disk locally
-
-Current limitation:
-
-- local data is persisted on disk but not encrypted at rest
-
-That means Atlas is local-first, but not yet a hardened encrypted vault.
-
-## Architecture
-
-- `src/atlas_local/api.py`: FastAPI surface for the desktop client
-- `src/atlas_local/api_service.py`: backend orchestration, streaming, search, compaction, duplication, and reset flows
-- `src/atlas_local/run_store.py`: persisted thread and run artifacts
-- `src/atlas_local/run_contract.py`: shared run event and trace contract
-- `src/atlas_local/graph/*`: chat graph composition, context compaction, and memory injection
-- `src/atlas_local/memory/*`: Mem0 integration and heuristic memory extraction
 
 ## Troubleshooting
 
@@ -221,8 +184,10 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 If the desktop app opens but no models appear:
 
-1. Make sure Ollama is running
-2. Make sure the models in `.env` have been pulled locally
-3. Restart Atlas from the desktop shell
+1. Make sure Ollama is running.
+2. Make sure the models in `.env` have been pulled locally.
+3. Restart Atlas.
 
 If the backend is offline after a code change, fully close and reopen the app. Backend Python changes require a real restart, not only a frontend refresh.
+
+If Atlas only works while a PowerShell window stays open, you are running the source/dev launcher. Use a packaged build from GitHub Releases for normal desktop use.

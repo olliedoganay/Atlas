@@ -66,10 +66,12 @@ export function AtlasShell() {
     retry: 1,
     refetchOnWindowFocus: false,
   });
+  const currentUserProfile = users.find((user) => user.user_id === currentUserId);
+  const currentUserLocked = Boolean(currentUserProfile?.locked);
   const { data: threads = [] } = useQuery({
     queryKey: ["threads", currentUserId],
     queryFn: () => getThreads(currentUserId),
-    enabled: isWorkspaceRoute && Boolean(currentUserId),
+    enabled: isWorkspaceRoute && Boolean(currentUserId) && !currentUserLocked,
     staleTime: 2000,
   });
 
@@ -182,12 +184,12 @@ export function AtlasShell() {
   }, [currentThreadId, currentThreadTitle, currentUserId, defaultModel, defaultTemperature, draftThreadModel, draftThreadTemperature, threadItems]);
 
   useEffect(() => {
-    if (usersFetched && currentUserId && !users.some((user) => user.user_id === currentUserId)) {
+    if (usersFetched && currentUserId && (!currentUserProfile || currentUserProfile.locked)) {
       setCurrentUserId("");
       setCurrentThreadTitle("main");
       setCurrentThreadId("main");
     }
-  }, [currentUserId, setCurrentThreadId, setCurrentThreadTitle, setCurrentUserId, users, usersFetched]);
+  }, [currentUserId, currentUserProfile, setCurrentThreadId, setCurrentThreadTitle, setCurrentUserId, usersFetched]);
 
   useEffect(() => {
     if (isWorkspaceRoute && !currentThreadId && threadItems.length) {

@@ -136,6 +136,100 @@ class RunStoreTests(unittest.TestCase):
             self.assertEqual(thread["last_run_id"], chat_run["run_id"])
             self.assertEqual(thread["temperature"], 0.7)
 
+    def test_create_user_can_store_password_protection_and_verify_password(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = load_config(project_root=Path(temp_dir), env={})
+            store = RunStore(config)
+
+            user = store.create_user("protected_user", password="atlas-secret")
+
+            self.assertEqual(user["protection"], "password")
+            self.assertIsNotNone(user["password_hash"])
+            self.assertIsNotNone(user["password_salt"])
+            self.assertTrue(store.verify_user_password("protected_user", "atlas-secret"))
+            self.assertFalse(store.verify_user_password("protected_user", "wrong-secret"))
+
+    def test_delete_thread_preserves_user_record(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = load_config(project_root=Path(temp_dir), env={})
+            store = RunStore(config)
+            store.create_user("research_user", password="atlas-secret")
+            store.unlock_user_key("research_user", password="atlas-secret")
+            store.create_run(
+                mode="chat",
+                user_id="research_user",
+                thread_id="main",
+                chat_model="gpt-oss:20b",
+                temperature=0.2,
+                prompt="hello",
+            )
+
+            store.delete_thread(user_id="research_user", thread_id="main")
+
+            user = store.get_user("research_user")
+            self.assertIsNotNone(user)
+            self.assertEqual(user["protection"], "password")
+
+    def test_upsert_thread_preserves_existing_user_protection_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = load_config(project_root=Path(temp_dir), env={})
+            store = RunStore(config)
+            store.create_user("research_user", password="atlas-secret")
+
+            store.upsert_thread(
+                user_id="research_user",
+                thread_id="main",
+                title="main",
+                chat_model="gpt-oss:20b",
+                temperature=0.2,
+            )
+
+            user = store.get_user("research_user")
+            self.assertIsNotNone(user)
+            self.assertEqual(user["protection"], "password")
+            self.assertTrue(store.verify_user_password("research_user", "atlas-secret"))
+
+    def test_run_artifact_is_encrypted_at_rest(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = load_config(project_root=Path(temp_dir), env={})
+            store = RunStore(config)
+            store.create_user("research_user")
+
+            artifact = store.create_run(
+                mode="chat",
+                user_id="research_user",
+                thread_id="main",
+                chat_model="gpt-oss:20b",
+                temperature=0.2,
+                prompt="super secret prompt",
+            )
+
+            run_path = config.data_dir / "runs" / f"{artifact['run_id']}.json"
+            raw_text = run_path.read_text(encoding="utf-8")
+            self.assertNotIn("super secret prompt", raw_text)
+            self.assertIn('"format": "atlas-dpapi-run-v1"', raw_text)
+            self.assertEqual(store.get_run(artifact["run_id"])["prompt"], "super secret prompt")
+
+    def test_index_is_encrypted_at_rest(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = load_config(project_root=Path(temp_dir), env={})
+            store = RunStore(config)
+            store.create_user("research_user")
+            store.upsert_thread(
+                user_id="research_user",
+                thread_id="main",
+                title="secret project",
+                chat_model="gpt-oss:20b",
+                temperature=0.2,
+                last_prompt="this should not leak",
+            )
+
+            index_text = (config.data_dir / "runs" / "index.json").read_text(encoding="utf-8")
+            self.assertNotIn("secret project", index_text)
+            self.assertNotIn("this should not leak", index_text)
+            self.assertIn('"format": "atlas-dpapi-index-v1"', index_text)
+            self.assertEqual(store.list_threads(user_id="research_user")[0]["title"], "secret project")
+
 
 if __name__ == "__main__":
     unittest.main()

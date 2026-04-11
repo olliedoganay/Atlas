@@ -10,11 +10,22 @@ $pythonExe = Join-Path $repoRoot ".venv\Scripts\python.exe"
 $atlasDir = Join-Path $repoRoot "apps\atlas"
 $tauriDir = Join-Path $atlasDir "src-tauri"
 
-if (-not $SkipBackend) {
-  if (-not (Test-Path -LiteralPath $pythonExe)) {
-    throw "Python environment not found: $pythonExe"
-  }
+if (-not (Test-Path -LiteralPath $pythonExe)) {
+  throw "Python environment not found: $pythonExe"
+}
 
+Write-Host "Checking Atlas version consistency..." -ForegroundColor Cyan
+Push-Location $repoRoot
+try {
+  & $pythonExe scripts\check_atlas_version.py
+  if ($LASTEXITCODE -ne 0) {
+    throw "Atlas version check failed with exit code $LASTEXITCODE."
+  }
+} finally {
+  Pop-Location
+}
+
+if (-not $SkipBackend) {
   Write-Host "Running backend test suite..." -ForegroundColor Cyan
   Push-Location $repoRoot
   try {

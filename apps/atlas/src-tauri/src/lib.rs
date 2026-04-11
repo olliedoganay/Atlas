@@ -135,9 +135,13 @@ fn start_backend(app: AppHandle, state: &State<'_, BackendState>) -> Result<(), 
         } => {
             fs::create_dir_all(&data_dir).map_err(|error| error.to_string())?;
             fs::create_dir_all(data_dir.join("langgraph")).map_err(|error| error.to_string())?;
-            let log_dir = data_dir.join("logs");
-            fs::create_dir_all(&log_dir).map_err(|error| error.to_string())?;
-            let (stdout, stderr) = backend_log_streams(&log_dir.join("backend.log"))?;
+            let (stdout, stderr) = if packaged_backend_logs_enabled() {
+                let log_dir = data_dir.join("logs");
+                fs::create_dir_all(&log_dir).map_err(|error| error.to_string())?;
+                backend_log_streams(&log_dir.join("backend.log"))?
+            } else {
+                (Stdio::null(), Stdio::null())
+            };
             command.stdout(stdout).stderr(stderr);
             command
                 .current_dir(&data_dir)
@@ -302,6 +306,13 @@ fn backend_log_streams(path: &Path) -> Result<(Stdio, Stdio), String> {
         .map_err(|error| error.to_string())?;
     let stderr = stdout.try_clone().map_err(|error| error.to_string())?;
     Ok((Stdio::from(stdout), Stdio::from(stderr)))
+}
+
+fn packaged_backend_logs_enabled() -> bool {
+    matches!(
+        env::var("ATLAS_ENABLE_PACKAGED_LOGS"),
+        Ok(value) if value == "1" || value.eq_ignore_ascii_case("true")
+    )
 }
 
 fn playwright_browsers_path() -> Option<PathBuf> {

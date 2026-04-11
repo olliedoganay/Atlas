@@ -1,12 +1,26 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useMemo, useState } from "react";
-import { Database, Info, Monitor, Plus, SlidersHorizontal } from "lucide-react";
+import { Database, Info, Lock, Monitor, Plus, SlidersHorizontal, Unlock, Users } from "lucide-react";
 
 import { ResetDialog } from "../components/ResetDialog";
-import { createMemory, createUser, deleteMemory, deleteUser, getMemories, getModels, getStatus, getUsers, resetAll } from "../lib/api";
+import {
+  createMemory,
+  createUser,
+  deleteMemory,
+  deleteUser,
+  getMemories,
+  getModels,
+  getStatus,
+  getUsers,
+  lockUser,
+  resetAll,
+  unlockUser,
+} from "../lib/api";
 import { useAtlasStore } from "../store/useAtlasStore";
 
-type SettingsSection = "general" | "models" | "data" | "about";
+type SettingsSection = "general" | "users" | "models" | "data" | "about";
+type UserProtectionMode = "passwordless" | "password";
 
 export function SettingsPage() {
   const queryClient = useQueryClient();
@@ -25,8 +39,13 @@ export function SettingsPage() {
   const [dialog, setDialog] = useState<"all" | "user" | null>(null);
   const [section, setSection] = useState<SettingsSection>("general");
   const [newUserId, setNewUserId] = useState("");
+  const [newUserProtection, setNewUserProtection] = useState<UserProtectionMode>("passwordless");
+  const [newUserPassword, setNewUserPassword] = useState("");
   const [memoryDraft, setMemoryDraft] = useState("");
   const [pendingDeleteUserId, setPendingDeleteUserId] = useState<string | null>(null);
+  const [unlockTargetUserId, setUnlockTargetUserId] = useState<string | null>(null);
+  const [unlockPassword, setUnlockPassword] = useState("");
+  const [appVersion, setAppVersion] = useState("1.0.0");
   const { data: status } = useQuery({
     queryKey: ["status"],
     queryFn: getStatus,
@@ -67,6 +86,10 @@ export function SettingsPage() {
       return true;
     });
   }, [users]);
+  const currentUser = useMemo(
+    () => visibleUsers.find((user) => user.user_id === currentUserId) ?? null,
+    [currentUserId, visibleUsers],
+  );
   const manualMemories = useMemo(
     () =>
       memories.filter(
@@ -77,9 +100,10 @@ export function SettingsPage() {
     [memories],
   );
   const defaultModel = models?.default_model ?? status?.default_chat_model ?? status?.chat_model ?? "";
+  const security = status?.security;
 
   useEffect(() => {
-    if (usersFetched && currentUserId && !visibleUsers.some((user) => user.user_id === currentUserId)) {
+    if (usersFetched && currentUserId && (!currentUser || currentUser.locked)) {
       setCurrentUserId("");
       setCurrentThreadId("main");
       setCurrentThreadTitle("main");
@@ -94,9 +118,27 @@ export function SettingsPage() {
     setCurrentUserId,
     setDraftThreadModel,
     setDraftThreadTemperature,
-    visibleUsers,
+    currentUser,
     usersFetched,
   ]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void getVersion()
+      .then((version) => {
+        if (!cancelled && version.trim()) {
+          setAppVersion(version.trim());
+        }
+      })
+      .catch(() => {
+        // Keep the manifest fallback if the runtime API is unavailable.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const allReset = useMutation({
     mutationFn: resetAll,
@@ -106,17 +148,60 @@ export function SettingsPage() {
       await queryClient.invalidateQueries();
     },
   });
+
+  const switchToUser = async (userId: string) => {
+    setCurrentUserId(userId);
+    setCurrentThreadId("main");
+    setCurrentThreadTitle("main");
+    setDraftThreadModel(defaultModel);
+    setDraftThreadTemperature(null);
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["users"] }),
+      queryClient.invalidateQueries({ queryKey: ["threads"] }),
+      queryClient.invalidateQueries({ queryKey: ["thread-history"] }),
+      queryClient.invalidateQueries({ queryKey: ["memories"] }),
+    ]);
+  };
+
   const createUserMutation = useMutation({
-    mutationFn: async () => createUser(newUserId.trim()),
+    mutationFn: async () =>
+      createUser(
+        newUserId.trim(),
+        newUserProtection === "password" ? newUserPassword.trim() : undefined,
+      ),
     onSuccess: async (user) => {
-      setCurrentUserId(user.user_id);
-      setCurrentThreadId("main");
-      setCurrentThreadTitle("main");
       setNewUserId("");
+      setNewUserPassword("");
+      setNewUserProtection("passwordless");
+      setUnlockPassword("");
+      setUnlockTargetUserId(null);
+      await switchToUser(user.user_id);
+    },
+  });
+  const unlockUserMutation = useMutation({
+    mutationFn: async (payload: { userId: string; password?: string }) =>
+      unlockUser(payload.userId, payload.password),
+    onSuccess: async (user) => {
+      setUnlockPassword("");
+      setUnlockTargetUserId(null);
+      await switchToUser(user.user_id);
+    },
+  });
+  const lockUserMutation = useMutation({
+    mutationFn: async (userId: string) => lockUser(userId),
+    onSuccess: async (user) => {
+      if (currentUserId === user.user_id) {
+        setCurrentUserId("");
+        setCurrentThreadId("main");
+        setCurrentThreadTitle("main");
+        setDraftThreadModel(defaultModel);
+        setDraftThreadTemperature(null);
+      }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["users"] }),
         queryClient.invalidateQueries({ queryKey: ["threads"] }),
         queryClient.invalidateQueries({ queryKey: ["thread-history"] }),
+        queryClient.invalidateQueries({ queryKey: ["memories"] }),
       ]);
     },
   });
@@ -162,6 +247,8 @@ export function SettingsPage() {
       }
 
       setPendingDeleteUserId(null);
+      setUnlockPassword("");
+      setUnlockTargetUserId(null);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["users"] }),
         queryClient.invalidateQueries({ queryKey: ["threads"] }),
@@ -173,6 +260,7 @@ export function SettingsPage() {
 
   const sections = [
     { id: "general", label: "General", icon: SlidersHorizontal },
+    { id: "users", label: "Users", icon: Users },
     { id: "models", label: "Models", icon: Monitor },
     { id: "data", label: "Data", icon: Database },
     { id: "about", label: "About", icon: Info },
@@ -180,7 +268,9 @@ export function SettingsPage() {
   const activeSectionLabel = sections.find((item) => item.id === section)?.label ?? "General";
   const activeSectionDescription =
     section === "general"
-      ? "Operator identity, theme, and memory behavior."
+      ? "Appearance and conversation behavior."
+      : section === "users"
+        ? "Profile selection, optional password protection, and account lifecycle."
       : section === "models"
         ? "Runtime defaults, temperature behavior, and local model inventory."
         : section === "data"
@@ -237,34 +327,6 @@ export function SettingsPage() {
 
               <div className="settings-row">
                 <div className="settings-row-copy">
-                  <strong>Current user</strong>
-                  <p>Persistent memory is scoped to this user. Switch between saved users here.</p>
-                </div>
-                <select
-                  className="select-input settings-select"
-                  onChange={(event) => {
-                    const nextUser = event.currentTarget.value;
-                    setCurrentUserId(nextUser);
-                    setCurrentThreadId("main");
-                    setCurrentThreadTitle("main");
-                    void Promise.all([
-                      queryClient.invalidateQueries({ queryKey: ["threads"] }),
-                      queryClient.invalidateQueries({ queryKey: ["thread-history"] }),
-                    ]);
-                  }}
-                  value={currentUserId}
-                >
-                  {!currentUserId ? <option value="">No user selected</option> : null}
-                  {visibleUsers.map((user) => (
-                    <option key={user.user_id} value={user.user_id}>
-                      {user.user_id}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="settings-row">
-                <div className="settings-row-copy">
                   <strong>Cross-chat memory</strong>
                   <p>When enabled, Atlas can recall durable facts from other chats for the current user.</p>
                 </div>
@@ -308,35 +370,195 @@ export function SettingsPage() {
                   </button>
                 </div>
               </div>
+            </div>
+          ) : null}
 
+          {section === "users" ? (
+            <div className="settings-rows">
               <div className="settings-row">
                 <div className="settings-row-copy">
-                  <strong>Add user</strong>
-                  <p>Create a new persistent memory namespace and switch to it immediately.</p>
+                  <strong>Current profile</strong>
+                  <p>Select which local profile Atlas should use for chats, memory, and search.</p>
                 </div>
-                <div className="settings-inline-form">
-                  <input
-                    className="text-input settings-user-input"
-                    onChange={(event) => setNewUserId(event.currentTarget.value)}
-                    placeholder="new_user"
-                    value={newUserId}
-                  />
-                  <button
-                    className="primary-button compact-button"
-                    disabled={!newUserId.trim() || createUserMutation.isPending}
-                    onClick={() => createUserMutation.mutate()}
-                    type="button"
-                  >
-                    <Plus size={15} />
-                    {createUserMutation.isPending ? "Adding..." : "Add"}
-                  </button>
+                <span>
+                  {currentUser
+                    ? `${currentUser.user_id} · ${describeUserProtection(currentUser)}`
+                    : "No profile selected"}
+                </span>
+              </div>
+
+              <div className="settings-row settings-row-block">
+                <div className="settings-row-copy">
+                  <strong>Profiles</strong>
+                  <p>Password-protected profiles stay locked until you unlock them in this session.</p>
+                </div>
+                <div className="settings-column">
+                  {visibleUsers.length === 0 ? (
+                    <div className="empty-inline">No profiles created yet.</div>
+                  ) : (
+                    visibleUsers.map((user) => {
+                      const isCurrent = currentUserId === user.user_id;
+                      const isUnlocking = unlockTargetUserId === user.user_id;
+                      const isProtected = user.protection === "password";
+                      const isLocked = Boolean(user.locked);
+                      return (
+                        <div className="stack-card settings-user-card" key={user.user_id}>
+                          <div className="settings-user-card-header">
+                            <div className="settings-user-card-copy">
+                              <strong>{user.user_id}</strong>
+                              <span>{describeUserProtection(user)}</span>
+                            </div>
+                            <div className="inline-actions">
+                              {isCurrent ? <span className="muted-text">Current</span> : null}
+                              {isProtected && !isLocked ? (
+                                <button
+                                  className="ghost-button compact-button"
+                                  disabled={lockUserMutation.isPending}
+                                  onClick={() => lockUserMutation.mutate(user.user_id)}
+                                  type="button"
+                                >
+                                  <Lock size={14} />
+                                  Lock
+                                </button>
+                              ) : null}
+                              {!isLocked ? (
+                                <button
+                                  className="primary-button compact-button"
+                                  disabled={isCurrent}
+                                  onClick={() => {
+                                    void switchToUser(user.user_id);
+                                  }}
+                                  type="button"
+                                >
+                                  Use profile
+                                </button>
+                              ) : (
+                                <button
+                                  className="ghost-button compact-button"
+                                  onClick={() => {
+                                    setUnlockTargetUserId(user.user_id);
+                                    setUnlockPassword("");
+                                  }}
+                                  type="button"
+                                >
+                                  <Unlock size={14} />
+                                  Unlock
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          {isProtected && isLocked && isUnlocking ? (
+                            <div className="settings-column">
+                              <div className="settings-inline-form">
+                                <input
+                                  className="text-input settings-user-input"
+                                  onChange={(event) => setUnlockPassword(event.currentTarget.value)}
+                                  placeholder="Enter profile password"
+                                  type="password"
+                                  value={unlockPassword}
+                                />
+                                <button
+                                  className="primary-button compact-button"
+                                  disabled={!unlockPassword.trim() || unlockUserMutation.isPending}
+                                  onClick={() =>
+                                    unlockUserMutation.mutate({
+                                      userId: user.user_id,
+                                      password: unlockPassword.trim(),
+                                    })
+                                  }
+                                  type="button"
+                                >
+                                  {unlockUserMutation.isPending ? "Unlocking..." : "Unlock and use"}
+                                </button>
+                                <button
+                                  className="ghost-button compact-button"
+                                  onClick={() => {
+                                    setUnlockTargetUserId(null);
+                                    setUnlockPassword("");
+                                  }}
+                                  type="button"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                              {unlockUserMutation.isError ? (
+                                <div className="error-inline">{getMutationErrorMessage(unlockUserMutation.error)}</div>
+                              ) : null}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              <div className="settings-row settings-row-block">
+                <div className="settings-row-copy">
+                  <strong>Create profile</strong>
+                  <p>Choose a profile name and decide whether Atlas should require a password to unlock it.</p>
+                </div>
+                <div className="settings-column">
+                  <div className="settings-inline-form">
+                    <input
+                      className="text-input settings-user-input"
+                      onChange={(event) => setNewUserId(event.currentTarget.value)}
+                      placeholder="new_profile"
+                      value={newUserId}
+                    />
+                    <div className="segmented-control">
+                      <button
+                        className={`segmented-button ${newUserProtection === "passwordless" ? "active" : ""}`}
+                        onClick={() => setNewUserProtection("passwordless")}
+                        type="button"
+                      >
+                        Passwordless
+                      </button>
+                      <button
+                        className={`segmented-button ${newUserProtection === "password" ? "active" : ""}`}
+                        onClick={() => setNewUserProtection("password")}
+                        type="button"
+                      >
+                        Password
+                      </button>
+                    </div>
+                  </div>
+                  {newUserProtection === "password" ? (
+                    <div className="settings-inline-form">
+                      <input
+                        className="text-input settings-user-input"
+                        onChange={(event) => setNewUserPassword(event.currentTarget.value)}
+                        placeholder="Profile password"
+                        type="password"
+                        value={newUserPassword}
+                      />
+                    </div>
+                  ) : null}
+                  <div className="settings-inline-form">
+                    <button
+                      className="primary-button compact-button"
+                      disabled={
+                        !newUserId.trim() ||
+                        createUserMutation.isPending ||
+                        (newUserProtection === "password" && !newUserPassword.trim())
+                      }
+                      onClick={() => createUserMutation.mutate()}
+                      type="button"
+                    >
+                      <Plus size={15} />
+                      {createUserMutation.isPending ? "Creating..." : "Create profile"}
+                    </button>
+                  </div>
+                  {createUserMutation.isError ? (
+                    <div className="error-inline">{getMutationErrorMessage(createUserMutation.error)}</div>
+                  ) : null}
                 </div>
               </div>
 
               <div className="settings-row danger">
                 <div className="settings-row-copy">
-                  <strong>Delete current user</strong>
-                  <p>Delete this user and remove their chats, saved runs, durable world state, and manual memories.</p>
+                  <strong>Delete current profile</strong>
+                  <p>Delete this profile and remove its chats, saved runs, durable world state, and manual memories.</p>
                 </div>
                 <button
                   className="danger-button compact-button"
@@ -350,7 +572,6 @@ export function SettingsPage() {
                   {deleteUserMutation.isPending ? "Deleting..." : "Delete user"}
                 </button>
               </div>
-
             </div>
           ) : null}
 
@@ -396,6 +617,30 @@ export function SettingsPage() {
 
           {section === "data" ? (
             <div className="settings-rows">
+              <div className="settings-row">
+                <div className="settings-row-copy">
+                  <strong>Local protection</strong>
+                  <p>
+                    {security?.run_artifacts_encrypted_at_rest && security?.run_index_encrypted_at_rest
+                      ? "Run files and the run index are encrypted at rest on this Windows device. Packaged backend logs stay off unless you enable them explicitly."
+                      : "Atlas is storing local data without at-rest protection on this runtime."}
+                  </p>
+                </div>
+                <span>
+                  {security?.run_artifacts_encrypted_at_rest && security?.run_index_encrypted_at_rest
+                    ? "DPAPI + minimal logs"
+                    : "Unprotected"}
+                </span>
+              </div>
+              <div className="settings-row">
+                <div className="settings-row-copy">
+                  <strong>Current limit</strong>
+                  <p>
+                    LangGraph checkpoints, Mem0 history, and local Qdrant storage still stay on disk as local files and are not encrypted at rest yet.
+                  </p>
+                </div>
+                <span>SQLite + Qdrant pending</span>
+              </div>
               <div className="settings-row danger">
                 <div className="settings-row-copy">
                   <strong>Wipe all local data</strong>
@@ -475,7 +720,7 @@ export function SettingsPage() {
                   <strong>Version</strong>
                   <p>Installed desktop shell version.</p>
                 </div>
-                <span>Atlas Desktop v0.1.0</span>
+                <span>{`Atlas Desktop v${appVersion}`}</span>
               </div>
             </div>
           ) : null}
@@ -532,4 +777,18 @@ function formatTemperature(value?: number) {
     return "Creative (0.9)";
   }
   return value.toFixed(1);
+}
+
+function describeUserProtection(user: { protection?: string; locked?: boolean }) {
+  if (user.protection === "password") {
+    return user.locked ? "Password protected · Locked" : "Password protected";
+  }
+  return "Passwordless";
+}
+
+function getMutationErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return "The request did not complete.";
 }

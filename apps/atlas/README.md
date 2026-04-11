@@ -1,14 +1,10 @@
 # Atlas Desktop Shell
 
-This folder contains the Tauri, React, and Vite frontend for Atlas.
+This folder contains the Tauri, React, and Vite desktop shell for Atlas.
 
-For normal development, start the app from the repo root so the desktop shell and Python backend boot together:
+Use the repo root [README](../../README.md) for install, release, and packaging instructions.
 
-```powershell
-.\scripts\start_atlas_dev.ps1
-```
-
-If you need to work inside this folder directly:
+If you need to work inside this folder directly, these are the only commands that matter:
 
 ```powershell
 npm run dev

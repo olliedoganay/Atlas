@@ -64,10 +64,38 @@ class FakeService:
         }
 
     def list_users(self):
-        return [{"user_id": "research_user", "updated_at": "2026-04-08T00:00:00Z"}]
+        return [
+            {
+                "user_id": "research_user",
+                "updated_at": "2026-04-08T00:00:00Z",
+                "protection": "passwordless",
+                "locked": False,
+            }
+        ]
 
-    def create_user(self, *, user_id: str):
-        return {"user_id": user_id, "updated_at": "2026-04-08T00:00:00Z"}
+    def create_user(self, *, user_id: str, password: str | None = None):
+        return {
+            "user_id": user_id,
+            "updated_at": "2026-04-08T00:00:00Z",
+            "protection": "password" if password else "passwordless",
+            "locked": False,
+        }
+
+    def unlock_user(self, *, user_id: str, password: str | None = None):
+        return {
+            "user_id": user_id,
+            "updated_at": "2026-04-08T00:00:00Z",
+            "protection": "password",
+            "locked": False,
+        }
+
+    def lock_user(self, *, user_id: str):
+        return {
+            "user_id": user_id,
+            "updated_at": "2026-04-08T00:00:00Z",
+            "protection": "password",
+            "locked": True,
+        }
 
     def list_memories(self, *, user_id: str, limit: int = 50):
         return [{"memory": "name: Atlas Tester", "memory_id": "mem-1", "metadata": {"source": "manual"}}][:limit]
@@ -280,16 +308,23 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.json()["mode"], "compact")
 
     def test_user_creation_and_thread_rename(self) -> None:
-        created = self.client.post("/users", json={"user_id": "atlas_user"})
+        created = self.client.post("/users", json={"user_id": "atlas_user", "password": "atlas-secret"})
+        unlocked = self.client.post("/users/atlas_user/unlock", json={"password": "atlas-secret"})
+        locked = self.client.post("/users/atlas_user/lock")
         renamed = self.client.patch(
             "/threads/main/title",
             json={"user_id": "research_user", "title": "Research notes"},
         )
         duplicated = self.client.post("/threads/main/duplicate", json={"user_id": "research_user"})
         self.assertEqual(created.status_code, 200)
+        self.assertEqual(unlocked.status_code, 200)
+        self.assertEqual(locked.status_code, 200)
         self.assertEqual(renamed.status_code, 200)
         self.assertEqual(duplicated.status_code, 200)
         self.assertEqual(created.json()["user_id"], "atlas_user")
+        self.assertEqual(created.json()["protection"], "password")
+        self.assertFalse(created.json()["locked"])
+        self.assertTrue(locked.json()["locked"])
         self.assertEqual(renamed.json()["title"], "Research notes")
         self.assertEqual(duplicated.json()["thread_id"], "main-copy")
 

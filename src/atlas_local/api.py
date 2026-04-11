@@ -33,6 +33,11 @@ class PromptRequest(BaseModel):
 
 class UserRequest(BaseModel):
     user_id: str = Field(..., min_length=1)
+    password: str | None = None
+
+
+class UnlockUserRequest(BaseModel):
+    password: str | None = None
 
 
 class MemoryCreateRequest(BaseModel):
@@ -87,7 +92,7 @@ def create_api_app(service: AtlasBackendService | None = None) -> FastAPI:
             if service is None and managed_service is not None:
                 managed_service.close()
 
-    app = FastAPI(title="Atlas API", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Atlas API", version="1.0.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(allowed_origins),
@@ -147,7 +152,15 @@ def create_api_app(service: AtlasBackendService | None = None) -> FastAPI:
 
     @app.post("/users")
     def create_user(request: UserRequest) -> dict[str, Any]:
-        return _handle_runtime(lambda: backend().create_user(user_id=request.user_id))
+        return _handle_runtime(lambda: backend().create_user(user_id=request.user_id, password=request.password))
+
+    @app.post("/users/{user_id}/unlock")
+    def unlock_user(user_id: str, request: UnlockUserRequest) -> dict[str, Any]:
+        return _handle_runtime(lambda: backend().unlock_user(user_id=user_id, password=request.password))
+
+    @app.post("/users/{user_id}/lock")
+    def lock_user(user_id: str) -> dict[str, Any]:
+        return _handle_runtime(lambda: backend().lock_user(user_id=user_id))
 
     @app.delete("/users/{user_id}")
     def delete_user(user_id: str, confirmation_user_id: str = Query(..., min_length=1)) -> dict[str, Any]:

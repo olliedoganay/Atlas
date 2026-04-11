@@ -42,7 +42,100 @@ class ApiServiceCreateTests(unittest.TestCase):
 
         users = AtlasBackendService.list_users(service)
 
-        self.assertEqual(users, [{"user_id": "other_user", "updated_at": "2026-04-11T00:00:00Z"}])
+        self.assertEqual(
+            users,
+            [
+                {
+                    "user_id": "other_user",
+                    "updated_at": "2026-04-11T00:00:00Z",
+                    "protection": "passwordless",
+                    "locked": False,
+                }
+            ],
+        )
+
+    def test_status_reports_current_storage_protection_boundaries(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = load_config(project_root=Path(temp_dir), env={})
+            service = AtlasBackendService(
+                config=config,
+                app=SimpleNamespace(close=lambda: None),
+                run_store=RunStore(config),
+                run_hub=RunHub(),
+            )
+
+            payload = service.status()
+
+            self.assertIn("security", payload)
+            self.assertTrue(payload["security"]["run_artifacts_encrypted_at_rest"])
+            self.assertTrue(payload["security"]["run_index_encrypted_at_rest"])
+            self.assertFalse(payload["security"]["sqlite_encrypted_at_rest"])
+            self.assertEqual(payload["security"]["vector_store"], "local-qdrant")
+
+
+class UserProtectionTests(unittest.TestCase):
+    def test_list_users_marks_password_profiles_locked_until_unlocked(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = load_config(project_root=Path(temp_dir), env={})
+            store = RunStore(config)
+            store.create_user("protected_user", password="atlas-secret")
+            service = AtlasBackendService(
+                config=config,
+                app=SimpleNamespace(close=lambda: None),
+                run_store=store,
+                run_hub=RunHub(),
+            )
+
+            users = service.list_users()
+
+            self.assertEqual(users[0]["protection"], "password")
+            self.assertTrue(users[0]["locked"])
+
+    def test_unlock_user_requires_matching_password(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = load_config(project_root=Path(temp_dir), env={})
+            store = RunStore(config)
+            store.create_user("protected_user", password="atlas-secret")
+            service = AtlasBackendService(
+                config=config,
+                app=SimpleNamespace(close=lambda: None),
+                run_store=store,
+                run_hub=RunHub(),
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "Password did not match"):
+                service.unlock_user(user_id="protected_user", password="wrong-secret")
+
+            unlocked = service.unlock_user(user_id="protected_user", password="atlas-secret")
+
+            self.assertFalse(unlocked["locked"])
+
+    def test_locked_user_cannot_list_threads_until_unlocked(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = load_config(project_root=Path(temp_dir), env={})
+            store = RunStore(config)
+            store.create_user("protected_user", password="atlas-secret")
+            store.upsert_thread(
+                user_id="protected_user",
+                thread_id="main",
+                title="main",
+                chat_model="gpt-oss:20b",
+                temperature=0.2,
+            )
+            service = AtlasBackendService(
+                config=config,
+                app=SimpleNamespace(close=lambda: None),
+                run_store=store,
+                run_hub=RunHub(),
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "Unlock this user"):
+                service.list_threads(user_id="protected_user")
+
+            service.unlock_user(user_id="protected_user", password="atlas-secret")
+            threads = service.list_threads(user_id="protected_user")
+
+            self.assertEqual(threads[0]["thread_id"], "main")
 
 
 class GraphExecutionSequenceTests(unittest.TestCase):
@@ -660,7 +753,7 @@ class ManualCompactionTests(unittest.TestCase):
 class QueuedExecutionTests(unittest.TestCase):
     def _make_service(self, temp_dir: str, abort_calls: list[str]) -> AtlasBackendService:
         config = load_config(project_root=Path(temp_dir), env={})
-        return AtlasBackendService(
+        service = AtlasBackendService(
             config=config,
             app=SimpleNamespace(
                 llm_provider=SimpleNamespace(abort_active_requests=lambda: abort_calls.append("abort")),
@@ -670,6 +763,8 @@ class QueuedExecutionTests(unittest.TestCase):
             run_store=RunStore(config),
             run_hub=RunHub(),
         )
+        service.run_store.create_user("research_user")
+        return service
 
     def test_runs_execute_serially_through_single_worker(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
