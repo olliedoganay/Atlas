@@ -159,6 +159,22 @@ def create_api_app(service: AtlasBackendService | None = None) -> FastAPI:
     def threads(user_id: str | None = Query(default=None)) -> list[dict[str, Any]]:
         return backend().list_threads(user_id=user_id)
 
+    @app.get("/search")
+    def search_threads(
+        user_id: str = Query(..., min_length=1),
+        q: str = Query(..., min_length=1),
+        current_thread_id: str | None = Query(default=None),
+        limit: int = Query(default=8, ge=1, le=25),
+    ) -> dict[str, Any]:
+        return _handle_runtime(
+            lambda: backend().search_threads(
+                user_id=user_id,
+                query=q,
+                current_thread_id=current_thread_id,
+                limit=limit,
+            )
+        )
+
     @app.patch("/threads/{thread_id}/title")
     def rename_thread(thread_id: str, request: ThreadTitleRequest) -> dict[str, Any]:
         return _handle_runtime(

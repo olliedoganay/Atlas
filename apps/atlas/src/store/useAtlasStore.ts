@@ -16,6 +16,13 @@ type CompactionNotice = {
   historyRepresentationTokensAfterCompaction?: number;
 };
 
+type SearchJumpTarget = {
+  userId: string;
+  threadId: string;
+  historyIndex: number | null;
+  query: string;
+};
+
 type AtlasState = {
   theme: ThemeMode;
   currentUserId: string;
@@ -38,6 +45,7 @@ type AtlasState = {
   liveAnswer: string;
   liveError: string;
   compactionNotice: CompactionNotice | null;
+  searchJumpTarget: SearchJumpTarget | null;
   isStreaming: boolean;
   setTheme: (theme: ThemeMode) => void;
   setCurrentUserId: (value: string) => void;
@@ -64,6 +72,8 @@ type AtlasState = {
   failRun: (message: string) => void;
   showCompactionNotice: (notice: CompactionNotice) => void;
   clearCompactionNotice: () => void;
+  setSearchJumpTarget: (target: SearchJumpTarget | null) => void;
+  clearSearchJumpTarget: () => void;
   clearLiveRun: () => void;
 };
 
@@ -93,6 +103,7 @@ export const useAtlasStore = create<AtlasState>()(
       liveAnswer: "",
       liveError: "",
       compactionNotice: null,
+      searchJumpTarget: null,
       isStreaming: false,
       setTheme: (theme) => set({ theme }),
       setCurrentUserId: (value) => set({ currentUserId: value }),
@@ -155,6 +166,8 @@ export const useAtlasStore = create<AtlasState>()(
         }),
       showCompactionNotice: (notice) => set({ compactionNotice: notice }),
       clearCompactionNotice: () => set({ compactionNotice: null }),
+      setSearchJumpTarget: (target) => set({ searchJumpTarget: target }),
+      clearSearchJumpTarget: () => set({ searchJumpTarget: null }),
       clearLiveRun: () =>
         set({
           currentRunId: null,
@@ -168,6 +181,7 @@ export const useAtlasStore = create<AtlasState>()(
           liveAnswer: "",
           liveError: "",
           compactionNotice: null,
+          searchJumpTarget: null,
           isStreaming: false,
         }),
     }),

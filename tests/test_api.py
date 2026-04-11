@@ -118,6 +118,36 @@ class FakeService:
     def get_thread_history(self, *, user_id=None, thread_id: str):
         return [{"role": "user", "content": f"{user_id or 'research_user'}:{thread_id}", "attachments": []}]
 
+    def search_threads(self, *, user_id: str, query: str, current_thread_id: str | None = None, limit: int = 8):
+        return {
+            "query": query,
+            "current_thread_id": current_thread_id or "",
+            "current_thread_results": [
+                {
+                    "thread_id": current_thread_id or "main",
+                    "thread_title": "Main chat",
+                    "chat_model": "test-model",
+                    "updated_at": "2026-04-08T00:00:00Z",
+                    "match_type": "message",
+                    "role": "assistant",
+                    "history_index": 1,
+                    "snippet": "matching answer",
+                }
+            ],
+            "other_thread_results": [
+                {
+                    "thread_id": "archive",
+                    "thread_title": "Archive",
+                    "chat_model": "model-b",
+                    "updated_at": "2026-04-07T00:00:00Z",
+                    "match_type": "thread",
+                    "role": None,
+                    "history_index": None,
+                    "snippet": "matching archive",
+                }
+            ],
+        }
+
     def get_run(self, run_id: str):
         if run_id not in self.artifacts:
             raise RuntimeError(f"Run not found: {run_id}")
@@ -192,6 +222,17 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.json()[0]["thread_id"], "main")
         self.assertEqual(response.json()[0]["title"], "Main chat")
         self.assertEqual(details.json()["answer"], "hello")
+
+    def test_chat_search(self) -> None:
+        response = self.client.get(
+            "/search",
+            params={"user_id": "research_user", "q": "match", "current_thread_id": "main", "limit": 6},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["query"], "match")
+        self.assertEqual(payload["current_thread_results"][0]["thread_id"], "main")
+        self.assertEqual(payload["other_thread_results"][0]["thread_id"], "archive")
 
     def test_chat_run_creation(self) -> None:
         response = self.client.post(

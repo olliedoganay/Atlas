@@ -366,6 +366,138 @@ class ContextCompactionTests(unittest.TestCase):
             ],
         )
 
+    def test_thread_history_ignores_legacy_lifecycle_events_stored_in_snapshot(self) -> None:
+        service = AtlasBackendService.__new__(AtlasBackendService)
+        service.run_store = SimpleNamespace(list_runs_for_thread=lambda **_: [])
+        service._get_snapshot = lambda **_: SimpleNamespace(
+            values={
+                "messages": [],
+                "timeline_events": [
+                    {
+                        "type": "run_started",
+                        "timestamp": "2026-04-11T00:00:00Z",
+                        "run_id": "run-chat",
+                        "chat_model": "gemma4:e4b",
+                    },
+                    {
+                        "type": "context_compacted",
+                        "timestamp": "2026-04-11T00:00:01Z",
+                        "run_id": "run-compact",
+                        "after_message_count": 0,
+                        "compacted_message_count": 2,
+                        "newly_compacted_message_count": 2,
+                        "thread_summary": "- summary",
+                        "detected_context_window": 4096,
+                        "compaction_reason": "auto",
+                        "history_representation_tokens_before_compaction": 1800,
+                        "history_representation_tokens_after_compaction": 640,
+                    },
+                ],
+            }
+        )
+
+        history = AtlasBackendService.get_thread_history(service, user_id="research_user", thread_id="main")
+
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["kind"], "context_compacted")
+        self.assertEqual(history[0]["run_id"], "run-compact")
+
+
+class SearchTests(unittest.TestCase):
+    def test_search_threads_returns_current_and_other_thread_matches(self) -> None:
+        service = AtlasBackendService.__new__(AtlasBackendService)
+        service.run_store = SimpleNamespace(
+            list_threads=lambda **_: [
+                {
+                    "user_id": "research_user",
+                    "thread_id": "current",
+                    "title": "Novel outline",
+                    "chat_model": "gemma4:e4b",
+                    "updated_at": "2026-04-11T10:00:00Z",
+                    "last_prompt": "let's build the world",
+                },
+                {
+                    "user_id": "research_user",
+                    "thread_id": "archive",
+                    "title": "Atlantis notes",
+                    "chat_model": "gpt-oss:20b",
+                    "updated_at": "2026-04-10T09:00:00Z",
+                    "last_prompt": "summarize the ruins",
+                },
+            ]
+        )
+        snapshots = {
+            "current": SimpleNamespace(
+                values={
+                    "messages": [
+                        HumanMessage(content="draft the opening scene"),
+                        AIMessage(content="The opening scene begins in silence."),
+                    ],
+                    "timeline_events": [],
+                }
+            ),
+            "archive": SimpleNamespace(
+                values={
+                    "messages": [
+                        HumanMessage(content="what do we know about Atlantis?"),
+                        AIMessage(content="Atlantis is described as a lost island civilization."),
+                    ],
+                    "timeline_events": [],
+                }
+            ),
+        }
+        service._get_snapshot = lambda **kwargs: snapshots[kwargs["thread_id"]]
+
+        payload = AtlasBackendService.search_threads(
+            service,
+            user_id="research_user",
+            query="Atlantis",
+            current_thread_id="current",
+            limit=5,
+        )
+
+        self.assertEqual(payload["query"], "Atlantis")
+        self.assertEqual(payload["current_thread_results"], [])
+        self.assertEqual(payload["other_thread_results"][0]["thread_id"], "archive")
+        self.assertEqual(payload["other_thread_results"][0]["match_type"], "thread")
+        self.assertEqual(payload["other_thread_results"][1]["history_index"], 1)
+
+    def test_search_threads_returns_message_match_in_current_thread(self) -> None:
+        service = AtlasBackendService.__new__(AtlasBackendService)
+        service.run_store = SimpleNamespace(
+            list_threads=lambda **_: [
+                {
+                    "user_id": "research_user",
+                    "thread_id": "main",
+                    "title": "Novel outline",
+                    "chat_model": "gemma4:e4b",
+                    "updated_at": "2026-04-11T10:00:00Z",
+                    "last_prompt": "draft the opening",
+                },
+            ]
+        )
+        service._get_snapshot = lambda **_: SimpleNamespace(
+            values={
+                "messages": [
+                    HumanMessage(content="draft the opening scene"),
+                    AIMessage(content="The opening scene begins in silence."),
+                ],
+                "timeline_events": [],
+            }
+        )
+
+        payload = AtlasBackendService.search_threads(
+            service,
+            user_id="research_user",
+            query="opening",
+            current_thread_id="main",
+            limit=5,
+        )
+
+        self.assertEqual(len(payload["current_thread_results"]), 3)
+        self.assertEqual(payload["current_thread_results"][0]["match_type"], "thread")
+        self.assertEqual(payload["current_thread_results"][1]["history_index"], 1)
+
 
 class ManualCompactionTests(unittest.TestCase):
     def test_manual_compact_context_summarizes_older_turns(self) -> None:

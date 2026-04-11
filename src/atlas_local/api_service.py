@@ -305,7 +305,7 @@ class AtlasBackendService:
         duplicate_thread_id = f"atlas-{datetime.now(UTC).strftime('%Y-%m-%d-%H-%M-%S')}-{uuid4().hex[:4]}"
         duplicate_title = _duplicate_thread_title(source_thread.get("title") or thread_id)
         duplicate_session_id = scoped_thread_id(user_id, duplicate_thread_id)
-        timeline_events = list(snapshot.values.get("timeline_events", []))
+        timeline_events = _persistent_thread_timeline_events(snapshot.values.get("timeline_events", []))
 
         if history_messages:
             self.app.graph.update_state(
@@ -333,7 +333,9 @@ class AtlasBackendService:
     def get_thread_history(self, *, user_id: str | None, thread_id: str) -> list[dict[str, Any]]:
         snapshot = self._get_snapshot(user_id=user_id, thread_id=thread_id)
         history: list[dict[str, Any]] = []
-        timeline_events = _sorted_thread_timeline_events(list(snapshot.values.get("timeline_events", [])))
+        timeline_events = _sorted_thread_timeline_events(
+            _persistent_thread_timeline_events(snapshot.values.get("timeline_events", []))
+        )
         pending_events = list(timeline_events)
         for index, message in enumerate(snapshot.values.get("messages", []), start=1):
             role = "system"
@@ -349,6 +351,51 @@ class AtlasBackendService:
             history.append(_timeline_event_to_history_item(pending_events.pop(0)))
         return history
 
+    def search_threads(
+        self,
+        *,
+        user_id: str,
+        query: str,
+        current_thread_id: str | None = None,
+        limit: int = 8,
+    ) -> dict[str, Any]:
+        if not user_id.strip():
+            raise RuntimeError("User id is required.")
+
+        normalized_query = _normalize_search_query(query)
+        if len(normalized_query) < 2:
+            return {
+                "query": query.strip(),
+                "current_thread_id": current_thread_id or "",
+                "current_thread_results": [],
+                "other_thread_results": [],
+            }
+
+        thread_items = self.list_threads(user_id=user_id)
+        current_results: list[dict[str, Any]] = []
+        other_results: list[dict[str, Any]] = []
+
+        for thread in thread_items:
+            thread_id = str(thread.get("thread_id", "") or "").strip()
+            if not thread_id:
+                continue
+            matches = self._search_thread_matches(
+                user_id=user_id,
+                thread=thread,
+                normalized_query=normalized_query,
+            )
+            if thread_id == (current_thread_id or ""):
+                current_results.extend(matches)
+            else:
+                other_results.extend(matches)
+
+        return {
+            "query": query.strip(),
+            "current_thread_id": current_thread_id or "",
+            "current_thread_results": _sort_search_results(current_results, current_thread=True)[: max(1, limit)],
+            "other_thread_results": _sort_search_results(other_results, current_thread=False)[: max(1, limit * 2)],
+        }
+
     def get_run(self, run_id: str) -> dict[str, Any]:
         artifact = self.run_store.get_run(run_id)
         user_id = str(artifact.get("user_id", "") or "").strip() or None
@@ -360,6 +407,58 @@ class AtlasBackendService:
         artifact["compacted_message_count"] = int(snapshot.values.get("compacted_message_count", 0) or 0)
         artifact["detected_context_window"] = int(snapshot.values.get("detected_context_window", 0) or 0)
         return artifact
+
+    def _search_thread_matches(
+        self,
+        *,
+        user_id: str,
+        thread: dict[str, Any],
+        normalized_query: str,
+    ) -> list[dict[str, Any]]:
+        thread_id = str(thread.get("thread_id", "") or "").strip()
+        title = str(thread.get("title", "") or thread_id).strip() or thread_id
+        last_prompt = str(thread.get("last_prompt", "") or "").strip()
+        updated_at = str(thread.get("updated_at", "") or "")
+        chat_model = str(thread.get("chat_model", "") or "")
+
+        results: list[dict[str, Any]] = []
+        title_match = normalized_query in title.casefold()
+        prompt_match = bool(last_prompt) and normalized_query in last_prompt.casefold()
+        if title_match or prompt_match:
+            results.append(
+                {
+                    "thread_id": thread_id,
+                    "thread_title": title,
+                    "chat_model": chat_model,
+                    "updated_at": updated_at,
+                    "match_type": "thread",
+                    "role": None,
+                    "history_index": None,
+                    "snippet": _build_thread_search_snippet(title=title, last_prompt=last_prompt, normalized_query=normalized_query),
+                }
+            )
+
+        history = self.get_thread_history(user_id=user_id, thread_id=thread_id)
+        for history_index, item in enumerate(history):
+            role = str(item.get("role", "") or "")
+            if role not in {"user", "assistant"}:
+                continue
+            content = str(item.get("content", "") or "").strip()
+            if not content or normalized_query not in content.casefold():
+                continue
+            results.append(
+                {
+                    "thread_id": thread_id,
+                    "thread_title": title,
+                    "chat_model": chat_model,
+                    "updated_at": updated_at,
+                    "match_type": "message",
+                    "role": role,
+                    "history_index": history_index,
+                    "snippet": _build_search_snippet(content, normalized_query),
+                }
+            )
+        return results
 
     def subscribe(self, run_id: str) -> queue.Queue[RunEvent]:
         return self.run_hub.subscribe(run_id)
@@ -624,7 +723,7 @@ class AtlasBackendService:
         state["messages"] = prior_messages + [new_user_message]
         state.setdefault("thread_summary", "")
         state.setdefault("compacted_message_count", 0)
-        state["timeline_events"] = list(snapshot.values.get("timeline_events", []))
+        state["timeline_events"] = _persistent_thread_timeline_events(snapshot.values.get("timeline_events", []))
         state["detected_context_window"] = effective_context_window
         runtime = SimpleNamespace(
             context=GraphContext(
@@ -762,7 +861,7 @@ class AtlasBackendService:
         state["messages"] = all_messages
         state.setdefault("thread_summary", "")
         state.setdefault("compacted_message_count", 0)
-        state["timeline_events"] = list(snapshot.values.get("timeline_events", []))
+        state["timeline_events"] = _persistent_thread_timeline_events(snapshot.values.get("timeline_events", []))
         state["detected_context_window"] = effective_context_window
         runtime = SimpleNamespace(
             context=GraphContext(
@@ -1547,6 +1646,65 @@ def _temperature_dropdown_values() -> list[float]:
     return [round(step / 10, 1) for step in range(21)]
 
 
+def _normalize_search_query(value: str) -> str:
+    return " ".join(str(value or "").split()).casefold()
+
+
+def _build_search_snippet(content: str, normalized_query: str, *, radius: int = 88) -> str:
+    cleaned = " ".join(content.split()).strip()
+    if not cleaned:
+        return ""
+    haystack = cleaned.casefold()
+    index = haystack.find(normalized_query)
+    if index < 0:
+        return cleaned[: radius * 2].rstrip()
+    start = max(0, index - radius)
+    end = min(len(cleaned), index + len(normalized_query) + radius)
+    prefix = "… " if start > 0 else ""
+    suffix = " …" if end < len(cleaned) else ""
+    return f"{prefix}{cleaned[start:end].strip()}{suffix}"
+
+
+def _build_thread_search_snippet(*, title: str, last_prompt: str, normalized_query: str) -> str:
+    if normalized_query in title.casefold():
+        return title
+    if last_prompt:
+        return _build_search_snippet(last_prompt, normalized_query)
+    return title
+
+
+def _sort_search_results(items: list[dict[str, Any]], *, current_thread: bool) -> list[dict[str, Any]]:
+    if current_thread:
+        return sorted(
+            items,
+            key=lambda item: (
+                0 if str(item.get("match_type", "")) == "thread" else 1,
+                -(int(item.get("history_index", -1) or -1)),
+                str(item.get("thread_title", "") or ""),
+            ),
+        )
+    return sorted(
+        items,
+        key=lambda item: (
+            str(item.get("updated_at", "") or ""),
+            1 if str(item.get("match_type", "")) == "thread" else 0,
+            int(item.get("history_index", -1) or -1),
+            str(item.get("thread_title", "") or ""),
+        ),
+        reverse=True,
+    )
+
+
+def _persistent_thread_timeline_events(items: list[dict[str, Any]] | Any) -> list[dict[str, Any]]:
+    if not isinstance(items, list):
+        return []
+    return [
+        item
+        for item in items
+        if isinstance(item, dict) and str(item.get("type", "")).strip() == "context_compacted"
+    ]
+
+
 def _sorted_thread_timeline_events(items: list[dict[str, Any]] | Any) -> list[dict[str, Any]]:
     if not isinstance(items, list):
         return []
@@ -1587,41 +1745,11 @@ def _timeline_event_to_history_item(item: dict[str, Any]) -> dict[str, Any]:
             "history_representation_tokens_after_compaction": representation_after,
         }
 
-    content = _format_thread_lifecycle_event(item)
     return {
         "role": "system",
         "kind": item_type,
-        "content": content,
+        "content": "System event",
         "attachments": [],
         "run_id": str(item.get("run_id", "") or ""),
         "timestamp": str(item.get("timestamp", "") or ""),
     }
-
-
-def _format_thread_lifecycle_event(item: dict[str, Any]) -> str:
-    item_type = str(item.get("type", "") or "")
-    mode = str(item.get("mode", "chat") or "chat")
-    chat_model = str(item.get("chat_model", "") or "").strip()
-    if item_type == "run_queued":
-        queue_position = max(0, int(item.get("queue_position", 0) or 0))
-        if mode == "compact":
-            return (
-                f"Manual compaction queued behind {queue_position} active "
-                f"{'task' if queue_position == 1 else 'tasks'}."
-            )
-        return (
-            f"Response queued behind {queue_position} active "
-            f"{'task' if queue_position == 1 else 'tasks'}."
-        )
-    if item_type == "run_started":
-        if mode == "compact":
-            return f"Manual compaction started{f' with {chat_model}' if chat_model else ''}."
-        return f"Atlas started responding{f' with {chat_model}' if chat_model else ''}."
-    if item_type == "run_stopped":
-        return "Run stopped."
-    if item_type == "backend_restarted":
-        return "Backend restarted while this run was active."
-    if item_type == "run_failed":
-        error = str(item.get("error", "") or "").strip()
-        return f"Run failed: {error}" if error else "Run failed."
-    return "System event"

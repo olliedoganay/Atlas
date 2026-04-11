@@ -6,6 +6,7 @@ import {
   Copy,
   Plus,
   RotateCcw,
+  Search,
   Settings,
   Workflow,
   X,
@@ -14,6 +15,7 @@ import { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 import { duplicateThread, getModels, getStatus, getThreads, getUsers, resetThread, restartManagedBackend, type ThreadSummary } from "../lib/api";
+import { ChatSearchDialog } from "./ChatSearchDialog";
 import { ResetDialog } from "./ResetDialog";
 import { RunStreamCoordinator } from "./RunStreamCoordinator";
 import { useAtlasStore } from "../store/useAtlasStore";
@@ -37,9 +39,11 @@ export function AtlasShell() {
   const setCurrentThreadTitle = useAtlasStore((state) => state.setCurrentThreadTitle);
   const setDraftThreadModel = useAtlasStore((state) => state.setDraftThreadModel);
   const setDraftThreadTemperature = useAtlasStore((state) => state.setDraftThreadTemperature);
+  const setSearchJumpTarget = useAtlasStore((state) => state.setSearchJumpTarget);
   const toggleNavCollapsed = useAtlasStore((state) => state.toggleNavCollapsed);
   const isWorkspaceRoute = location.pathname === "/workspace";
   const [threadToDelete, setThreadToDelete] = useState<ThreadSummary | null>(null);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
 
   const { data: status } = useQuery({
     queryKey: ["status"],
@@ -192,6 +196,20 @@ export function AtlasShell() {
     }
   }, [currentThreadId, isWorkspaceRoute, setCurrentThreadId, setCurrentThreadTitle, threadItems]);
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!isWorkspaceRoute || !currentUserId) {
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setIsSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [currentUserId, isWorkspaceRoute]);
+
   const restartBackend = async () => {
     await restartManagedBackend();
     await Promise.all([
@@ -253,6 +271,15 @@ export function AtlasShell() {
             <section className="shell-threads">
               {navCollapsed ? (
                 <div className="collapsed-thread-list">
+                  <button
+                    className="ghost-button icon-button"
+                    disabled={!currentUserId}
+                    onClick={() => setIsSearchOpen(true)}
+                    title="Search chats"
+                    type="button"
+                  >
+                    <Search size={16} />
+                  </button>
                   <button className="primary-button icon-button" onClick={createThread} type="button">
                     <Plus size={16} />
                   </button>
@@ -279,6 +306,17 @@ export function AtlasShell() {
                       <Plus size={16} />
                     </button>
                   </div>
+
+                  <button
+                    className="search-launcher"
+                    disabled={!currentUserId}
+                    onClick={() => setIsSearchOpen(true)}
+                    type="button"
+                  >
+                    <Search size={16} />
+                    <span>Search chats</span>
+                    <span className="search-launcher-shortcut">Ctrl+K</span>
+                  </button>
 
                   <ScrollArea.Root className="thread-scroll shell-thread-scroll">
                     <ScrollArea.Viewport className="thread-scroll-viewport">
@@ -380,6 +418,35 @@ export function AtlasShell() {
         onOpenChange={(open) => setThreadToDelete(open ? threadToDelete : null)}
         open={Boolean(threadToDelete)}
         title="Delete chat"
+      />
+      <ChatSearchDialog
+        currentThreadId={currentThreadId}
+        currentThreadTitle={currentThreadTitle}
+        currentUserId={currentUserId}
+        onOpenChange={setIsSearchOpen}
+        onPick={(result, query) => {
+          const existingThread = threadItems.find((item) => item.thread_id === result.thread_id);
+          const targetThread: ThreadSummary = existingThread ?? {
+            user_id: currentUserId,
+            thread_id: result.thread_id,
+            title: result.thread_title || result.thread_id,
+            chat_model: result.chat_model || defaultModel,
+            temperature: null,
+            last_mode: "chat",
+            updated_at: result.updated_at,
+            last_prompt: "",
+            last_run_id: "",
+          };
+          selectThread(targetThread);
+          setSearchJumpTarget({
+            userId: currentUserId,
+            threadId: result.thread_id,
+            historyIndex: typeof result.history_index === "number" ? result.history_index : null,
+            query,
+          });
+          setIsSearchOpen(false);
+        }}
+        open={isSearchOpen}
       />
     </div>
   );

@@ -115,6 +115,24 @@ export type ThreadMessage = {
   compaction_reason?: string;
 };
 
+export type ChatSearchResult = {
+  thread_id: string;
+  thread_title: string;
+  chat_model?: string;
+  updated_at?: string;
+  match_type: "thread" | "message";
+  role?: "user" | "assistant" | null;
+  history_index?: number | null;
+  snippet: string;
+};
+
+export type ChatSearchResponse = {
+  query: string;
+  current_thread_id: string;
+  current_thread_results: ChatSearchResult[];
+  other_thread_results: ChatSearchResult[];
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const primaryRuntime = await getBackendRuntime();
 
@@ -210,6 +228,18 @@ export function duplicateThread(threadId: string, userId: string) {
 export function getThreadHistory(threadId: string, userId?: string) {
   const query = userId ? `?user_id=${encodeURIComponent(userId)}` : "";
   return request<ThreadMessage[]>(`/threads/${encodeURIComponent(threadId)}/history${query}`);
+}
+
+export function searchChats(query: string, userId: string, currentThreadId?: string, limit = 8) {
+  const params = new URLSearchParams({
+    user_id: userId,
+    q: query,
+    limit: String(limit),
+  });
+  if (currentThreadId) {
+    params.set("current_thread_id", currentThreadId);
+  }
+  return request<ChatSearchResponse>(`/search?${params.toString()}`);
 }
 
 export function getRun(runId: string) {

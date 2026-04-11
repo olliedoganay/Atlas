@@ -35,6 +35,7 @@ type ConversationMessage = {
   detectedContextWindow?: number;
   historyRepresentationTokensBeforeCompaction?: number;
   historyRepresentationTokensAfterCompaction?: number;
+  historyIndex?: number;
 };
 
 export function WorkspacePage() {
@@ -72,10 +73,13 @@ export function WorkspacePage() {
   const setStage = useAtlasStore((state) => state.setStage);
   const failRun = useAtlasStore((state) => state.failRun);
   const clearCompactionNotice = useAtlasStore((state) => state.clearCompactionNotice);
+  const searchJumpTarget = useAtlasStore((state) => state.searchJumpTarget);
+  const clearSearchJumpTarget = useAtlasStore((state) => state.clearSearchJumpTarget);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
   const [expandedCompactionKeys, setExpandedCompactionKeys] = useState<Record<string, boolean>>({});
   const [isThinkingExpanded, setIsThinkingExpanded] = useState(false);
+  const [highlightedHistoryIndex, setHighlightedHistoryIndex] = useState<number | null>(null);
 
   const { data: status } = useQuery({
     queryKey: ["status"],
@@ -316,10 +320,11 @@ export function WorkspacePage() {
   }, [currentThread?.title, currentThreadId, currentThreadTitle, setCurrentThreadTitle]);
 
   const transcript = useMemo(() => {
-    const items: ConversationMessage[] = history.map((item: ThreadMessage) => ({
+    const items: ConversationMessage[] = history.map((item: ThreadMessage, historyIndex) => ({
       role: item.role,
       content: item.content,
       attachments: item.attachments,
+      historyIndex,
       kind: item.kind,
       runId: item.run_id,
       timestamp: item.timestamp,
@@ -346,6 +351,38 @@ export function WorkspacePage() {
   useEffect(() => {
     autoScrollToLatestRef.current = true;
   }, [currentUserId, currentThreadId]);
+
+  useEffect(() => {
+    if (!searchJumpTarget) {
+      return;
+    }
+    if (searchJumpTarget.userId !== currentUserId || searchJumpTarget.threadId !== currentThreadId) {
+      return;
+    }
+    if (searchJumpTarget.historyIndex === null || searchJumpTarget.historyIndex === undefined) {
+      clearSearchJumpTarget();
+      return;
+    }
+    const targetHistoryIndex = searchJumpTarget.historyIndex;
+    const targetElement = conversationViewportRef.current?.querySelector<HTMLElement>(
+      `[data-history-index="${targetHistoryIndex}"]`,
+    );
+    if (!targetElement) {
+      return;
+    }
+    autoScrollToLatestRef.current = false;
+    targetElement.scrollIntoView({ behavior: "smooth", block: "center" });
+    setHighlightedHistoryIndex(targetHistoryIndex);
+    clearSearchJumpTarget();
+  }, [clearSearchJumpTarget, currentThreadId, currentUserId, searchJumpTarget, transcript]);
+
+  useEffect(() => {
+    if (highlightedHistoryIndex === null) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setHighlightedHistoryIndex(null), 2400);
+    return () => window.clearTimeout(timer);
+  }, [highlightedHistoryIndex]);
 
   useEffect(() => {
     const viewport = conversationViewportRef.current;
@@ -598,7 +635,11 @@ export function WorkspacePage() {
                     <p className="timeline-system-text">{formatTimelineSystemMessageText(message)}</p>
                   </article>
                 ) : (
-                  <article className={`message-card ${message.role}`} key={`${message.role}-${index}-${message.content.length}`}>
+                  <article
+                    className={`message-card ${message.role}${message.historyIndex === highlightedHistoryIndex ? " search-hit-active" : ""}`}
+                    data-history-index={message.historyIndex}
+                    key={`${message.role}-${index}-${message.content.length}`}
+                  >
                     <div className="message-meta">
                       <span>{formatMessageRoleLabel(message.role)}</span>
                     </div>
