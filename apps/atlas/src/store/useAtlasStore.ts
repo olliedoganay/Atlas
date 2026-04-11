@@ -11,6 +11,8 @@ type CompactionNotice = {
   newlyCompactedMessageCount: number;
   threadSummary: string;
   detectedContextWindow: number;
+  historyRepresentationTokensBeforeCompaction?: number;
+  historyRepresentationTokensAfterCompaction?: number;
 };
 
 type AtlasState = {
@@ -121,6 +123,7 @@ export const useAtlasStore = create<AtlasState>()(
           pendingAttachments: [],
           liveAnswer: "",
           liveError: "",
+          compactionNotice: null,
           currentStage: "completed",
         }),
       failRun: (message) =>
@@ -128,6 +131,7 @@ export const useAtlasStore = create<AtlasState>()(
           currentRunId: null,
           isStreaming: false,
           liveError: message,
+          compactionNotice: null,
           currentStage: "failed",
         }),
       showCompactionNotice: (notice) => set({ compactionNotice: notice }),

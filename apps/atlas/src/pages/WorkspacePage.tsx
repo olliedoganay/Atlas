@@ -14,6 +14,7 @@ import {
   renameThread,
   startChat,
   type ImageAttachment,
+  type ThreadMessage,
 } from "../lib/api";
 import { useAtlasStore } from "../store/useAtlasStore";
 
@@ -22,6 +23,16 @@ type ConversationMessage = {
   content: string;
   attachments?: ImageAttachment[];
   ephemeral?: boolean;
+  dismissible?: boolean;
+  kind?: string;
+  runId?: string;
+  timestamp?: string;
+  threadSummary?: string;
+  compactedMessageCount?: number;
+  newlyCompactedMessageCount?: number;
+  detectedContextWindow?: number;
+  historyRepresentationTokensBeforeCompaction?: number;
+  historyRepresentationTokensAfterCompaction?: number;
 };
 
 export function WorkspacePage() {
@@ -58,7 +69,7 @@ export function WorkspacePage() {
   const clearCompactionNotice = useAtlasStore((state) => state.clearCompactionNotice);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
-  const [showCompactionSummary, setShowCompactionSummary] = useState(false);
+  const [expandedCompactionKeys, setExpandedCompactionKeys] = useState<Record<string, boolean>>({});
 
   const { data: status } = useQuery({
     queryKey: ["status"],
@@ -196,20 +207,6 @@ export function WorkspacePage() {
     }
     return compactionNotice;
   }, [compactionNotice, currentThreadId, currentUserId]);
-  const runCompactedMessageCount = readPositiveInteger(runDetails?.compacted_message_count);
-  const noticedCompactedMessageCount = currentThreadCompactionNotice?.compactedMessageCount ?? 0;
-  const effectiveCompactedMessageCount = Math.max(runCompactedMessageCount, noticedCompactedMessageCount);
-  const effectiveDetectedContextWindow =
-    readPositiveInteger(currentThreadCompactionNotice?.detectedContextWindow) ||
-    readPositiveInteger(runDetails?.detected_context_window);
-  const effectiveThreadSummary = useMemo(() => {
-    const liveSummary = (currentThreadCompactionNotice?.threadSummary || "").trim();
-    if (liveSummary) {
-      return liveSummary;
-    }
-    return String(runDetails?.thread_summary ?? "").trim();
-  }, [currentThreadCompactionNotice?.threadSummary, runDetails?.thread_summary]);
-  const hasCompactionHistory = effectiveCompactedMessageCount > 0 && Boolean(effectiveThreadSummary);
 
   useEffect(() => {
     setDraftTitle(currentThread?.title || currentThreadTitle || currentThreadId || "");
@@ -217,14 +214,8 @@ export function WorkspacePage() {
   }, [currentThread?.title, currentThreadId, currentThreadTitle]);
 
   useEffect(() => {
-    setShowCompactionSummary(false);
+    setExpandedCompactionKeys({});
   }, [currentUserId, currentThreadId]);
-
-  useEffect(() => {
-    if (currentThreadCompactionNotice) {
-      setShowCompactionSummary(true);
-    }
-  }, [currentThreadCompactionNotice?.runId]);
 
   const startRun = useMutation({
     mutationFn: async (value: string) => {
@@ -297,15 +288,31 @@ export function WorkspacePage() {
   }, [currentThread?.title, currentThreadId, currentThreadTitle, setCurrentThreadTitle]);
 
   const transcript = useMemo(() => {
-    const items: ConversationMessage[] = history.map((item) => ({ ...item }));
+    const items: ConversationMessage[] = history.map((item: ThreadMessage) => ({
+      role: item.role,
+      content: item.content,
+      attachments: item.attachments,
+      kind: item.kind,
+      runId: item.run_id,
+      timestamp: item.timestamp,
+      threadSummary: item.thread_summary,
+      compactedMessageCount: item.compacted_message_count,
+      newlyCompactedMessageCount: item.newly_compacted_message_count,
+      detectedContextWindow: item.detected_context_window,
+      historyRepresentationTokensBeforeCompaction: item.history_representation_tokens_before_compaction,
+      historyRepresentationTokensAfterCompaction: item.history_representation_tokens_after_compaction,
+    }));
     if (currentThreadHasActiveRun && (pendingPrompt || pendingAttachments.length)) {
       items.push({ role: "user", content: pendingPrompt, attachments: pendingAttachments, ephemeral: true });
+    }
+    if (currentThreadHasActiveRun && currentThreadCompactionNotice) {
+      items.push(buildLiveCompactionMessage(currentThreadCompactionNotice));
     }
     if (currentThreadHasActiveRun && liveAnswer) {
       items.push({ role: "assistant", content: liveAnswer, ephemeral: true });
     }
     return items;
-  }, [currentThreadHasActiveRun, history, liveAnswer, pendingAttachments, pendingPrompt]);
+  }, [currentThreadCompactionNotice, currentThreadHasActiveRun, history, liveAnswer, pendingAttachments, pendingPrompt]);
 
   useEffect(() => {
     autoScrollToLatestRef.current = true;
@@ -370,6 +377,10 @@ export function WorkspacePage() {
     setAttachments(nextAttachments);
   };
 
+  const toggleCompactionSummary = (key: string) => {
+    setExpandedCompactionKeys((current) => ({ ...current, [key]: !current[key] }));
+  };
+
   return (
     <section className="workspace-main workspace-main-single">
       <div className="workspace-main-header">
@@ -417,35 +428,6 @@ export function WorkspacePage() {
             )}
           </div>
           <p>{headerSummary}</p>
-          {hasCompactionHistory ? (
-            <div className="compaction-summary-card">
-              <div className="compaction-summary-topline">
-                <span className="status-pill subtle compacted">
-                  <span className="status-dot" />
-                  Context compacted
-                </span>
-                <p className="compaction-summary-copy">
-                  {formatCompactionSummaryMessage(
-                    effectiveCompactedMessageCount,
-                    effectiveDetectedContextWindow,
-                  )}
-                </p>
-                <button
-                  className="ghost-button compact-summary-toggle"
-                  onClick={() => setShowCompactionSummary((current) => !current)}
-                  type="button"
-                >
-                  {showCompactionSummary ? "Hide summary" : "Preview summary"}
-                </button>
-              </div>
-              {showCompactionSummary ? (
-                <div className="stack-card compaction-summary-preview">
-                  <span className="compaction-summary-preview-label">Active summary</span>
-                  <pre className="compaction-summary-preview-text">{effectiveThreadSummary}</pre>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
         </div>
 
         <div className="workspace-header-controls">
@@ -514,39 +496,6 @@ export function WorkspacePage() {
             ref={conversationViewportRef}
           >
             <div className="conversation-stack">
-              {currentThreadCompactionNotice ? (
-                <div className="success-banner compact-notice" role="status">
-                  <div className="compact-notice-copy">
-                    <strong>Context compacted while Atlas was answering.</strong>
-                    <span>
-                      {formatCompactionNoticeMessage(
-                        currentThreadCompactionNotice.newlyCompactedMessageCount,
-                        currentThreadCompactionNotice.compactedMessageCount,
-                        effectiveDetectedContextWindow,
-                      )}
-                    </span>
-                  </div>
-                  <div className="compact-notice-actions">
-                    {effectiveThreadSummary ? (
-                      <button
-                        className="ghost-button compact-summary-toggle"
-                        onClick={() => setShowCompactionSummary((current) => !current)}
-                        type="button"
-                      >
-                        {showCompactionSummary ? "Hide summary" : "Preview summary"}
-                      </button>
-                    ) : null}
-                    <button
-                      aria-label="Dismiss compaction notice"
-                      className="ghost-button icon-button"
-                      onClick={() => clearCompactionNotice()}
-                      type="button"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                </div>
-              ) : null}
               {transcript.length === 0 ? (
                 <div className="workspace-idle">
                   <div className="workspace-idle-card">
@@ -558,26 +507,72 @@ export function WorkspacePage() {
                   </div>
                 </div>
               ) : null}
-
               {transcript.map((message, index) => (
-                <article className={`message-card ${message.role}`} key={`${message.role}-${index}-${message.content.length}`}>
-                  <div className="message-meta">
-                    <span>{formatMessageRoleLabel(message.role)}</span>
-                  </div>
-                  {message.attachments?.length ? (
-                    <div className="message-attachments">
-                      {message.attachments.map((item, attachmentIndex) => (
-                        <img
-                          alt={item.name || `attachment-${attachmentIndex + 1}`}
-                          className="message-attachment-image"
-                          key={`${item.data_url}-${attachmentIndex}`}
-                          src={item.data_url}
-                        />
-                      ))}
+                isContextCompactionMessage(message) ? (
+                  <article
+                    className={`message-card system compact-context-message${message.ephemeral ? " active" : ""}`}
+                    key={compactionMessageKey(message, index)}
+                    role={message.ephemeral ? "status" : undefined}
+                  >
+                    <div className="message-meta compact-context-meta">
+                      <span>{formatMessageRoleLabel("system")}</span>
+                      <span className="status-pill subtle compacted">
+                        <span className="status-dot" />
+                        Context compacted
+                      </span>
+                      {message.ephemeral ? <span className="ephemeral-tag">during this response</span> : null}
                     </div>
-                  ) : null}
-                  <MessageContent content={message.content} streaming={Boolean(message.ephemeral && message.role === "assistant")} />
-                </article>
+                    <div className="message-content compact-context-copy">
+                      <p>{formatCompactionMessageText(message)}</p>
+                    </div>
+                    <div className="compact-context-actions">
+                      {message.threadSummary ? (
+                        <button
+                          className="ghost-button compact-summary-toggle"
+                          onClick={() => toggleCompactionSummary(compactionMessageKey(message, index))}
+                          type="button"
+                        >
+                          {expandedCompactionKeys[compactionMessageKey(message, index)] ? "Hide summary" : "Preview summary"}
+                        </button>
+                      ) : null}
+                      {message.dismissible ? (
+                        <button
+                          aria-label="Dismiss compaction notice"
+                          className="ghost-button icon-button"
+                          onClick={() => clearCompactionNotice()}
+                          type="button"
+                        >
+                          <X size={14} />
+                        </button>
+                      ) : null}
+                    </div>
+                    {message.threadSummary && expandedCompactionKeys[compactionMessageKey(message, index)] ? (
+                      <div className="stack-card compaction-summary-preview compact-context-summary">
+                        <span className="compaction-summary-preview-label">Summary snapshot at this point</span>
+                        <pre className="compaction-summary-preview-text">{message.threadSummary}</pre>
+                      </div>
+                    ) : null}
+                  </article>
+                ) : (
+                  <article className={`message-card ${message.role}`} key={`${message.role}-${index}-${message.content.length}`}>
+                    <div className="message-meta">
+                      <span>{formatMessageRoleLabel(message.role)}</span>
+                    </div>
+                    {message.attachments?.length ? (
+                      <div className="message-attachments">
+                        {message.attachments.map((item, attachmentIndex) => (
+                          <img
+                            alt={item.name || `attachment-${attachmentIndex + 1}`}
+                            className="message-attachment-image"
+                            key={`${item.data_url}-${attachmentIndex}`}
+                            src={item.data_url}
+                          />
+                        ))}
+                      </div>
+                    ) : null}
+                    <MessageContent content={message.content} streaming={Boolean(message.ephemeral && message.role === "assistant")} />
+                  </article>
+                )
               ))}
               {currentThreadHasActiveRun && isStreaming && !liveAnswer ? (
                 <article className="message-card assistant message-card-waiting">
@@ -708,11 +703,6 @@ function formatTemperatureLabel(value: number | null | undefined) {
   return value.toFixed(1);
 }
 
-function readPositiveInteger(value: unknown) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : 0;
-}
-
 function isNearBottom(element: HTMLDivElement, threshold = 72) {
   return element.scrollHeight - element.scrollTop - element.clientHeight <= threshold;
 }
@@ -724,27 +714,60 @@ function formatMessageRoleLabel(role: ConversationMessage["role"]) {
   return role;
 }
 
-function formatCompactionSummaryMessage(compactedMessageCount: number, detectedContextWindow: number) {
-  const messageLabel = compactedMessageCount === 1 ? "message was" : "messages were";
-  const windowCopy =
-    detectedContextWindow > 0
-      ? ` Atlas detected a ${detectedContextWindow.toLocaleString()} token window for this model.`
-      : "";
-  return `${compactedMessageCount} earlier ${messageLabel} summarized so Atlas can keep the prompt inside the model context.${windowCopy}`;
+function isContextCompactionMessage(message: ConversationMessage) {
+  return message.role === "system" && message.kind === "context_compacted";
 }
 
-function formatCompactionNoticeMessage(
-  newlyCompactedMessageCount: number,
-  compactedMessageCount: number,
-  detectedContextWindow: number,
-) {
-  const freshCount = newlyCompactedMessageCount > 0 ? newlyCompactedMessageCount : compactedMessageCount;
-  const verb = freshCount === 1 ? "message was" : "messages were";
-  const windowCopy =
-    detectedContextWindow > 0
-      ? ` Context window: ${detectedContextWindow.toLocaleString()} tokens.`
+function buildLiveCompactionMessage(notice: {
+  runId: string;
+  compactedMessageCount: number;
+  newlyCompactedMessageCount: number;
+  threadSummary: string;
+  detectedContextWindow: number;
+  historyRepresentationTokensBeforeCompaction?: number;
+  historyRepresentationTokensAfterCompaction?: number;
+}): ConversationMessage {
+  return {
+    role: "system",
+    kind: "context_compacted",
+    content: "Context compacted",
+    ephemeral: true,
+    dismissible: true,
+    runId: notice.runId,
+    threadSummary: notice.threadSummary,
+    compactedMessageCount: notice.compactedMessageCount,
+    newlyCompactedMessageCount: notice.newlyCompactedMessageCount,
+    detectedContextWindow: notice.detectedContextWindow,
+    historyRepresentationTokensBeforeCompaction: notice.historyRepresentationTokensBeforeCompaction,
+    historyRepresentationTokensAfterCompaction: notice.historyRepresentationTokensAfterCompaction,
+  };
+}
+
+function compactionMessageKey(message: ConversationMessage, index: number) {
+  return message.runId || message.timestamp || `context-compacted-${index}`;
+}
+
+function formatCompactionMessageText(message: ConversationMessage) {
+  const freshCount = Math.max(
+    0,
+    Number(message.newlyCompactedMessageCount ?? message.compactedMessageCount ?? 0),
+  );
+  const compactedCount = Math.max(0, Number(message.compactedMessageCount ?? 0));
+  const countForCopy = freshCount > 0 ? freshCount : compactedCount;
+  const lead = countForCopy > 0
+    ? `${countForCopy} earlier ${countForCopy === 1 ? "message was" : "messages were"} folded into a running summary.`
+    : "Earlier turns were folded into a running summary.";
+  const beforeTokens = Math.max(0, Number(message.historyRepresentationTokensBeforeCompaction ?? 0));
+  const afterTokens = Math.max(0, Number(message.historyRepresentationTokensAfterCompaction ?? 0));
+  const reductionCopy =
+    beforeTokens > afterTokens && afterTokens > 0
+      ? ` Atlas compressed the represented thread context from ${beforeTokens.toLocaleString()} to ${afterTokens.toLocaleString()} estimated tokens.`
       : "";
-  return `${freshCount} earlier ${verb} folded into the thread summary. Atlas will use that summary plus the most recent raw turns on the next prompt.${windowCopy}`;
+  const windowCopy =
+    message.detectedContextWindow && message.detectedContextWindow > 0
+      ? ` Model window: ${message.detectedContextWindow.toLocaleString()} tokens.`
+      : "";
+  return `${lead}${reductionCopy} Future turns use this summary plus the most recent raw turns.${windowCopy}`;
 }
 
 async function fileToAttachment(file: File): Promise<ImageAttachment> {

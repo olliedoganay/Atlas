@@ -1010,39 +1010,51 @@ pre {
   font-size: 0.94rem;
 }
 
-.compaction-summary-card {
-  display: grid;
-  gap: 12px;
-  width: min(100%, 780px);
-  margin-top: 14px;
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-}
-
-.compaction-summary-topline {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
 .status-pill.compacted {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 28%, transparent);
   background: var(--accent-soft);
 }
 
-.compaction-summary-copy {
-  flex: 1 1 320px;
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.94rem;
-}
-
 .compact-summary-toggle {
   min-height: 34px;
   padding-inline: 12px;
+}
+
+.compact-context-message {
+  justify-self: stretch;
+  display: grid;
+  gap: 12px;
+  max-width: 100%;
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--message-system-bg) 78%, var(--surface) 22%);
+}
+
+.compact-context-message.active {
+  border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+  background: color-mix(in srgb, var(--accent-soft) 44%, var(--message-system-bg) 56%);
+}
+
+.compact-context-meta {
+  align-items: center;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.compact-context-copy {
+  margin-top: 0;
+}
+
+.compact-context-copy p {
+  margin: 0;
+  color: var(--muted-strong);
+}
+
+.compact-context-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .compaction-summary-preview {
@@ -1137,35 +1149,6 @@ pre {
   align-content: start;
   min-height: auto;
   padding: 18px 18px 24px;
-}
-
-.compact-notice {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-}
-
-.compact-notice-copy {
-  display: grid;
-  gap: 6px;
-  min-width: 0;
-  flex: 1;
-}
-
-.compact-notice-copy strong {
-  color: var(--text);
-}
-
-.compact-notice-copy span {
-  color: var(--muted-strong);
-}
-
-.compact-notice-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
 }
 
 
@@ -1972,9 +1955,7 @@ pre {
     flex: 1;
   }
 
-  .compaction-summary-topline,
-  .compact-notice,
-  .compact-notice-actions {
+  .compact-context-actions {
     flex-direction: column;
     align-items: stretch;
   }

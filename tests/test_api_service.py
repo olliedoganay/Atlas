@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from atlas_local.api_service import AtlasBackendService
+from atlas_local.api_service import AtlasBackendService, _estimate_thread_representation_tokens
 from atlas_local.graph.builder import execution_node_sequence, post_synthesis_node_sequence, pre_synthesis_node_sequence
 from atlas_local.llm import OllamaModelInfo
 
@@ -223,6 +223,18 @@ class ContextCompactionTests(unittest.TestCase):
         self.assertEqual(result["thread_summary"], "summary")
         self.assertEqual(len(summarized_batches), 1)
 
+        before_tokens = _estimate_thread_representation_tokens(
+            messages=state["messages"],
+            thread_summary="",
+            compacted_message_count=0,
+        )
+        after_tokens = _estimate_thread_representation_tokens(
+            messages=state["messages"],
+            thread_summary=result["thread_summary"],
+            compacted_message_count=result["compacted_message_count"],
+        )
+        self.assertLess(after_tokens, before_tokens)
+
     def test_get_run_includes_compaction_metadata_from_snapshot(self) -> None:
         service = AtlasBackendService.__new__(AtlasBackendService)
         service.run_store = SimpleNamespace(
@@ -246,6 +258,46 @@ class ContextCompactionTests(unittest.TestCase):
         self.assertEqual(artifact["thread_summary"], "summary")
         self.assertEqual(artifact["compacted_message_count"], 4)
         self.assertEqual(artifact["detected_context_window"], 4096)
+
+    def test_thread_history_inserts_context_compaction_marker_at_message_boundary(self) -> None:
+        service = AtlasBackendService.__new__(AtlasBackendService)
+        service._get_snapshot = lambda **_: SimpleNamespace(
+            values={
+                "messages": [
+                    HumanMessage(content="first question"),
+                    AIMessage(content="first answer"),
+                    HumanMessage(content="second question"),
+                    AIMessage(content="second answer"),
+                ],
+                "timeline_events": [
+                    {
+                        "type": "context_compacted",
+                        "timestamp": "2026-04-11T00:00:00Z",
+                        "run_id": "run-2",
+                        "after_message_count": 3,
+                        "compacted_message_count": 2,
+                        "newly_compacted_message_count": 2,
+                        "thread_summary": "- first turn summary",
+                        "detected_context_window": 4096,
+                        "history_representation_tokens_before_compaction": 1800,
+                        "history_representation_tokens_after_compaction": 640,
+                    }
+                ],
+            }
+        )
+
+        history = AtlasBackendService.get_thread_history(service, user_id="research_user", thread_id="main")
+
+        self.assertEqual(
+            [item["role"] for item in history],
+            ["user", "assistant", "user", "system", "assistant"],
+        )
+        marker = history[3]
+        self.assertEqual(marker["kind"], "context_compacted")
+        self.assertEqual(marker["run_id"], "run-2")
+        self.assertEqual(marker["thread_summary"], "- first turn summary")
+        self.assertEqual(marker["history_representation_tokens_before_compaction"], 1800)
+        self.assertEqual(marker["history_representation_tokens_after_compaction"], 640)
 
 
 if __name__ == "__main__":

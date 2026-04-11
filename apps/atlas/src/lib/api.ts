@@ -109,6 +109,15 @@ export type ThreadMessage = {
   role: "user" | "assistant" | "system";
   content: string;
   attachments?: ImageAttachment[];
+  kind?: string;
+  run_id?: string;
+  timestamp?: string;
+  thread_summary?: string;
+  compacted_message_count?: number;
+  newly_compacted_message_count?: number;
+  detected_context_window?: number;
+  history_representation_tokens_before_compaction?: number;
+  history_representation_tokens_after_compaction?: number;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

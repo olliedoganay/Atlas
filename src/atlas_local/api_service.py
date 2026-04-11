@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from .config import AppConfig, load_config
 from .graph.builder import AgentApplication, build_chat_application
@@ -174,6 +174,7 @@ class AtlasBackendService:
         duplicate_thread_id = f"atlas-{datetime.now(UTC).strftime('%Y-%m-%d-%H-%M-%S')}-{uuid4().hex[:4]}"
         duplicate_title = _duplicate_thread_title(source_thread.get("title") or thread_id)
         duplicate_session_id = scoped_thread_id(user_id, duplicate_thread_id)
+        timeline_events = list(snapshot.values.get("timeline_events", []))
 
         if history_messages:
             self.app.graph.update_state(
@@ -183,6 +184,7 @@ class AtlasBackendService:
                     "thread_summary": str(snapshot.values.get("thread_summary", "") or ""),
                     "compacted_message_count": int(snapshot.values.get("compacted_message_count", 0) or 0),
                     "detected_context_window": int(snapshot.values.get("detected_context_window", 0) or 0),
+                    "timeline_events": timeline_events,
                 },
                 as_node="persist",
             )
@@ -200,7 +202,9 @@ class AtlasBackendService:
     def get_thread_history(self, *, user_id: str | None, thread_id: str) -> list[dict[str, Any]]:
         snapshot = self._get_snapshot(user_id=user_id, thread_id=thread_id)
         history: list[dict[str, Any]] = []
-        for message in snapshot.values.get("messages", []):
+        timeline_events = _sorted_context_timeline_events(snapshot.values.get("timeline_events", []))
+        pending_events = list(timeline_events)
+        for index, message in enumerate(snapshot.values.get("messages", []), start=1):
             role = "system"
             if isinstance(message, HumanMessage):
                 role = "user"
@@ -208,6 +212,8 @@ class AtlasBackendService:
                 role = "assistant"
             content, attachments = _message_content_to_history_parts(message.content)
             history.append({"role": role, "content": content, "attachments": attachments})
+            while pending_events and int(pending_events[0].get("after_message_count", 0) or 0) == index:
+                history.append(_timeline_event_to_history_item(pending_events.pop(0)))
         return history
 
     def get_run(self, run_id: str) -> dict[str, Any]:
@@ -412,6 +418,7 @@ class AtlasBackendService:
         state["messages"] = prior_messages + [new_user_message]
         state.setdefault("thread_summary", "")
         state.setdefault("compacted_message_count", 0)
+        state["timeline_events"] = list(snapshot.values.get("timeline_events", []))
         state["detected_context_window"] = effective_context_window
         runtime = SimpleNamespace(
             context=GraphContext(
@@ -450,12 +457,25 @@ class AtlasBackendService:
 
             self._raise_if_cancelled(run_id)
             prior_compacted_count = int(state.get("compacted_message_count", 0) or 0)
+            representation_tokens_before = _estimate_thread_representation_tokens(
+                messages=state.get("messages", []),
+                thread_summary=str(state.get("thread_summary", "") or ""),
+                compacted_message_count=prior_compacted_count,
+            )
             compaction = self._maybe_compact_context(state=state, runtime=runtime)
             if compaction:
                 state.update(compaction)
                 updated_compacted_count = int(state.get("compacted_message_count", 0) or 0)
-                if updated_compacted_count > prior_compacted_count:
-                    self._emit_event(
+                representation_tokens_after = _estimate_thread_representation_tokens(
+                    messages=state.get("messages", []),
+                    thread_summary=str(state.get("thread_summary", "") or ""),
+                    compacted_message_count=updated_compacted_count,
+                )
+                if (
+                    updated_compacted_count > prior_compacted_count
+                    and representation_tokens_after < representation_tokens_before
+                ):
+                    compaction_event = self._emit_event(
                         run_id,
                         "context_compacted",
                         {
@@ -463,8 +483,19 @@ class AtlasBackendService:
                             "newly_compacted_message_count": updated_compacted_count - prior_compacted_count,
                             "thread_summary": str(state.get("thread_summary", "") or ""),
                             "detected_context_window": int(state.get("detected_context_window", 0) or 0),
+                            "history_representation_tokens_before_compaction": representation_tokens_before,
+                            "history_representation_tokens_after_compaction": representation_tokens_after,
                         },
                     )
+                    state["timeline_events"] = list(state.get("timeline_events", [])) + [
+                        {
+                            "type": "context_compacted",
+                            "timestamp": compaction_event["timestamp"],
+                            "run_id": run_id,
+                            "after_message_count": len(prior_messages) + 1,
+                            **compaction_event["payload"],
+                        }
+                    ]
 
             self._emit_stage(run_id, "synthesis")
             answer = self._stream_answer(run_id=run_id, state=state, runtime=runtime)
@@ -499,6 +530,7 @@ class AtlasBackendService:
                     "thread_summary": str(state.get("thread_summary", "") or ""),
                     "compacted_message_count": int(state.get("compacted_message_count", 0) or 0),
                     "detected_context_window": int(state.get("detected_context_window", 0) or 0),
+                    "timeline_events": list(state.get("timeline_events", [])),
                 },
                 as_node="persist",
             )
@@ -832,6 +864,22 @@ def _estimate_history_tokens(messages: list[Any]) -> int:
     return _estimate_prompt_messages_tokens(messages)
 
 
+def _estimate_thread_representation_tokens(
+    *,
+    messages: list[Any],
+    thread_summary: str,
+    compacted_message_count: int,
+) -> int:
+    clamped_compacted_count = max(0, min(int(compacted_message_count or 0), len(messages)))
+    total = _estimate_history_tokens(messages[clamped_compacted_count:])
+    summary = thread_summary.strip()
+    if summary:
+        total += _estimate_prompt_messages_tokens(
+            [SystemMessage(content=f"Conversation summary from earlier in this thread:\n{summary}")]
+        )
+    return total
+
+
 def _select_messages_for_compaction(
     messages: list[HumanMessage | AIMessage],
     *,
@@ -1078,3 +1126,41 @@ def _duplicate_thread_title(value: str) -> str:
 
 def _temperature_dropdown_values() -> list[float]:
     return [round(step / 10, 1) for step in range(21)]
+
+
+def _sorted_context_timeline_events(items: list[dict[str, Any]] | Any) -> list[dict[str, Any]]:
+    if not isinstance(items, list):
+        return []
+    filtered = [
+        item
+        for item in items
+        if isinstance(item, dict) and str(item.get("type", "")).strip() == "context_compacted"
+    ]
+    return sorted(
+        filtered,
+        key=lambda item: (
+            int(item.get("after_message_count", 0) or 0),
+            str(item.get("timestamp", "") or ""),
+        ),
+    )
+
+
+def _timeline_event_to_history_item(item: dict[str, Any]) -> dict[str, Any]:
+    compacted_message_count = int(item.get("compacted_message_count", 0) or 0)
+    detected_context_window = int(item.get("detected_context_window", 0) or 0)
+    representation_before = int(item.get("history_representation_tokens_before_compaction", 0) or 0)
+    representation_after = int(item.get("history_representation_tokens_after_compaction", 0) or 0)
+    return {
+        "role": "system",
+        "kind": "context_compacted",
+        "content": "Context compacted",
+        "attachments": [],
+        "run_id": str(item.get("run_id", "") or ""),
+        "timestamp": str(item.get("timestamp", "") or ""),
+        "thread_summary": str(item.get("thread_summary", "") or ""),
+        "compacted_message_count": compacted_message_count,
+        "newly_compacted_message_count": int(item.get("newly_compacted_message_count", 0) or 0),
+        "detected_context_window": detected_context_window,
+        "history_representation_tokens_before_compaction": representation_before,
+        "history_representation_tokens_after_compaction": representation_after,
+    }

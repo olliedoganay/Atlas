@@ -142,6 +142,12 @@ export function RunStreamCoordinator() {
             const newlyCompactedMessageCount = Number(event.payload.newly_compacted_message_count ?? 0);
             const threadSummary = String(event.payload.thread_summary ?? "");
             const detectedContextWindow = Number(event.payload.detected_context_window ?? 0);
+            const historyRepresentationTokensBeforeCompaction = Number(
+              event.payload.history_representation_tokens_before_compaction ?? 0,
+            );
+            const historyRepresentationTokensAfterCompaction = Number(
+              event.payload.history_representation_tokens_after_compaction ?? 0,
+            );
             showCompactionNotice({
               runId: currentRunId,
               userId: activeRunUserId,
@@ -153,6 +159,12 @@ export function RunStreamCoordinator() {
               threadSummary,
               detectedContextWindow: Number.isFinite(detectedContextWindow)
                 ? Math.max(0, Math.trunc(detectedContextWindow))
+                : 0,
+              historyRepresentationTokensBeforeCompaction: Number.isFinite(historyRepresentationTokensBeforeCompaction)
+                ? Math.max(0, Math.trunc(historyRepresentationTokensBeforeCompaction))
+                : 0,
+              historyRepresentationTokensAfterCompaction: Number.isFinite(historyRepresentationTokensAfterCompaction)
+                ? Math.max(0, Math.trunc(historyRepresentationTokensAfterCompaction))
                 : 0,
             });
             updateRunCompactionMetadata(currentRunId, {

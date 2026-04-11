@@ -11,6 +11,7 @@ class AgentState(TypedDict, total=False):
     thread_summary: str
     compacted_message_count: int
     detected_context_window: int
+    timeline_events: list[dict[str, Any]]
     retrieved_memories: list[str]
     update_candidates: list[dict[str, Any]]
     persisted_memories: list[dict[str, Any]]
