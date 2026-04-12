@@ -1,6 +1,6 @@
 # Atlas
 
-Atlas is a Windows desktop app for chatting with local Ollama models.
+Atlas is a desktop app for chatting with local Ollama models.
 
 Chats, memories, and run state stay on your machine.
 
@@ -15,27 +15,39 @@ Chats, memories, and run state stay on your machine.
 
 ## Install from Release
 
-For normal use, install a packaged release instead of running the repo in dev mode.
+For normal Windows use, install the latest release.
 
 1. Open the latest release on GitHub:
    `https://github.com/olliedoganay/Atlas/releases/latest`
 2. Download the latest Windows installer or packaged `.exe`.
 3. Install and launch `Atlas`.
 
-The packaged app runs without the extra PowerShell window used by `tauri dev`.
-
 ## Requirements for Source Builds
 
-- Windows 10 or 11
-- PowerShell
 - Python 3.11+
 - Node.js 20+
 - Rust stable toolchain with Cargo
 - Ollama running locally
 - a chat model such as `gpt-oss:20b`
 - an embedding model such as `nomic-embed-text:latest`
+- Tauri prerequisites for your platform:
+  `https://v2.tauri.app/start/prerequisites/`
+
+### Windows source prerequisites
+
+- Windows 10 or 11
+- PowerShell
+
+### macOS and Linux source use
+
+- Atlas does not publish macOS or Linux installers.
+- macOS and Linux are supported through source builds.
+- Use the generic source steps below instead of the Windows-only PowerShell helpers.
+- For local secret protection, the machine should have a working OS keychain or secret-store backend.
 
 ## Install from Source
+
+### Windows
 
 1. Create and activate the Python environment.
 
@@ -72,7 +84,46 @@ npm install
 Set-Location ..\..
 ```
 
+### macOS and Linux
+
+1. Create and activate the Python environment.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+2. Install the Python runtime.
+
+```bash
+pip install -r requirements.txt
+pip install -e .
+```
+
+3. Create the local config file.
+
+```bash
+cp .env.example .env
+```
+
+4. Pull the local Ollama models.
+
+```bash
+ollama pull gpt-oss:20b
+ollama pull nomic-embed-text:latest
+```
+
+5. Install the desktop dependencies.
+
+```bash
+cd apps/atlas
+npm install
+cd ../..
+```
+
 ## Run from Source
+
+### Windows
 
 Start the desktop app from source:
 
@@ -102,18 +153,39 @@ Optional source commands:
 python -m atlas_local.api
 ```
 
+### macOS and Linux
+
+Start the desktop shell from source:
+
+```bash
+source .venv/bin/activate
+cd apps/atlas
+npm run tauri dev
+```
+
+Optional source commands:
+
+```bash
+source .venv/bin/activate
+atlas-backend
+atlas --user-id your_user
+atlas --user-id your_user --ask "What should I build next?"
+python -m atlas_local.api
+```
+
+Windows helper scripts under `scripts/*.ps1` are Windows-only.
+
 ## Security Model
 
 For the threat model and supported protection boundaries, see [SECURITY.md](SECURITY.md).
 
-Atlas is designed for local use:
+Atlas is built for local desktop use:
 
-- the desktop app talks to a local backend
-- Ollama is expected to run on the same machine
-- Windows builds protect the run index and saved run artifacts with DPAPI
-- packaged Windows runtimes encrypt LangGraph checkpoints, Mem0 history, and local Qdrant storage with SQLCipher-backed local storage
-- password-protected profiles wrap their profile key behind the profile password
-- packaged backend logs stay off by default unless you explicitly enable them
+- the desktop app talks to a local backend on the same machine
+- Ollama is expected to run locally
+- saved runs and profile keys are protected with local OS secret storage
+- runtime SQLite and local vector-store storage use encrypted local storage when SQLCipher support is available
+- password-protected profiles add an extra unlock step inside Atlas
 
 ## Verify the Repo
 
@@ -181,4 +253,4 @@ If the desktop app opens but no models appear:
 
 If the backend is offline after a code change, fully close and reopen the app. Backend Python changes require a real restart, not only a frontend refresh.
 
-If Atlas only works while a PowerShell window stays open, you are running the source/dev launcher. Use a packaged build from GitHub Releases for normal desktop use.
+If Atlas only stays open while the terminal that launched it stays open, you are running the source build in dev mode. The Windows release runs as a normal installed desktop app.

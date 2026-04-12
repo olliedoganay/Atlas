@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import ctypes
+import hashlib
+import hmac
 import json
 import os
 import shutil
@@ -16,10 +18,23 @@ try:
 except ImportError:  # pragma: no cover - dependency is required in Windows builds
     sqlcipher_dbapi = None
 
+try:
+    import keyring
+except ImportError:  # pragma: no cover - dependency is required in non-Windows source builds
+    keyring = None
+
+try:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+except ImportError:  # pragma: no cover - dependency is required in non-Windows source builds
+    AESGCM = None
+
 
 CRYPTPROTECT_UI_FORBIDDEN = 0x01
 _STORAGE_KEY_FORMAT = "atlas-dpapi-storage-key-v1"
 _SQLITE_HEADER = b"SQLite format 3\x00"
+_NON_WINDOWS_FORMAT = b"atlas-aesgcm-v1\0"
+_KEYRING_SERVICE = "Atlas"
+_KEYRING_ACCOUNT = "atlas-storage-master-key-v1"
 
 
 class _DataBlob(ctypes.Structure):
@@ -31,7 +46,13 @@ class _DataBlob(ctypes.Structure):
 
 def protect_bytes(data: bytes, *, entropy: bytes | None = None, description: str = "Atlas") -> bytes:
     if os.name != "nt":
-        return data
+        if not _non_windows_secret_storage_supported():
+            return data
+        master_key = _get_or_create_non_windows_master_key()
+        encryption_key = _derive_non_windows_encryption_key(master_key, entropy=entropy)
+        nonce = os.urandom(12)
+        encrypted = AESGCM(encryption_key).encrypt(nonce, data, None)
+        return _NON_WINDOWS_FORMAT + nonce + encrypted
 
     input_blob, _input_buffer = _blob_from_bytes(data)
     entropy_blob = _blob_from_bytes(entropy)[0] if entropy else None
@@ -56,7 +77,15 @@ def protect_bytes(data: bytes, *, entropy: bytes | None = None, description: str
 
 def unprotect_bytes(data: bytes, *, entropy: bytes | None = None) -> bytes:
     if os.name != "nt":
-        return data
+        if not data.startswith(_NON_WINDOWS_FORMAT):
+            return data
+        if not _non_windows_secret_storage_supported():
+            raise RuntimeError("Atlas could not access OS keyring storage on this machine.")
+        master_key = _get_or_create_non_windows_master_key()
+        encryption_key = _derive_non_windows_encryption_key(master_key, entropy=entropy)
+        nonce = data[len(_NON_WINDOWS_FORMAT) : len(_NON_WINDOWS_FORMAT) + 12]
+        ciphertext = data[len(_NON_WINDOWS_FORMAT) + 12 :]
+        return AESGCM(encryption_key).decrypt(nonce, ciphertext, None)
 
     input_blob, _input_buffer = _blob_from_bytes(data)
     entropy_blob = _blob_from_bytes(entropy)[0] if entropy else None
@@ -83,6 +112,18 @@ def sqlcipher_enabled() -> bool:
     return sqlcipher_dbapi is not None
 
 
+def local_secret_storage_label() -> str:
+    if os.name == "nt":
+        return "windows-dpapi"
+    if _non_windows_secret_storage_supported():
+        return "os-keyring"
+    return "not-available"
+
+
+def application_secret_protection_available() -> bool:
+    return local_secret_storage_label() != "not-available"
+
+
 def get_or_create_storage_key(data_dir: Path) -> bytes:
     key_path = data_dir / "storage.key.json"
     if key_path.exists():
@@ -99,6 +140,40 @@ def get_or_create_storage_key(data_dir: Path) -> bytes:
     }
     key_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return key
+
+
+def _non_windows_secret_storage_supported() -> bool:
+    if keyring is None or AESGCM is None:
+        return False
+    try:
+        backend = keyring.get_keyring()
+    except Exception:
+        return False
+    return bool(getattr(backend, "priority", 0) > 0)
+
+
+def _get_or_create_non_windows_master_key() -> bytes:
+    if not _non_windows_secret_storage_supported():
+        raise RuntimeError("Atlas could not access OS keyring storage on this machine.")
+    try:
+        stored = keyring.get_password(_KEYRING_SERVICE, _KEYRING_ACCOUNT)
+        if stored:
+            return base64.b64decode(stored.encode("ascii"))
+        master_key = os.urandom(32)
+        keyring.set_password(
+            _KEYRING_SERVICE,
+            _KEYRING_ACCOUNT,
+            base64.b64encode(master_key).decode("ascii"),
+        )
+        return master_key
+    except Exception as exc:
+        raise RuntimeError("Atlas could not access OS keyring storage on this machine.") from exc
+
+
+def _derive_non_windows_encryption_key(master_key: bytes, *, entropy: bytes | None) -> bytes:
+    if not entropy:
+        return hashlib.sha256(master_key + b":atlas").digest()
+    return hmac.new(master_key, entropy, hashlib.sha256).digest()
 
 
 def prepare_encrypted_sqlite(path: Path, *, data_dir: Path, reset_legacy: bool = True) -> None:

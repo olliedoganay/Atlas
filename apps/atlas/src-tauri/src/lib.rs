@@ -238,11 +238,16 @@ fn backend_command(
         return Err("Packaged Atlas backend sidecar was not found.".to_string());
     }
 
-    let python = repo_root.join(".venv").join("Scripts").join("python.exe");
-    let program = if python.exists() {
-        python
-    } else {
+    let windows_python = repo_root.join(".venv").join("Scripts").join("python.exe");
+    let unix_python = repo_root.join(".venv").join("bin").join("python");
+    let program = if windows_python.exists() {
+        windows_python
+    } else if unix_python.exists() {
+        unix_python
+    } else if cfg!(windows) {
         PathBuf::from("python")
+    } else {
+        PathBuf::from("python3")
     };
     Ok((
         program,

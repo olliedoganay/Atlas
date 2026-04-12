@@ -1669,6 +1669,9 @@ function chatWaitingLabel(stage: string) {
   if (stage === "queued") {
     return "Queued";
   }
+  if (stage === "compaction") {
+    return "Compacting";
+  }
   if (stage === "web_search") {
     return "Searching";
   }

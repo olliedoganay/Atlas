@@ -1,55 +1,56 @@
 # Security
 
-## Supported model
+## Deployment model
 
-Atlas is designed as a local Windows desktop app.
+Atlas is a local desktop application.
 
-- the desktop shell starts a local backend on `127.0.0.1`
+- Windows is the packaged release target.
+- macOS and Linux are supported through source builds.
+
+Across supported local setups:
+
+- the Tauri shell starts a backend on `127.0.0.1`
 - the shell and backend authenticate with an instance token
-- local packaged builds keep backend logs off by default
-- saved run artifacts and the run index are protected with Windows DPAPI
-- packaged Windows runtimes use SQLCipher-backed local storage for local SQLite state and local Qdrant persistence
-- password-protected profiles require the profile password before Atlas can unlock that profile's data key
+- Ollama is expected to run on the same machine
+- packaged backend logs stay off by default
 
-## What Atlas is intended to protect against
+## Storage protection
 
-- accidental exposure through a local browser page or another process hitting the backend without the instance token
-- casual access to saved run artifacts on disk
-- access to a password-protected profile from inside Atlas without the profile password
+Atlas protects local data in two layers:
 
-## What Atlas does not claim to protect against
+- saved runs, profile keys, and related secrets use local OS secret storage
+- runtime SQLite files and local vector-store storage use encrypted local storage when SQLCipher support is available
 
-- malware or another process already running as the same Windows user with access to your session
-- a machine that is already fully compromised
-- data sent to a remote model endpoint if you change the Ollama/base URL away from a local service
-- development overrides that you explicitly enable on purpose
+On Windows, local secret storage uses DPAPI. On macOS and Linux source builds, Atlas uses the local OS keychain or secret store when available.
 
-## Development overrides
+Password-protected profiles add a separate unlock step inside Atlas. Passwordless profiles still remain scoped to the local machine and local user account.
 
-The backend has an explicit local development override:
+## What this is meant to protect against
+
+- accidental exposure through another local process or browser page that does not have the backend instance token
+- casual inspection of saved run files on disk
+- opening a password-protected profile inside Atlas without the profile password
+
+## What this does not try to protect against
+
+- malware or any other process already running as the same local user
+- a machine that is already compromised
+- data sent to a remote model endpoint if you point Atlas away from a local Ollama service
+- development overrides that you enable intentionally
+
+## Development override
+
+Atlas includes one explicit local development override:
 
 - `ATLAS_ALLOW_INSECURE_LOCALHOST=1`
 
-This is for development only. Packaged Atlas builds reject startup if that override is enabled.
-
-## Data locations
-
-Packaged Atlas stores runtime data under the app data runtime directory. Source/dev runs store runtime data under the repo-local `.data/` directory.
-
-Typical local data includes:
-
-- LangGraph checkpoints
-- Mem0 history
-- local Qdrant storage
-- saved runs and the run index
-
-These paths should never be committed to Git.
+This is for development only. Packaged builds refuse to start if that override is enabled.
 
 ## Reporting
 
-If you find a security issue, open a private report with enough detail to reproduce it safely:
+If you find a security issue, report it privately with:
 
 - affected version
 - Windows version
-- exact steps
-- whether the issue affects packaged builds, source/dev builds, or both
+- exact reproduction steps
+- whether it affects a packaged build, a source build, or both

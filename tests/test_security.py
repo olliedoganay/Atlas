@@ -3,13 +3,18 @@ import tempfile
 import unittest
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 
 from atlas_local.security import (
+    application_secret_protection_available,
     get_or_create_storage_key,
+    local_secret_storage_label,
     open_application_sqlite,
     prepare_encrypted_qdrant_storage,
     prepare_encrypted_sqlite,
+    protect_bytes,
     sqlcipher_enabled,
+    unprotect_bytes,
 )
 
 
@@ -65,6 +70,29 @@ class SecurityStorageTests(unittest.TestCase):
 
             if sqlcipher_enabled():
                 self.assertFalse(db_path.exists())
+
+    def test_non_windows_secret_storage_encrypts_and_decrypts(self) -> None:
+        with (
+            patch("atlas_local.security.os.name", "posix"),
+            patch("atlas_local.security._non_windows_secret_storage_supported", return_value=True),
+            patch("atlas_local.security._get_or_create_non_windows_master_key", return_value=b"\x11" * 32),
+        ):
+            encrypted = protect_bytes(b"atlas-secret", entropy=b"profile-key")
+            self.assertNotEqual(encrypted, b"atlas-secret")
+            decrypted = unprotect_bytes(encrypted, entropy=b"profile-key")
+            self.assertEqual(decrypted, b"atlas-secret")
+
+    def test_non_windows_unprotect_keeps_legacy_plaintext_bytes(self) -> None:
+        with patch("atlas_local.security.os.name", "posix"):
+            self.assertEqual(unprotect_bytes(b"legacy-bytes"), b"legacy-bytes")
+
+    def test_secret_storage_status_reports_non_windows_keyring_support(self) -> None:
+        with (
+            patch("atlas_local.security.os.name", "posix"),
+            patch("atlas_local.security._non_windows_secret_storage_supported", return_value=True),
+        ):
+            self.assertEqual(local_secret_storage_label(), "os-keyring")
+            self.assertTrue(application_secret_protection_available())
 
 
 if __name__ == "__main__":

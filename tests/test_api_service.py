@@ -14,7 +14,7 @@ from atlas_local.graph.builder import execution_node_sequence, post_synthesis_no
 from atlas_local.llm import OllamaCatalogSnapshot, OllamaModelInfo
 from atlas_local.run_contract import RunHub
 from atlas_local.run_store import RunStore
-from atlas_local.security import sqlcipher_enabled
+from atlas_local.security import application_secret_protection_available, local_secret_storage_label, sqlcipher_enabled
 
 
 class ApiServiceCreateTests(unittest.TestCase):
@@ -68,8 +68,9 @@ class ApiServiceCreateTests(unittest.TestCase):
             payload = service.status()
 
             self.assertIn("security", payload)
-            self.assertTrue(payload["security"]["run_artifacts_encrypted_at_rest"])
-            self.assertTrue(payload["security"]["run_index_encrypted_at_rest"])
+            self.assertEqual(payload["security"]["profile_key_protection"], local_secret_storage_label())
+            self.assertEqual(payload["security"]["run_artifacts_encrypted_at_rest"], application_secret_protection_available())
+            self.assertEqual(payload["security"]["run_index_encrypted_at_rest"], application_secret_protection_available())
             self.assertEqual(payload["security"]["sqlite_encrypted_at_rest"], sqlcipher_enabled())
             self.assertEqual(payload["security"]["vector_store"], "local-qdrant")
             self.assertEqual(payload["security"]["vector_store_encrypted_at_rest"], sqlcipher_enabled())
@@ -367,6 +368,112 @@ class ContextCompactionTests(unittest.TestCase):
             compacted_message_count=result["compacted_message_count"],
         )
         self.assertLess(after_tokens, before_tokens)
+
+    def test_summarize_message_batch_disables_reasoning(self) -> None:
+        service = AtlasBackendService.__new__(AtlasBackendService)
+        captured: dict[str, object] = {}
+
+        class _FakeChat:
+            def invoke(self, messages: list[HumanMessage]) -> SimpleNamespace:
+                captured["prompt"] = str(messages[0].content)
+                return SimpleNamespace(content="summary output")
+
+        def fake_chat(model: str, temperature: float | None = None, reasoning: bool | str | None = None):
+            captured["model"] = model
+            captured["temperature"] = temperature
+            captured["reasoning"] = reasoning
+            return _FakeChat()
+
+        service.app = SimpleNamespace(llm_provider=SimpleNamespace(chat=fake_chat))
+
+        summary = AtlasBackendService._summarize_message_batch(
+            service,
+            model="gpt-oss:20b",
+            existing_summary="",
+            messages=[HumanMessage(content="u1"), AIMessage(content="a1")],
+        )
+
+        self.assertEqual(summary, "summary output")
+        self.assertEqual(captured["model"], "gpt-oss:20b")
+        self.assertEqual(captured["temperature"], 0.0)
+        self.assertIs(captured["reasoning"], False)
+        prompt = str(captured["prompt"])
+        self.assertIn("preserves exact details", prompt)
+        self.assertIn("Canon details", prompt)
+        self.assertIn("Do not replace specific details with vague phrases", prompt)
+
+    def test_execute_run_stops_before_synthesis_if_cancelled_during_auto_compaction(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = load_config(project_root=Path(temp_dir), env={})
+            store = RunStore(config)
+            service = AtlasBackendService(
+                config=config,
+                app=SimpleNamespace(
+                    llm_provider=SimpleNamespace(
+                        abort_active_requests=lambda: None,
+                        effective_context_window=lambda _model: 1024,
+                        count_message_tokens=lambda _model, messages: len(messages) * 700,
+                    ),
+                    graph=SimpleNamespace(update_state=lambda *_args, **_kwargs: None),
+                    close=lambda: None,
+                ),
+                run_store=store,
+                run_hub=RunHub(),
+            )
+
+            service._run_graph_node = lambda **_: None  # type: ignore[method-assign]
+            service._stream_answer = lambda **_: (_ for _ in ()).throw(AssertionError("synthesis should not start"))  # type: ignore[method-assign]
+
+            artifact = store.create_run(
+                mode="chat",
+                user_id="research_user",
+                thread_id="main",
+                chat_model="gpt-oss:20b",
+                temperature=0.2,
+                prompt="continue",
+                status="running",
+            )
+            run_id = artifact["run_id"]
+
+            def summarize_message_batch(*, model: str, existing_summary: str, messages: list[HumanMessage | AIMessage]) -> str:
+                service._cancelled_runs.add(run_id)
+                return "summary"
+
+            service._summarize_message_batch = summarize_message_batch  # type: ignore[method-assign]
+            service._get_snapshot = lambda **_: SimpleNamespace(
+                values={
+                    "messages": [
+                        HumanMessage(content="u1"),
+                        AIMessage(content="a1"),
+                        HumanMessage(content="u2"),
+                        AIMessage(content="a2"),
+                    ],
+                    "thread_summary": "",
+                    "compacted_message_count": 0,
+                    "timeline_events": [],
+                }
+            )
+
+            service._execute_run(
+                run_id=run_id,
+                prompt="continue",
+                user_id="research_user",
+                thread_id="main",
+                chat_model="gpt-oss:20b",
+                temperature=0.2,
+                reasoning_mode=None,
+                web_search_enabled=False,
+                cross_chat_memory=False,
+                auto_compact_long_chats=True,
+                attachments=[],
+            )
+
+            stored = store.get_run(run_id)
+            self.assertEqual(stored["status"], "failed")
+            self.assertEqual(stored["error"], "Run stopped by user.")
+            stage_events = [event for event in stored["events"] if event["type"] == "stage_changed"]
+            self.assertIn("compaction", [event["payload"]["stage"] for event in stage_events])
+            self.assertNotIn("synthesis", [event["payload"]["stage"] for event in stage_events])
 
     def test_get_run_includes_compaction_metadata_from_snapshot(self) -> None:
         service = AtlasBackendService.__new__(AtlasBackendService)

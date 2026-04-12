@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "atlas-local"
-version = "1.0.3"
+version = "1.0.4"
 description = "Local desktop chat runtime with persistent memory for Atlas."
 readme = "README.md"
 license = { text = "MIT" }
@@ -13,7 +13,9 @@ authors = [
     { name = "Atlas" },
 ]
 dependencies = [
+    "cryptography==45.0.4",
     "fastapi==0.122.0",
+    "keyring==25.6.0",
     "langchain-ollama==1.1.0",
     "langgraph==1.1.6",
     "langgraph-checkpoint-sqlite==3.0.3",

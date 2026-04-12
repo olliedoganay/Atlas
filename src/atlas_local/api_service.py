@@ -26,7 +26,12 @@ from .llm import OllamaCatalogSnapshot, OllamaModelInfo, inspect_local_ollama_mo
 from .memory.models import MemoryRecord
 from .run_contract import RunEvent, RunHub, TERMINAL_EVENT_TYPES
 from .run_store import PASSWORD_PROTECTED, RunStore
-from .security import open_application_sqlite, sqlcipher_enabled
+from .security import (
+    application_secret_protection_available,
+    local_secret_storage_label,
+    open_application_sqlite,
+    sqlcipher_enabled,
+)
 from .session import scoped_thread_id
 from .text_normalization import MojibakeRepairStream
 
@@ -107,7 +112,7 @@ class AtlasBackendService:
         self._ensure_runtime_state()
         with self._control_lock:
             busy = self._active_run_id is not None or bool(self._pending_runs)
-        supports_dpapi = os.name == "nt"
+        protected_locally = application_secret_protection_available()
         return {
             "status": "ok",
             "product_name": "Atlas",
@@ -123,9 +128,9 @@ class AtlasBackendService:
             "runtime_mode": "chat-only",
             "busy": busy,
             "security": {
-                "profile_key_protection": "windows-dpapi" if supports_dpapi else "not-available",
-                "run_artifacts_encrypted_at_rest": supports_dpapi,
-                "run_index_encrypted_at_rest": supports_dpapi,
+                "profile_key_protection": local_secret_storage_label(),
+                "run_artifacts_encrypted_at_rest": protected_locally,
+                "run_index_encrypted_at_rest": protected_locally,
                 "packaged_logs_default": "off",
                 "sqlite_encrypted_at_rest": sqlcipher_enabled(),
                 "sqlite_paths": [
@@ -995,6 +1000,12 @@ class AtlasBackendService:
                 thread_summary=str(state.get("thread_summary", "") or ""),
                 compacted_message_count=prior_compacted_count,
             )
+            effective_context_window = int(runtime.context.effective_context_window or 0)
+            if effective_context_window > 0:
+                threshold = max(1024, int(effective_context_window * 0.72))
+                uncompacted_messages = list(state.get("messages", []))[prior_compacted_count:]
+                if self._count_messages_tokens(model=chat_model, messages=uncompacted_messages) > threshold:
+                    self._emit_stage(run_id, "compaction")
             compaction = self._maybe_compact_context(state=state, runtime=runtime)
             if compaction:
                 state.update(compaction)
@@ -1019,6 +1030,7 @@ class AtlasBackendService:
                         reason="auto",
                     )
 
+            self._raise_if_cancelled(run_id)
             self._emit_stage(run_id, "synthesis")
             answer = self._stream_answer(run_id=run_id, state=state, runtime=runtime)
             self._raise_if_cancelled(run_id)
@@ -1193,6 +1205,7 @@ class AtlasBackendService:
         stream_parser = _ThinkingStreamParser()
         answer_repair = MojibakeRepairStream()
         thinking_repair = MojibakeRepairStream()
+        self._raise_if_cancelled(run_id)
         for chunk in self.app.llm_provider.chat(
             runtime.context.chat_model,
             temperature=runtime.context.chat_temperature,
@@ -1426,16 +1439,19 @@ class AtlasBackendService:
             return existing_summary
 
         prompt_parts = [
-            "Condense the earlier part of this conversation into a compact working summary.",
-            "Keep only durable user facts, active goals, constraints, key decisions, code/file references, and unresolved tasks.",
-            "Drop filler chat. Use short bullet points. Stay under 220 words.",
+            "Condense the earlier part of this conversation into a compact working summary that preserves exact details needed to continue the thread correctly.",
+            "Keep durable user facts, active goals, explicit constraints, exact names and titles, chronology, worldbuilding details, list items, code/file references, decisions, and unresolved tasks.",
+            "Do not replace specific details with vague phrases like 'details were discussed' or 'a plan was outlined'.",
+            "If the conversation contains creative work, preserve concrete canon details such as character names, relationships, settings, episode labels, plot beats, tone, style, and production constraints.",
+            "Use short bullets under these headings when relevant: Canon details, Active goals, Constraints and style, Open threads.",
+            "Keep it concise but detail-dense. Stay under 420 words.",
         ]
         if existing_summary.strip():
             prompt_parts.append("\nExisting summary:\n" + existing_summary.strip())
         prompt_parts.append("\nNew conversation chunk:\n" + transcript)
 
         try:
-            response = self.app.llm_provider.chat(model, temperature=0.0).invoke(
+            response = self.app.llm_provider.chat(model, temperature=0.0, reasoning=False).invoke(
                 [HumanMessage(content="\n".join(prompt_parts))]
             )
             summary = str(response.content).strip()
@@ -1666,8 +1682,13 @@ def _message_text_for_summary(message: HumanMessage | AIMessage) -> str:
 
 def _fallback_summary(*, existing_summary: str, transcript: str) -> str:
     lines = [line.strip() for line in transcript.splitlines() if line.strip()]
-    bullets = [f"- {line[:180]}" for line in lines[:8]]
-    merged = "\n".join(part for part in [existing_summary.strip(), "\n".join(bullets)] if part)
+    bullets = [f"- {line[:240]}" for line in lines[:16]]
+    sections: list[str] = []
+    if existing_summary.strip():
+        sections.append(existing_summary.strip())
+    if bullets:
+        sections.append("Recent exact details:\n" + "\n".join(bullets))
+    merged = "\n".join(part for part in sections if part)
     return merged.strip()
 
 
