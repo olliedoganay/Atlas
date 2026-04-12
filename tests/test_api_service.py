@@ -144,7 +144,7 @@ class GraphExecutionSequenceTests(unittest.TestCase):
     def test_sequences_match_chat_only_runtime(self) -> None:
         self.assertEqual(
             pre_synthesis_node_sequence(),
-            ("retrieve_memories",),
+            ("retrieve_memories", "retrieve_web"),
         )
         self.assertEqual(
             post_synthesis_node_sequence(),
@@ -154,6 +154,7 @@ class GraphExecutionSequenceTests(unittest.TestCase):
             execution_node_sequence(),
             (
                 "retrieve_memories",
+                "retrieve_web",
                 "synthesize_answer",
                 "extract_updates",
                 "persist",

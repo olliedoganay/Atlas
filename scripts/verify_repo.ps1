@@ -29,11 +29,14 @@ if (-not $SkipBackend) {
   Write-Host "Running backend test suite..." -ForegroundColor Cyan
   Push-Location $repoRoot
   try {
+    $previousPythonPath = $env:PYTHONPATH
+    $env:PYTHONPATH = Join-Path $repoRoot "src"
     & $pythonExe -m unittest discover -s tests -p "test_*.py"
     if ($LASTEXITCODE -ne 0) {
       throw "Backend tests failed with exit code $LASTEXITCODE."
     }
   } finally {
+    $env:PYTHONPATH = $previousPythonPath
     Pop-Location
   }
 }

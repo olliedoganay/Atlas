@@ -11,6 +11,8 @@ let lastRuntime: BackendRuntime | null = null;
 
 export type ThemeMode = "light" | "dark";
 export type RunMode = "chat" | "compact";
+export type ReasoningMode = "off" | "on" | "low" | "medium" | "high";
+export type AttachmentKind = "image" | "file";
 
 export type ThreadSummary = {
   user_id: string;
@@ -24,11 +26,15 @@ export type ThreadSummary = {
   last_run_id?: string;
 };
 
-export type ImageAttachment = {
+export type ChatAttachment = {
   name: string;
   media_type: string;
-  data_url: string;
+  kind?: AttachmentKind;
+  data_url?: string;
+  text_content?: string;
+  byte_size?: number;
 };
+export type ImageAttachment = ChatAttachment;
 
 export type UserSummary = {
   user_id: string;
@@ -54,6 +60,8 @@ export type BackendStatus = {
   chat_temperature: number;
   embed_model: string;
   ollama_url: string;
+  web_search_available: boolean;
+  web_search_provider: string;
   runtime_mode: string;
   busy: boolean;
   security: {
@@ -87,6 +95,8 @@ export type ModelCatalog = {
     family?: string;
     families?: string[];
     supports_images?: boolean;
+    supports_reasoning?: boolean;
+    reasoning_mode_strategy?: "none" | "boolean" | "levels";
   }>;
 };
 
@@ -94,6 +104,15 @@ export type RunStatusEvent = {
   type: string;
   timestamp: string;
   payload: Record<string, unknown>;
+};
+
+export type RunTraceItem = {
+  timestamp: string;
+  stage?: string;
+  rationale?: string;
+  inputs?: Record<string, unknown>;
+  outputs?: Record<string, unknown>;
+  artifacts?: Record<string, unknown>;
 };
 
 export type RunSummary = {
@@ -110,6 +129,7 @@ export type RunSummary = {
   completed_at?: string | null;
   answer: string;
   events: RunStatusEvent[];
+  trace_items?: RunTraceItem[];
   error?: string | null;
   thread_summary?: string;
   compacted_message_count?: number;
@@ -276,6 +296,11 @@ export function getThreadHistory(threadId: string, userId?: string) {
   return request<ThreadMessage[]>(`/threads/${encodeURIComponent(threadId)}/history${query}`);
 }
 
+export function getThreadRuns(threadId: string, userId?: string) {
+  const query = userId ? `?user_id=${encodeURIComponent(userId)}` : "";
+  return request<RunSummary[]>(`/threads/${encodeURIComponent(threadId)}/runs${query}`);
+}
+
 export function searchChats(query: string, userId: string, currentThreadId?: string, limit = 8) {
   const params = new URLSearchParams({
     user_id: userId,
@@ -304,10 +329,12 @@ export function startChat(
   threadId: string,
   chatModel?: string,
   temperature?: number | null,
+  reasoningMode?: ReasoningMode,
+  webSearchEnabled?: boolean,
   threadTitle?: string,
   crossChatMemory = true,
   autoCompactLongChats = true,
-  images: ImageAttachment[] = [],
+  attachments: ImageAttachment[] = [],
 ) {
   return request<{ run_id: string; status: string; mode: RunMode; chat_model: string; temperature: number | null }>("/chat", {
     method: "POST",
@@ -317,10 +344,12 @@ export function startChat(
       thread_id: threadId,
       chat_model: chatModel,
       temperature,
+      reasoning_mode: reasoningMode,
+      web_search_enabled: webSearchEnabled,
       thread_title: threadTitle,
       cross_chat_memory: crossChatMemory,
       auto_compact_long_chats: autoCompactLongChats,
-      images,
+      attachments,
     }),
   });
 }

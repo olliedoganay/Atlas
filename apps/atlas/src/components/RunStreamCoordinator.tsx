@@ -79,6 +79,7 @@ export function RunStreamCoordinator() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["threads", userId] }),
       queryClient.invalidateQueries({ queryKey: ["thread-history", userId, threadId] }),
+      queryClient.invalidateQueries({ queryKey: ["thread-runs", userId, threadId] }),
       queryClient.invalidateQueries({ queryKey: ["run", runId] }),
     ]);
   };

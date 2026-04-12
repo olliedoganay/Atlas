@@ -27,23 +27,31 @@ def format_runtime_error(config: AppConfig, exc: Exception, *, chat_model: str |
 @dataclass
 class LLMProvider:
     config: AppConfig
-    _chat_models: dict[tuple[str, float | None], ChatOllama] = field(default_factory=dict, init=False, repr=False)
+    _chat_models: dict[tuple[str, float | None, str], ChatOllama] = field(default_factory=dict, init=False, repr=False)
     _json_chat_models: dict[str, ChatOllama] = field(default_factory=dict, init=False, repr=False)
     _context_windows: dict[str, tuple[float, int]] = field(default_factory=dict, init=False, repr=False)
 
-    def chat(self, model: str | None = None, *, temperature: float | None = None) -> ChatOllama:
+    def chat(
+        self,
+        model: str | None = None,
+        *,
+        temperature: float | None = None,
+        reasoning: bool | str | None = None,
+    ) -> ChatOllama:
         resolved_model = (model or self.config.chat_model).strip()
         resolved_temperature = None if temperature is None else float(temperature)
-        cache_key = (resolved_model, resolved_temperature)
+        resolved_reasoning = _resolve_reasoning_for_model(resolved_model, reasoning)
+        cache_key = (resolved_model, resolved_temperature, repr(resolved_reasoning))
         if cache_key not in self._chat_models:
             options: dict[str, Any] = {
                 "model": resolved_model,
                 "base_url": self.config.ollama_url,
-                "reasoning": True,
                 "validate_model_on_init": True,
             }
             if resolved_temperature is not None:
                 options["temperature"] = resolved_temperature
+            if resolved_reasoning is not None:
+                options["reasoning"] = resolved_reasoning
             self._chat_models[cache_key] = ChatOllama(**options)
         return self._chat_models[cache_key]
 
@@ -98,6 +106,8 @@ class OllamaModelInfo:
     family: str = ""
     families: tuple[str, ...] = ()
     supports_images: bool = False
+    supports_reasoning: bool = False
+    reasoning_mode_strategy: str = "none"
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -148,6 +158,8 @@ def inspect_local_ollama_models(config: AppConfig, *, timeout_seconds: float = 3
                 family=family,
                 families=families,
                 supports_images=_is_vision_capable_model(item),
+                supports_reasoning=_is_reasoning_capable_model(item),
+                reasoning_mode_strategy=_reasoning_mode_strategy(item),
             )
         )
 
@@ -308,6 +320,76 @@ def _is_vision_capable_model(payload: dict[str, Any]) -> bool:
         "qwen-vl",
     )
     return any(marker in combined for marker in vision_markers)
+
+
+def _reasoning_mode_strategy(payload: dict[str, Any]) -> str:
+    return _reasoning_mode_strategy_from_descriptor(_normalized_model_descriptor(payload))
+
+
+def _is_reasoning_capable_model(payload: dict[str, Any]) -> bool:
+    return _reasoning_mode_strategy(payload) != "none"
+
+
+def _normalized_model_descriptor(payload: dict[str, Any]) -> str:
+    name = str(payload.get("name", "")).lower()
+    model = str(payload.get("model", "")).lower()
+    details = payload.get("details", {}) if isinstance(payload.get("details"), dict) else {}
+    family = str(details.get("family", "")).lower()
+    families = [str(item).lower() for item in details.get("families", []) if str(item).strip()]
+    return " ".join([name, model, family, " ".join(families)])
+
+
+def _normalize_reasoning_value(value: bool | str | None) -> bool | str | None:
+    if isinstance(value, bool) or value is None:
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"", "default", "none"}:
+        return None
+    if normalized in {"true", "on"}:
+        return True
+    if normalized in {"false", "off"}:
+        return False
+    if normalized in {"low", "medium", "high"}:
+        return normalized
+    return None
+
+
+def _resolve_reasoning_for_model(model: str, value: bool | str | None) -> bool | str | None:
+    strategy = _reasoning_mode_strategy_from_descriptor(model.strip().lower())
+    normalized = _normalize_reasoning_value(value)
+    if strategy == "levels":
+        if normalized in {"low", "medium", "high"}:
+            return normalized
+        if normalized is True:
+            return "medium"
+        return None
+    if strategy == "boolean":
+        if normalized in {"low", "medium", "high"}:
+            return True
+        return normalized
+    return None
+
+
+def _reasoning_mode_strategy_from_descriptor(descriptor: str) -> str:
+    reasoning_markers = (
+        "qwen3",
+        "qwen 3",
+        "qwen-3",
+        "qwen3.5",
+        "qwen3-coder",
+        "gpt-oss",
+        "deepseek-r1",
+        "deepseek r1",
+        "deepseek-v3.1",
+        "deepseek v3.1",
+        "deepseek-v31",
+        "deepseek v31",
+    )
+    if "gpt-oss" in descriptor:
+        return "levels"
+    if any(marker in descriptor for marker in reasoning_markers):
+        return "boolean"
+    return "none"
 
 
 def _close_chat_client(chat_model: ChatOllama) -> None:

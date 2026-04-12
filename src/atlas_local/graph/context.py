@@ -10,6 +10,8 @@ class GraphContext:
     session_id: str
     chat_model: str
     chat_temperature: float | None
+    reasoning_mode: str | None = "on"
+    web_search_enabled: bool = False
     cross_chat_memory: bool = True
     auto_compact_long_chats: bool = True
     effective_context_window: int | None = None

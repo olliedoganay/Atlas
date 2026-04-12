@@ -11,6 +11,7 @@ Chats, memories, and run state stay on your machine.
 - search across the current chat and all local chats
 - automatic and manual context compaction for long threads
 - optional cross-chat memory retrieval with manual memory controls
+- requires Ollama server running
 
 ## Install from Release
 

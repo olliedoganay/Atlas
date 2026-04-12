@@ -3,6 +3,7 @@ langchain-ollama==1.1.0
 langgraph==1.1.6
 langgraph-checkpoint-sqlite==3.0.3
 mem0ai==1.0.11
+pypdf==6.1.3
 pyinstaller==6.19.0
 python-dotenv==1.2.2
 sqlcipher3-wheels==0.5.7

@@ -210,9 +210,12 @@ class FakeService:
         thread_id: str,
         chat_model=None,
         temperature=None,
+        reasoning_mode: str | None = None,
+        web_search_enabled: bool = False,
         thread_title=None,
         cross_chat_memory: bool = True,
         auto_compact_long_chats: bool = True,
+        attachments=None,
         images=None,
     ):
         return {
@@ -224,8 +227,11 @@ class FakeService:
             "thread_title": thread_title or thread_id,
             "chat_model": chat_model or "test-model",
             "temperature": temperature,
+            "reasoning_mode": reasoning_mode,
+            "web_search_enabled": web_search_enabled,
             "cross_chat_memory": cross_chat_memory,
             "auto_compact_long_chats": auto_compact_long_chats,
+            "attachments": attachments or [],
             "images": images or [],
         }
 

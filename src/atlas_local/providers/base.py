@@ -4,7 +4,13 @@ from typing import Any, Protocol
 
 
 class ChatModelProvider(Protocol):
-    def chat(self, model: str | None = None, *, temperature: float | None = None) -> Any: ...
+    def chat(
+        self,
+        model: str | None = None,
+        *,
+        temperature: float | None = None,
+        reasoning: bool | str | None = None,
+    ) -> Any: ...
 
     def json_chat(self, model: str | None = None) -> Any: ...
 

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-import type { ImageAttachment, RunMode, ThemeMode } from "../lib/api";
+import type { ImageAttachment, ReasoningMode, RunMode, ThemeMode } from "../lib/api";
 
 type CompactionNotice = {
   runId: string;
@@ -32,6 +32,8 @@ type AtlasState = {
   currentThreadTitle: string;
   draftThreadModel: string;
   draftThreadTemperature: number | null;
+  reasoningMode: ReasoningMode;
+  webSearchEnabled: boolean;
   crossChatMemoryEnabled: boolean;
   autoCompactLongChats: boolean;
   navCollapsed: boolean;
@@ -57,6 +59,8 @@ type AtlasState = {
   setCurrentThreadTitle: (value: string) => void;
   setDraftThreadModel: (value: string) => void;
   setDraftThreadTemperature: (value: number | null) => void;
+  setReasoningMode: (value: ReasoningMode) => void;
+  setWebSearchEnabled: (value: boolean) => void;
   setCrossChatMemoryEnabled: (value: boolean) => void;
   setAutoCompactLongChats: (value: boolean) => void;
   toggleNavCollapsed: () => void;
@@ -95,6 +99,8 @@ export const useAtlasStore = create<AtlasState>()(
       currentThreadTitle: "main",
       draftThreadModel: "",
       draftThreadTemperature: null,
+      reasoningMode: "on",
+      webSearchEnabled: false,
       crossChatMemoryEnabled: true,
       autoCompactLongChats: true,
       navCollapsed: false,
@@ -120,6 +126,8 @@ export const useAtlasStore = create<AtlasState>()(
       setCurrentThreadTitle: (value) => set({ currentThreadTitle: value }),
       setDraftThreadModel: (value) => set({ draftThreadModel: value }),
       setDraftThreadTemperature: (value) => set({ draftThreadTemperature: value }),
+      setReasoningMode: (value) => set({ reasoningMode: value }),
+      setWebSearchEnabled: (value) => set({ webSearchEnabled: value }),
       setCrossChatMemoryEnabled: (value) => set({ crossChatMemoryEnabled: value }),
       setAutoCompactLongChats: (value) => set({ autoCompactLongChats: value }),
       toggleNavCollapsed: () => set((state) => ({ navCollapsed: !state.navCollapsed })),
@@ -228,7 +236,7 @@ export const useAtlasStore = create<AtlasState>()(
     }),
     {
       name: "atlas-ui-state",
-      version: 6,
+      version: 8,
       migrate: (persistedState, version) => {
         if (!persistedState || typeof persistedState !== "object") {
           return persistedState as AtlasState;
@@ -248,6 +256,12 @@ export const useAtlasStore = create<AtlasState>()(
         if (version < 6) {
           migrated.recentSearchQueries = [];
         }
+        if (version < 7) {
+          migrated.reasoningMode = "on";
+        }
+        if (version < 8) {
+          migrated.webSearchEnabled = false;
+        }
         return migrated as AtlasState;
       },
       partialize: (state) => ({
@@ -257,6 +271,8 @@ export const useAtlasStore = create<AtlasState>()(
         currentThreadTitle: state.currentThreadTitle,
         draftThreadModel: state.draftThreadModel,
         draftThreadTemperature: state.draftThreadTemperature,
+        reasoningMode: state.reasoningMode,
+        webSearchEnabled: state.webSearchEnabled,
         crossChatMemoryEnabled: state.crossChatMemoryEnabled,
         autoCompactLongChats: state.autoCompactLongChats,
         navCollapsed: state.navCollapsed,

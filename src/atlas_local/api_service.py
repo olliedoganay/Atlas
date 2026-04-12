@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import os
 import queue
 import shutil
@@ -14,6 +15,7 @@ from typing import Any
 from uuid import uuid4
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from pypdf import PdfReader
 
 from .config import AppConfig, load_config
 from .graph.builder import AgentApplication, build_chat_application
@@ -38,9 +40,11 @@ class _QueuedRunJob:
     thread_id: str
     chat_model: str
     temperature: float | None
+    reasoning_mode: str | None
+    web_search_enabled: bool
     cross_chat_memory: bool
     auto_compact_long_chats: bool
-    images: list[dict[str, str]]
+    attachments: list[dict[str, Any]]
 
 
 @dataclass
@@ -114,6 +118,8 @@ class AtlasBackendService:
             "chat_temperature": self.config.chat_temperature,
             "embed_model": self.config.embed_model,
             "ollama_url": self.config.ollama_url,
+            "web_search_available": bool(self.config.ollama_api_key.strip()),
+            "web_search_provider": "ollama" if self.config.ollama_api_key.strip() else "disabled",
             "runtime_mode": "chat-only",
             "busy": busy,
             "security": {
@@ -193,9 +199,11 @@ class AtlasBackendService:
                             thread_id=job.thread_id,
                             chat_model=job.chat_model,
                             temperature=job.temperature,
+                            reasoning_mode=job.reasoning_mode,
+                            web_search_enabled=job.web_search_enabled,
                             cross_chat_memory=job.cross_chat_memory,
                             auto_compact_long_chats=job.auto_compact_long_chats,
-                            images=job.images,
+                            attachments=job.attachments,
                         )
                     elif job.mode == "compact":
                         self._execute_compact_run(
@@ -451,7 +459,7 @@ class AtlasBackendService:
                 role = "user"
             elif isinstance(message, AIMessage):
                 role = "assistant"
-            content, attachments = _message_content_to_history_parts(message.content)
+            content, attachments = _message_to_history_parts(message)
             history.append({"role": role, "content": content, "attachments": attachments})
             while pending_events and int(pending_events[0].get("after_message_count", 0) or 0) == index:
                 history.append(_timeline_event_to_history_item(pending_events.pop(0)))
@@ -518,6 +526,14 @@ class AtlasBackendService:
         artifact["detected_context_window"] = int(snapshot.values.get("detected_context_window", 0) or 0)
         artifact["diagnostics"] = _build_run_diagnostics(artifact)
         return artifact
+
+    def list_thread_runs(self, *, user_id: str | None, thread_id: str) -> list[dict[str, Any]]:
+        if user_id:
+            self._ensure_user_unlocked(user_id)
+        artifacts = self.run_store.list_runs_for_thread(user_id=user_id, thread_id=thread_id)
+        for artifact in artifacts:
+            artifact["diagnostics"] = _build_run_diagnostics(artifact)
+        return artifacts
 
     def _search_thread_matches(
         self,
@@ -623,10 +639,12 @@ class AtlasBackendService:
         thread_id: str,
         chat_model: str | None = None,
         temperature: float | None = None,
+        reasoning_mode: str | None = None,
+        web_search_enabled: bool = False,
         thread_title: str | None = None,
         cross_chat_memory: bool = True,
         auto_compact_long_chats: bool = True,
-        images: list[dict[str, str]] | None = None,
+        attachments: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         self._ensure_user_unlocked(user_id)
         return self._start_run(
@@ -636,10 +654,12 @@ class AtlasBackendService:
             thread_id=thread_id,
             chat_model=chat_model,
             temperature=temperature,
+            reasoning_mode=reasoning_mode,
+            web_search_enabled=web_search_enabled,
             thread_title=thread_title,
             cross_chat_memory=cross_chat_memory,
             auto_compact_long_chats=auto_compact_long_chats,
-            images=images or [],
+            attachments=attachments or [],
         )
 
     def start_manual_compact(
@@ -660,10 +680,12 @@ class AtlasBackendService:
             thread_id=thread_id,
             chat_model=None,
             temperature=None,
+            reasoning_mode="off",
+            web_search_enabled=False,
             thread_title=str(thread.get("title", "") or thread_id),
             cross_chat_memory=True,
             auto_compact_long_chats=True,
-            images=[],
+            attachments=[],
         )
 
     def list_memories(self, *, user_id: str, limit: int = 50) -> list[dict[str, Any]]:
@@ -779,10 +801,12 @@ class AtlasBackendService:
         thread_id: str,
         chat_model: str | None,
         temperature: float | None,
+        reasoning_mode: str | None,
+        web_search_enabled: bool,
         thread_title: str | None,
         cross_chat_memory: bool,
         auto_compact_long_chats: bool,
-        images: list[dict[str, str]],
+        attachments: list[dict[str, Any]],
     ) -> dict[str, Any]:
         self._ensure_worker_started()
         history_after_message_count = self._thread_history_after_message_count(
@@ -836,9 +860,11 @@ class AtlasBackendService:
                     thread_id=thread_id,
                     chat_model=resolved_chat_model,
                     temperature=resolved_temperature,
+                    reasoning_mode=reasoning_mode,
+                    web_search_enabled=web_search_enabled,
                     cross_chat_memory=cross_chat_memory,
                     auto_compact_long_chats=auto_compact_long_chats,
-                    images=images,
+                    attachments=attachments,
                 )
             )
         if queue_position > 0:
@@ -877,19 +903,28 @@ class AtlasBackendService:
         thread_id: str,
         chat_model: str,
         temperature: float | None,
+        reasoning_mode: str | None,
+        web_search_enabled: bool,
         cross_chat_memory: bool,
         auto_compact_long_chats: bool,
-        images: list[dict[str, str]],
+        attachments: list[dict[str, Any]],
     ) -> None:
         session_id = scoped_thread_id(user_id, thread_id)
         config = {"configurable": {"thread_id": session_id}}
         snapshot = self._get_snapshot(user_id=user_id, thread_id=thread_id)
         prior_messages = list(snapshot.values.get("messages", []))
-        validated_images = _validated_images(images)
-        if validated_images and not self._model_supports_images(chat_model):
+        validated_attachments = _validated_attachments(attachments)
+        image_attachments = [item for item in validated_attachments if item.get("kind") == "image"]
+        if image_attachments and not self._model_supports_images(chat_model):
             raise RuntimeError(f"Model '{chat_model}' does not appear to support image input.")
         effective_context_window = self.app.llm_provider.effective_context_window(chat_model)
-        new_user_message = HumanMessage(content=_build_user_message_content(prompt, validated_images))
+        new_user_message = HumanMessage(
+            content=_build_user_message_content(prompt, validated_attachments),
+            additional_kwargs={
+                "atlas_user_prompt": _history_prompt_text(prompt, validated_attachments),
+                "atlas_attachments": _history_attachment_metadata(validated_attachments),
+            },
+        )
         state: dict[str, Any] = dict(snapshot.values)
         state["messages"] = prior_messages + [new_user_message]
         state.setdefault("thread_summary", "")
@@ -903,6 +938,8 @@ class AtlasBackendService:
                 session_id=session_id,
                 chat_model=chat_model,
                 chat_temperature=temperature,
+                reasoning_mode=reasoning_mode,
+                web_search_enabled=web_search_enabled,
                 cross_chat_memory=cross_chat_memory,
                 auto_compact_long_chats=auto_compact_long_chats,
                 effective_context_window=effective_context_window,
@@ -930,6 +967,25 @@ class AtlasBackendService:
                 inputs={"query": prompt},
                 outputs={"count": len(state.get("retrieved_memories", [])), "items": state.get("retrieved_memories", [])[:5]},
             )
+
+            if web_search_enabled:
+                self._raise_if_cancelled(run_id)
+                self._emit_stage(run_id, "web_search")
+                self._emit_event(run_id, "web_search_started", {"query": prompt})
+                self._run_graph_node(run_id=run_id, node_name="retrieve_web", state=state, runtime=runtime)
+                web_results = state.get("web_search_results", [])
+                self._emit_trace(
+                    run_id,
+                    stage="web search",
+                    rationale="Fetched recent web search results for the current prompt.",
+                    inputs={"query": prompt},
+                    outputs={"count": len(web_results), "items": web_results[:5]},
+                )
+                self._emit_event(
+                    run_id,
+                    "web_search_results",
+                    {"query": prompt, "count": len(web_results), "results": web_results[:5]},
+                )
 
             self._raise_if_cancelled(run_id)
             prior_compacted_count = int(state.get("compacted_message_count", 0) or 0)
@@ -1140,6 +1196,7 @@ class AtlasBackendService:
         for chunk in self.app.llm_provider.chat(
             runtime.context.chat_model,
             temperature=runtime.context.chat_temperature,
+            reasoning=runtime.context.reasoning_mode,
         ).stream(messages):
             self._raise_if_cancelled(run_id)
             raw_answer_text, raw_thinking_text = _extract_chunk_stream_parts(chunk, stream_parser)
@@ -1728,43 +1785,92 @@ def _safe_stream_boundary(data: str, marker: str) -> int:
     return len(data)
 
 
-def _validated_images(images: list[dict[str, str]]) -> list[dict[str, str]]:
-    validated: list[dict[str, str]] = []
-    for item in images:
+def _validated_attachments(attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    validated: list[dict[str, Any]] = []
+    for item in attachments:
         if not isinstance(item, dict):
             continue
+        kind = str(item.get("kind", "")).strip().lower()
+        name = str(item.get("name", "")).strip() or "attachment"
+        media_type = str(item.get("media_type", "")).strip()
+        byte_size = _safe_attachment_size(item.get("byte_size"))
         data_url = str(item.get("data_url", "")).strip()
-        media_type = str(item.get("media_type", "")).strip() or "image/png"
-        name = str(item.get("name", "")).strip() or "image"
-        if not data_url.startswith("data:image/"):
+        text_content = str(item.get("text_content", "") or "")
+
+        if (kind == "image" or data_url.startswith("data:image/")) and data_url:
+            if _decode_data_url_bytes(data_url) is None:
+                continue
+            validated.append(
+                {
+                    "kind": "image",
+                    "name": name,
+                    "media_type": media_type or _data_url_media_type(data_url),
+                    "data_url": data_url,
+                    "byte_size": byte_size,
+                }
+            )
             continue
-        try:
-            encoded = data_url.split(",", 1)[1]
-            base64.b64decode(encoded, validate=True)
-        except (IndexError, ValueError):
+
+        if kind not in {"", "file"}:
             continue
-        validated.append({"name": name, "media_type": media_type, "data_url": data_url})
+
+        resolved_media_type = media_type or _data_url_media_type(data_url) or "text/plain"
+        extracted_text = _attachment_text_content(
+            name=name,
+            media_type=resolved_media_type,
+            text_content=text_content,
+            data_url=data_url,
+        )
+        if not extracted_text:
+            continue
+        validated.append(
+            {
+                "kind": "file",
+                "name": name,
+                "media_type": resolved_media_type,
+                "text_content": extracted_text,
+                "byte_size": byte_size,
+            }
+        )
     return validated
 
 
-def _build_user_message_content(prompt: str, images: list[dict[str, str]]) -> str | list[dict[str, Any]]:
+def _build_user_message_content(prompt: str, attachments: list[dict[str, Any]]) -> str | list[dict[str, Any]]:
     text = prompt.strip()
-    if not images:
+    file_context = _build_attachment_context_text(attachments)
+    if file_context:
+        text = "\n\n".join(part for part in [text, file_context] if part).strip()
+
+    image_attachments = [item for item in attachments if item.get("kind") == "image" and item.get("data_url")]
+    if not image_attachments:
         return text
-    parts: list[dict[str, Any]] = [{"type": "text", "text": text or "Describe this image."}]
-    for item in images:
+
+    parts: list[dict[str, Any]] = [{"type": "text", "text": text or "Describe the attached images."}]
+    for item in image_attachments:
         parts.append({"type": "image_url", "image_url": item["data_url"]})
     return parts
 
 
-def _message_content_to_history_parts(content: Any) -> tuple[str, list[dict[str, str]]]:
-    if isinstance(content, str):
-        return content, []
-    if not isinstance(content, list):
-        return str(content), []
+def _message_to_history_parts(message: Any) -> tuple[str, list[dict[str, Any]]]:
+    additional_kwargs = getattr(message, "additional_kwargs", {}) or {}
+    stored_prompt = str(additional_kwargs.get("atlas_user_prompt", "") or "").strip()
+    stored_attachments = additional_kwargs.get("atlas_attachments")
+    content = stored_prompt or _message_content_to_history_text(getattr(message, "content", ""))
+    attachments = _history_attachment_list(stored_attachments)
+    if attachments:
+        return content, attachments
+    fallback_content, fallback_attachments = _message_content_to_history_parts(getattr(message, "content", ""))
+    return content or fallback_content, fallback_attachments
 
+
+def _message_content_to_history_parts(content: Any) -> tuple[str, list[dict[str, Any]]]:
     text_parts: list[str] = []
-    attachments: list[dict[str, str]] = []
+    attachments: list[dict[str, Any]] = []
+    if isinstance(content, str):
+        return content, attachments
+    if not isinstance(content, list):
+        return str(content), attachments
+
     for item in content:
         if isinstance(item, str):
             text_parts.append(item)
@@ -1781,6 +1887,7 @@ def _message_content_to_history_parts(content: Any) -> tuple[str, list[dict[str,
             data_url = str(raw_value or "")
             attachments.append(
                 {
+                    "kind": "image",
                     "name": "image",
                     "media_type": _data_url_media_type(data_url),
                     "data_url": data_url,
@@ -1789,10 +1896,173 @@ def _message_content_to_history_parts(content: Any) -> tuple[str, list[dict[str,
     return "\n".join(part for part in text_parts if part).strip(), attachments
 
 
+def _message_content_to_history_text(content: Any) -> str:
+    text, _ = _message_content_to_history_parts(content)
+    return text
+
+
 def _data_url_media_type(value: str) -> str:
     if value.startswith("data:") and ";" in value:
         return value[5 : value.index(";")]
     return "image/png"
+
+
+def _history_attachment_metadata(attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    metadata: list[dict[str, Any]] = []
+    for item in attachments:
+        kind = str(item.get("kind", "")).strip().lower()
+        if kind == "image":
+            metadata.append(
+                {
+                    "kind": "image",
+                    "name": str(item.get("name", "") or "image"),
+                    "media_type": str(item.get("media_type", "") or "image/png"),
+                    "data_url": str(item.get("data_url", "") or ""),
+                    "byte_size": _safe_attachment_size(item.get("byte_size")),
+                }
+            )
+        elif kind == "file":
+            metadata.append(
+                {
+                    "kind": "file",
+                    "name": str(item.get("name", "") or "file"),
+                    "media_type": str(item.get("media_type", "") or "text/plain"),
+                    "byte_size": _safe_attachment_size(item.get("byte_size")),
+                }
+            )
+    return metadata
+
+
+def _history_attachment_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    attachments: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind", "")).strip().lower()
+        if kind not in {"image", "file"}:
+            continue
+        attachments.append(
+            {
+                "kind": kind,
+                "name": str(item.get("name", "") or ("image" if kind == "image" else "file")),
+                "media_type": str(item.get("media_type", "") or ("image/png" if kind == "image" else "text/plain")),
+                "data_url": str(item.get("data_url", "") or "") if kind == "image" else "",
+                "byte_size": _safe_attachment_size(item.get("byte_size")),
+            }
+        )
+    return attachments
+
+
+def _history_prompt_text(prompt: str, attachments: list[dict[str, Any]]) -> str:
+    text = prompt.strip()
+    if text:
+        return text
+    file_names = [str(item.get("name", "") or "").strip() for item in attachments if str(item.get("name", "")).strip()]
+    if not file_names:
+        return ""
+    if len(file_names) == 1:
+        return f"Attached {file_names[0]}"
+    return f"Attached {len(file_names)} files"
+
+
+def _build_attachment_context_text(attachments: list[dict[str, Any]]) -> str:
+    sections: list[str] = []
+    remaining = 42000
+    for item in attachments:
+        if item.get("kind") != "file":
+            continue
+        text_content = str(item.get("text_content", "") or "").strip()
+        if not text_content or remaining <= 0:
+            continue
+        snippet = text_content[: min(remaining, 14000)].strip()
+        if not snippet:
+            continue
+        sections.append(f"[Attached file: {item.get('name', 'file')}]\n{snippet}")
+        remaining -= len(snippet)
+    if not sections:
+        return ""
+    return "Use the attached files as context when answering.\n\n" + "\n\n".join(sections)
+
+
+def _attachment_text_content(*, name: str, media_type: str, text_content: str, data_url: str) -> str:
+    direct_text = text_content.strip()
+    if direct_text:
+        return direct_text[:14000]
+    lowered_name = name.strip().lower()
+    lowered_type = media_type.strip().lower()
+    if lowered_name.endswith(".pdf") or lowered_type == "application/pdf":
+        return _extract_pdf_text(data_url)[:14000]
+    if _is_text_attachment(lowered_name, lowered_type):
+        return _decode_data_url_text(data_url)[:14000]
+    return ""
+
+
+def _extract_pdf_text(data_url: str) -> str:
+    raw_bytes = _decode_data_url_bytes(data_url)
+    if raw_bytes is None:
+        return ""
+    try:
+        reader = PdfReader(io.BytesIO(raw_bytes))
+    except Exception:
+        return ""
+    parts: list[str] = []
+    for page in reader.pages:
+        try:
+            page_text = page.extract_text() or ""
+        except Exception:
+            page_text = ""
+        if page_text:
+            parts.append(page_text)
+        if sum(len(part) for part in parts) >= 18000:
+            break
+    return "\n".join(part.strip() for part in parts if part.strip()).strip()
+
+
+def _decode_data_url_text(data_url: str) -> str:
+    raw_bytes = _decode_data_url_bytes(data_url)
+    if raw_bytes is None:
+        return ""
+    return raw_bytes.decode("utf-8", errors="replace").strip()
+
+
+def _decode_data_url_bytes(data_url: str) -> bytes | None:
+    if not _is_valid_data_url(data_url):
+        return None
+    try:
+        encoded = data_url.split(",", 1)[1]
+        return base64.b64decode(encoded, validate=True)
+    except (IndexError, ValueError):
+        return None
+
+
+def _is_valid_data_url(value: str) -> bool:
+    return value.startswith("data:") and "," in value
+
+
+def _safe_attachment_size(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and value >= 0:
+        return value
+    if isinstance(value, float) and value >= 0:
+        return int(value)
+    text = str(value or "").strip()
+    return int(text) if text.isdigit() else None
+
+
+def _is_text_attachment(name: str, media_type: str) -> bool:
+    if media_type.startswith("text/"):
+        return True
+    if media_type in {"application/json", "application/xml", "application/x-yaml", "text/x-python"}:
+        return True
+    text_extensions = {
+        ".txt", ".md", ".markdown", ".json", ".csv", ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+        ".html", ".css", ".scss", ".sass", ".sql", ".yaml", ".yml", ".xml", ".sh", ".ps1", ".java", ".c",
+        ".cc", ".cpp", ".h", ".hpp", ".go", ".rs", ".rb", ".php", ".swift", ".kt", ".kts", ".toml", ".ini",
+    }
+    return any(name.endswith(extension) for extension in text_extensions)
 
 
 def _suggest_thread_title(prompt: str, *, max_words: int = 6, max_chars: int = 56) -> str:

@@ -25,9 +25,12 @@ class PromptRequest(BaseModel):
     thread_id: str = Field(..., min_length=1)
     chat_model: str | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    reasoning_mode: str | None = None
+    web_search_enabled: bool = False
     thread_title: str | None = None
     cross_chat_memory: bool = True
     auto_compact_long_chats: bool = True
+    attachments: list[dict[str, Any]] = Field(default_factory=list)
     images: list[dict[str, str]] = Field(default_factory=list)
 
 
@@ -97,7 +100,7 @@ def create_api_app(service: AtlasBackendService | None = None) -> FastAPI:
             if service is None and managed_service is not None:
                 managed_service.close()
 
-    app = FastAPI(title="Atlas API", version="1.0.2", lifespan=lifespan)
+    app = FastAPI(title="Atlas API", version="1.0.3", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(allowed_origins),
@@ -218,6 +221,10 @@ def create_api_app(service: AtlasBackendService | None = None) -> FastAPI:
     def thread_history(thread_id: str, user_id: str | None = Query(default=None)) -> list[dict[str, Any]]:
         return _handle_runtime(lambda: backend().get_thread_history(user_id=user_id, thread_id=thread_id))
 
+    @app.get("/threads/{thread_id}/runs")
+    def thread_runs(thread_id: str, user_id: str | None = Query(default=None)) -> list[dict[str, Any]]:
+        return _handle_runtime(lambda: backend().list_thread_runs(user_id=user_id, thread_id=thread_id))
+
     @app.get("/runs/{run_id}")
     def run_details(run_id: str) -> dict[str, Any]:
         return _handle_runtime(lambda: backend().get_run(run_id))
@@ -235,10 +242,12 @@ def create_api_app(service: AtlasBackendService | None = None) -> FastAPI:
                 thread_id=request.thread_id,
                 chat_model=request.chat_model,
                 temperature=request.temperature,
+                reasoning_mode=request.reasoning_mode,
+                web_search_enabled=request.web_search_enabled,
                 thread_title=request.thread_title,
                 cross_chat_memory=request.cross_chat_memory,
                 auto_compact_long_chats=request.auto_compact_long_chats,
-                images=request.images,
+                attachments=request.attachments or request.images,
             )
         )
 

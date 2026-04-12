@@ -1,26 +1,27 @@
 import * as ScrollArea from "@radix-ui/react-scroll-area";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Copy, CornerUpLeft, Edit3, GitBranch, ImagePlus, Lock, RotateCcw, Search, Send, Square, X } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Copy, CornerUpLeft, Edit3, FileText, GitBranch, Globe, ImagePlus, Lightbulb, Lock, Plus, RotateCcw, Search, Send, Square, X } from "lucide-react";
 import { ChangeEvent, FormEvent, KeyboardEvent, UIEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { MessageContent } from "../components/MessageContent";
 import {
   cancelRun,
   branchThread,
-  createUser,
   getRun,
   getModels,
   getStatus,
   getThreadHistory,
+  getThreadRuns,
   getThreads,
   getUsers,
   renameThread,
   startCompact,
   startChat,
   type ImageAttachment,
+  type ReasoningMode,
+  type RunStatusEvent,
+  type RunSummary,
   type ThreadMessage,
-  type UserSummary,
-  unlockUser,
 } from "../lib/api";
 import { useBackendPhase } from "../lib/backendPhase";
 import { useAtlasStore } from "../store/useAtlasStore";
@@ -44,27 +45,35 @@ type ConversationMessage = {
   historyIndex?: number;
 };
 
-type UserProtectionMode = "passwordless" | "password";
+type ThinkingEntry = {
+  runId: string;
+  text: string;
+  status: string;
+  chatModel?: string;
+  startedAt?: string;
+  durationMs?: number | null;
+  isLive?: boolean;
+};
 
 export function WorkspacePage() {
   const queryClient = useQueryClient();
   const conversationViewportRef = useRef<HTMLDivElement | null>(null);
   const autoScrollToLatestRef = useRef(true);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
+  const attachmentMenuRef = useRef<HTMLDivElement | null>(null);
+  const reasoningMenuRef = useRef<HTMLDivElement | null>(null);
   const promptInputRef = useRef<HTMLTextAreaElement | null>(null);
   const [prompt, setPrompt] = useState("");
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
-  const [onboardingUserId, setOnboardingUserId] = useState("");
-  const [onboardingUserProtection, setOnboardingUserProtection] = useState<UserProtectionMode>("passwordless");
-  const [onboardingUserPassword, setOnboardingUserPassword] = useState("");
-  const [unlockTargetUserId, setUnlockTargetUserId] = useState<string | null>(null);
-  const [unlockPassword, setUnlockPassword] = useState("");
 
   const currentUserId = useAtlasStore((state) => state.currentUserId);
   const currentThreadId = useAtlasStore((state) => state.currentThreadId);
   const currentThreadTitle = useAtlasStore((state) => state.currentThreadTitle);
   const draftThreadModel = useAtlasStore((state) => state.draftThreadModel);
   const draftThreadTemperature = useAtlasStore((state) => state.draftThreadTemperature);
+  const reasoningMode = useAtlasStore((state) => state.reasoningMode);
+  const webSearchEnabled = useAtlasStore((state) => state.webSearchEnabled);
   const crossChatMemoryEnabled = useAtlasStore((state) => state.crossChatMemoryEnabled);
   const autoCompactLongChats = useAtlasStore((state) => state.autoCompactLongChats);
   const currentRunId = useAtlasStore((state) => state.currentRunId);
@@ -80,11 +89,12 @@ export function WorkspacePage() {
   const liveError = useAtlasStore((state) => state.liveError);
   const compactionNotice = useAtlasStore((state) => state.compactionNotice);
   const isStreaming = useAtlasStore((state) => state.isStreaming);
-  const setCurrentUserId = useAtlasStore((state) => state.setCurrentUserId);
   const setCurrentThreadId = useAtlasStore((state) => state.setCurrentThreadId);
   const setCurrentThreadTitle = useAtlasStore((state) => state.setCurrentThreadTitle);
   const setDraftThreadModel = useAtlasStore((state) => state.setDraftThreadModel);
   const setDraftThreadTemperature = useAtlasStore((state) => state.setDraftThreadTemperature);
+  const setReasoningMode = useAtlasStore((state) => state.setReasoningMode);
+  const setWebSearchEnabled = useAtlasStore((state) => state.setWebSearchEnabled);
   const beginRun = useAtlasStore((state) => state.beginRun);
   const setStage = useAtlasStore((state) => state.setStage);
   const failRun = useAtlasStore((state) => state.failRun);
@@ -95,7 +105,9 @@ export function WorkspacePage() {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
   const [expandedCompactionKeys, setExpandedCompactionKeys] = useState<Record<string, boolean>>({});
-  const [isThinkingExpanded, setIsThinkingExpanded] = useState(false);
+  const [isThinkingPanelOpen, setIsThinkingPanelOpen] = useState(false);
+  const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false);
+  const [isReasoningMenuOpen, setIsReasoningMenuOpen] = useState(false);
   const [highlightedHistoryIndex, setHighlightedHistoryIndex] = useState<number | null>(null);
   const [copiedMessageKey, setCopiedMessageKey] = useState<string | null>(null);
 
@@ -176,6 +188,7 @@ export function WorkspacePage() {
   const ollamaOnline = Boolean(models?.ollama_online);
   const hasLocalModels = Boolean(models?.has_local_models);
   const ollamaUrl = status?.ollama_url || "http://127.0.0.1:11434";
+  const webSearchAvailable = Boolean(status?.web_search_available);
 
   const currentThread = useMemo(() => {
     const existing = threadItems.find((item) => item.thread_id === currentThreadId);
@@ -209,6 +222,12 @@ export function WorkspacePage() {
     queryKey: ["run", lastRunId],
     queryFn: () => getRun(lastRunId),
     enabled: Boolean(lastRunId),
+    staleTime: 2000,
+  });
+  const { data: threadRuns = [] } = useQuery({
+    queryKey: ["thread-runs", currentUserId, currentThreadId],
+    queryFn: () => getThreadRuns(currentThreadId, currentUserId),
+    enabled: Boolean(currentUserId && currentThreadId),
     staleTime: 2000,
   });
 
@@ -253,6 +272,21 @@ export function WorkspacePage() {
     [models?.model_details, selectedModel],
   );
   const selectedModelSupportsImages = Boolean(selectedModelDetails?.supports_images);
+  const selectedModelReasoningStrategy = selectedModelDetails?.reasoning_mode_strategy ?? "none";
+  const selectedModelSupportsReasoning = Boolean(selectedModelDetails?.supports_reasoning && selectedModelReasoningStrategy !== "none");
+  const effectiveReasoningMode = useMemo(
+    () => normalizeReasoningModeForModel(reasoningMode, selectedModelReasoningStrategy),
+    [reasoningMode, selectedModelReasoningStrategy],
+  );
+  const effectiveWebSearchEnabled = webSearchAvailable && webSearchEnabled;
+  const reasoningOptions = useMemo(
+    () => buildReasoningOptions(selectedModelReasoningStrategy),
+    [selectedModelReasoningStrategy],
+  );
+  const activeReasoningOption = useMemo(
+    () => reasoningOptions.find((option) => option.value === effectiveReasoningMode) ?? reasoningOptions[0] ?? null,
+    [effectiveReasoningMode, reasoningOptions],
+  );
   const headerSummary = backendStarting
     ? "Atlas is starting the local runtime."
     : !backendOnline
@@ -272,9 +306,7 @@ export function WorkspacePage() {
     ? "Starting backend"
     : !backendOnline
     ? "Backend offline"
-    : !currentUserId || !modelCatalogLoaded || !ollamaOnline || !hasLocalModels
-      ? "Finish setup"
-      : "Start the next thread";
+    : "New thread";
   const idleDescription = backendStarting
     ? "Atlas is starting the managed local runtime. Chats, profiles, and models will appear as soon as it comes online."
     : !backendOnline
@@ -344,6 +376,83 @@ export function WorkspacePage() {
       historyIndex: historyIndices[activePosition] ?? null,
     };
   }, [currentThreadId, currentUserId, searchJumpTarget]);
+  const currentThreadHasActiveChatRun = currentThreadHasActiveRun && currentRunMode === "chat";
+  const persistedThinking = useMemo(
+    () => extractThinkingText(runDetails?.events ?? []),
+    [runDetails?.events],
+  );
+  const liveThinkingText = useMemo(() => {
+    if (!currentThreadHasActiveChatRun) {
+      return "";
+    }
+    return preferLongerText(persistedThinking, liveThinking).trim();
+  }, [currentThreadHasActiveChatRun, liveThinking, persistedThinking]);
+  const thinkingEntries = useMemo<ThinkingEntry[]>(() => {
+    const persistedEntries = threadRuns
+      .filter((run) => run.mode === "chat")
+      .map((run) => {
+        const text = extractThinkingText(run.events ?? []).trim();
+        return {
+          runId: run.run_id,
+          text,
+          status: run.status,
+          chatModel: run.chat_model,
+          startedAt: run.started_at,
+          durationMs: run.diagnostics?.total_duration_ms ?? null,
+          isLive: false,
+        } as ThinkingEntry;
+      })
+      .filter((entry) => entry.text);
+
+    if (!currentThreadHasActiveChatRun || !currentRunId) {
+      return persistedEntries;
+    }
+
+    const liveEntry: ThinkingEntry = {
+      runId: currentRunId,
+      text: liveThinkingText,
+      status: "running",
+      chatModel: selectedModel || runDetails?.chat_model,
+      startedAt: runDetails?.started_at || new Date().toISOString(),
+      durationMs: runDetails?.diagnostics?.total_duration_ms ?? null,
+      isLive: true,
+    };
+
+    const existingIndex = persistedEntries.findIndex((entry) => entry.runId === currentRunId);
+    if (existingIndex >= 0) {
+      const nextEntries = [...persistedEntries];
+      nextEntries[existingIndex] = {
+        ...nextEntries[existingIndex],
+        ...liveEntry,
+        text: liveThinkingText || nextEntries[existingIndex].text,
+      };
+      return nextEntries;
+    }
+    return liveThinkingText ? [...persistedEntries, liveEntry] : persistedEntries;
+  }, [currentRunId, currentThreadHasActiveChatRun, liveThinkingText, runDetails?.chat_model, runDetails?.diagnostics?.total_duration_ms, runDetails?.started_at, selectedModel, threadRuns]);
+  const latestThinkingEntry = thinkingEntries[thinkingEntries.length - 1];
+  const canToggleThinkingPanel = Boolean(currentThreadHasActiveChatRun || thinkingEntries.length);
+  const thinkingPanelStatusLabel = currentThreadHasActiveChatRun
+    ? chatWaitingLabel(currentStage)
+    : formatRunStatusLabel(latestThinkingEntry ? ({
+        run_id: latestThinkingEntry.runId,
+        mode: "chat",
+        user_id: currentUserId,
+        thread_id: currentThreadId,
+        prompt: "",
+        status: latestThinkingEntry.status,
+        started_at: latestThinkingEntry.startedAt || "",
+        answer: "",
+        events: [],
+      } as RunSummary) : runDetails);
+  const thinkingPanelStatusClass = currentThreadHasActiveChatRun
+    ? "online"
+    : latestThinkingEntry?.status === "failed" || runDetails?.status === "failed"
+      ? "offline"
+      : latestThinkingEntry?.status === "completed" || runDetails?.status === "completed"
+        ? "subtle"
+        : "muted";
+  const currentChatWaitingLabel = chatWaitingLabel(currentStage);
 
   useEffect(() => {
     setDraftTitle(currentThread?.title || currentThreadTitle || currentThreadId || "");
@@ -355,8 +464,40 @@ export function WorkspacePage() {
   }, [currentUserId, currentThreadId]);
 
   useEffect(() => {
-    setIsThinkingExpanded(false);
-  }, [currentRunId]);
+    setIsThinkingPanelOpen(false);
+  }, [currentThreadId, currentUserId]);
+
+  useEffect(() => {
+    if (!isAttachmentMenuOpen) {
+      return undefined;
+    }
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!attachmentMenuRef.current?.contains(event.target as Node | null)) {
+        setIsAttachmentMenuOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", handlePointerDown);
+    return () => window.removeEventListener("pointerdown", handlePointerDown);
+  }, [isAttachmentMenuOpen]);
+
+  useEffect(() => {
+    if (!isReasoningMenuOpen) {
+      return undefined;
+    }
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!reasoningMenuRef.current?.contains(event.target as Node | null)) {
+        setIsReasoningMenuOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", handlePointerDown);
+    return () => window.removeEventListener("pointerdown", handlePointerDown);
+  }, [isReasoningMenuOpen]);
+
+  useEffect(() => {
+    if (!webSearchAvailable && webSearchEnabled) {
+      setWebSearchEnabled(false);
+    }
+  }, [setWebSearchEnabled, webSearchAvailable, webSearchEnabled]);
 
   const startRun = useMutation({
     mutationFn: async (value: string) => {
@@ -380,6 +521,8 @@ export function WorkspacePage() {
         currentThreadId,
         modelForRun,
         temperatureForRun,
+        effectiveReasoningMode,
+        effectiveWebSearchEnabled,
         (currentThreadTitle || currentThreadId).trim(),
         crossChatMemoryEnabled,
         autoCompactLongChats,
@@ -391,8 +534,11 @@ export function WorkspacePage() {
       beginRun(run_id, "chat", value, currentUserId, currentThreadId, attachments);
       setPrompt("");
       setAttachments([]);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
+      if (imageInputRef.current) {
+        imageInputRef.current.value = "";
+      }
+      if (attachmentInputRef.current) {
+        attachmentInputRef.current.value = "";
       }
     },
     onError: (error) => {
@@ -462,6 +608,8 @@ export function WorkspacePage() {
         thread.thread_id,
         thread.chat_model || selectedModel,
         readStoredTemperature(thread) ?? selectedTemperature ?? null,
+        effectiveReasoningMode,
+        effectiveWebSearchEnabled,
         thread.title || thread.thread_id,
         crossChatMemoryEnabled,
         autoCompactLongChats,
@@ -483,46 +631,6 @@ export function WorkspacePage() {
     },
     onError: (error) => {
       failRun(error instanceof Error ? error.message : "Atlas could not retry this response.");
-    },
-  });
-
-  const activateUser = async (user: UserSummary) => {
-    setCurrentUserId(user.user_id);
-    setCurrentThreadId("main");
-    setCurrentThreadTitle("main");
-    setDraftThreadTemperature(null);
-    if (preferredDraftModel) {
-      setDraftThreadModel(preferredDraftModel);
-    }
-    setUnlockPassword("");
-    setUnlockTargetUserId(null);
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["users"] }),
-      queryClient.invalidateQueries({ queryKey: ["threads"] }),
-      queryClient.invalidateQueries({ queryKey: ["thread-history"] }),
-      queryClient.invalidateQueries({ queryKey: ["models"] }),
-    ]);
-  };
-
-  const createOnboardingUser = useMutation({
-    mutationFn: async () =>
-      createUser(
-        onboardingUserId.trim(),
-        onboardingUserProtection === "password" ? onboardingUserPassword.trim() : undefined,
-      ),
-    onSuccess: async (user) => {
-      setOnboardingUserId("");
-      setOnboardingUserProtection("passwordless");
-      setOnboardingUserPassword("");
-      await activateUser(user);
-    },
-  });
-
-  const unlockOnboardingUser = useMutation({
-    mutationFn: async (payload: { userId: string; password?: string }) =>
-      unlockUser(payload.userId, payload.password),
-    onSuccess: async (user) => {
-      await activateUser(user);
     },
   });
 
@@ -577,27 +685,20 @@ export function WorkspacePage() {
       historyRepresentationTokensAfterCompaction: item.history_representation_tokens_after_compaction,
     }));
     if (currentThreadHasActiveRun && (pendingPrompt || pendingAttachments.length)) {
-      items.push({ role: "user", content: pendingPrompt, attachments: pendingAttachments, ephemeral: true });
+      items.push({ role: "user", content: pendingPrompt, attachments: pendingAttachments, ephemeral: true, runId: currentRunId || undefined });
     }
     if (currentThreadHasActiveRun && currentThreadCompactionNotice) {
       items.push(buildLiveCompactionMessage(currentThreadCompactionNotice));
     }
     if (currentThreadHasActiveRun && liveAnswer) {
-      items.push({ role: "assistant", content: liveAnswer, ephemeral: true });
+      items.push({ role: "assistant", content: liveAnswer, ephemeral: true, runId: currentRunId || undefined });
     }
     return items;
-  }, [currentThreadCompactionNotice, currentThreadHasActiveRun, history, liveAnswer, pendingAttachments, pendingPrompt]);
-  const shouldShowOnboarding = Boolean(
-    backendOnline &&
-      modelCatalogLoaded &&
-      transcript.length === 0 &&
-      (!currentUserId || !ollamaOnline || !hasLocalModels),
-  );
+  }, [currentRunId, currentThreadCompactionNotice, currentThreadHasActiveRun, history, liveAnswer, pendingAttachments, pendingPrompt]);
   const showOllamaWarning = Boolean(
     backendOnline &&
       modelCatalogLoaded &&
-      !ollamaOnline &&
-      !shouldShowOnboarding,
+      !ollamaOnline,
   );
 
   useEffect(() => {
@@ -734,18 +835,50 @@ export function WorkspacePage() {
     await commitTitle.mutateAsync(normalized);
   };
 
-  const handleFileSelection = async (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.currentTarget.files ?? []);
+  const appendAttachmentsFromFiles = async (files: File[]) => {
+    if (!files.length) {
+      return;
+    }
     const nextAttachments = await Promise.all(files.map((file) => fileToAttachment(file)));
-    setAttachments(nextAttachments);
+    setAttachments((current) => [...current, ...nextAttachments]);
+  };
+
+  const handleImageSelection = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.currentTarget.files ?? []);
+    await appendAttachmentsFromFiles(files);
+    event.currentTarget.value = "";
+    setIsAttachmentMenuOpen(false);
+  };
+
+  const handleAttachmentSelection = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.currentTarget.files ?? []);
+    await appendAttachmentsFromFiles(files);
+    event.currentTarget.value = "";
+    setIsAttachmentMenuOpen(false);
+  };
+
+  const toggleWebSearch = () => {
+    if (!webSearchAvailable) {
+      return;
+    }
+    setWebSearchEnabled(!webSearchEnabled);
   };
 
   const toggleCompactionSummary = (key: string) => {
     setExpandedCompactionKeys((current) => ({ ...current, [key]: !current[key] }));
   };
 
+  const openThinkingPanel = () => {
+    setIsThinkingPanelOpen(true);
+  };
+
+  const closeThinkingPanel = () => {
+    setIsThinkingPanelOpen(false);
+  };
+
   return (
-    <section className="workspace-main workspace-main-single">
+    <section className={`workspace-main workspace-main-single${isThinkingPanelOpen ? " has-thinking-panel" : ""}`}>
+      <div className="workspace-primary-column">
       <div className="workspace-main-header">
         <div className="workspace-title-block">
           <div className="workspace-title-row">
@@ -849,6 +982,7 @@ export function WorkspacePage() {
                 </label>
               )}
             </div>
+
           </div>
         </div>
       </div>
@@ -916,242 +1050,15 @@ export function WorkspacePage() {
             <div className="conversation-stack">
               {transcript.length === 0 ? (
                 <div className="workspace-idle">
-                  <div className={`workspace-idle-card${shouldShowOnboarding ? " workspace-onboarding-card" : ""}`}>
+                  <div className="workspace-idle-card">
                     <div className="workspace-idle-mark">
                       <img alt="Atlas" className="workspace-idle-logo workspace-idle-logo-large" src="/AtlasLogo.png" />
                     </div>
                     <span className="workspace-idle-kicker">
-                      {shouldShowOnboarding ? "First-run setup" : selectedModel ? formatModelLabel(selectedModel) : "New thread"}
+                      {selectedModel ? formatModelLabel(selectedModel) : "New thread"}
                     </span>
                     <h2>{idleTitle}</h2>
                     <p>{idleDescription}</p>
-                    {shouldShowOnboarding ? (
-                      <div className="workspace-onboarding-steps">
-                        <section className={`workspace-onboarding-step ${currentUserId ? "complete" : "active"}`}>
-                          <div className="workspace-onboarding-step-head">
-                            <span className="workspace-onboarding-step-index">1</span>
-                            <div className="workspace-onboarding-step-copy">
-                              <strong>Create or select a profile</strong>
-                              <p>Chats, memory, and search stay scoped to the active local profile.</p>
-                            </div>
-                            <span className="workspace-onboarding-step-state">{currentUserId ? "Ready" : "Needed"}</span>
-                          </div>
-                          {currentUserId ? (
-                            <div className="workspace-onboarding-summary">
-                              Using <strong>{currentUserId}</strong>{currentUserProfile ? ` - ${describeUserProtection(currentUserProfile)}` : ""}.
-                            </div>
-                          ) : (
-                            <div className="workspace-onboarding-step-body">
-                              {visibleUsers.length > 0 ? (
-                                <div className="workspace-onboarding-profile-list">
-                                  {visibleUsers.map((user) => {
-                                    const isProtected = user.protection === "password";
-                                    const isLocked = Boolean(user.locked);
-                                    const isUnlocking = unlockTargetUserId === user.user_id;
-                                    return (
-                                      <div className="workspace-onboarding-profile-card" key={user.user_id}>
-                                        <div className="workspace-onboarding-profile-copy">
-                                          <strong>{user.user_id}</strong>
-                                          <span>{describeUserProtection(user)}</span>
-                                        </div>
-                                        {!isLocked ? (
-                                          <button
-                                            className="ghost-button compact-button"
-                                            onClick={() => {
-                                              void activateUser(user);
-                                            }}
-                                            type="button"
-                                          >
-                                            Use profile
-                                          </button>
-                                        ) : (
-                                          <button
-                                            className="ghost-button compact-button"
-                                            onClick={() => {
-                                              setUnlockTargetUserId(user.user_id);
-                                              setUnlockPassword("");
-                                            }}
-                                            type="button"
-                                          >
-                                            Unlock
-                                          </button>
-                                        )}
-                                        {isProtected && isLocked && isUnlocking ? (
-                                          <div className="workspace-onboarding-inline-form">
-                                            <input
-                                              className="text-input"
-                                              onChange={(event) => setUnlockPassword(event.currentTarget.value)}
-                                              placeholder="Profile password"
-                                              type="password"
-                                              value={unlockPassword}
-                                            />
-                                            <button
-                                              className="primary-button compact-button"
-                                              disabled={!unlockPassword.trim() || unlockOnboardingUser.isPending}
-                                              onClick={() =>
-                                                unlockOnboardingUser.mutate({
-                                                  userId: user.user_id,
-                                                  password: unlockPassword.trim(),
-                                                })
-                                              }
-                                              type="button"
-                                            >
-                                              {unlockOnboardingUser.isPending ? "Unlocking..." : "Unlock"}
-                                            </button>
-                                          </div>
-                                        ) : null}
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              ) : (
-                                <div className="workspace-onboarding-summary">
-                                  No profiles exist yet. Create the first one here.
-                                </div>
-                              )}
-
-                              <div className="workspace-onboarding-create">
-                                <div className="workspace-onboarding-inline-form">
-                                  <input
-                                    className="text-input"
-                                    onChange={(event) => setOnboardingUserId(event.currentTarget.value)}
-                                    placeholder="new_profile"
-                                    value={onboardingUserId}
-                                  />
-                                  <div className="segmented-control">
-                                    <button
-                                      className={`segmented-button ${onboardingUserProtection === "passwordless" ? "active" : ""}`}
-                                      onClick={() => setOnboardingUserProtection("passwordless")}
-                                      type="button"
-                                    >
-                                      Passwordless
-                                    </button>
-                                    <button
-                                      className={`segmented-button ${onboardingUserProtection === "password" ? "active" : ""}`}
-                                      onClick={() => setOnboardingUserProtection("password")}
-                                      type="button"
-                                    >
-                                      Password
-                                    </button>
-                                  </div>
-                                </div>
-                                {onboardingUserProtection === "password" ? (
-                                  <div className="workspace-onboarding-inline-form">
-                                    <input
-                                      className="text-input"
-                                      onChange={(event) => setOnboardingUserPassword(event.currentTarget.value)}
-                                      placeholder="Profile password"
-                                      type="password"
-                                      value={onboardingUserPassword}
-                                    />
-                                  </div>
-                                ) : null}
-                                <div className="workspace-onboarding-inline-form">
-                                  <button
-                                    className="primary-button compact-button"
-                                    disabled={
-                                      !onboardingUserId.trim() ||
-                                      createOnboardingUser.isPending ||
-                                      (onboardingUserProtection === "password" && !onboardingUserPassword.trim())
-                                    }
-                                    onClick={() => createOnboardingUser.mutate()}
-                                    type="button"
-                                  >
-                                    {createOnboardingUser.isPending ? "Creating..." : "Create profile"}
-                                  </button>
-                                </div>
-                                {createOnboardingUser.isError ? (
-                                  <div className="error-inline">{getMutationErrorMessage(createOnboardingUser.error)}</div>
-                                ) : null}
-                                {unlockOnboardingUser.isError ? (
-                                  <div className="error-inline">{getMutationErrorMessage(unlockOnboardingUser.error)}</div>
-                                ) : null}
-                              </div>
-                            </div>
-                          )}
-                        </section>
-
-                        <section
-                          className={`workspace-onboarding-step ${
-                            !currentUserId ? "blocked" : ollamaOnline && hasLocalModels ? "complete" : "active"
-                          }`}
-                        >
-                          <div className="workspace-onboarding-step-head">
-                            <span className="workspace-onboarding-step-index">2</span>
-                            <div className="workspace-onboarding-step-copy">
-                              <strong>Confirm local model access</strong>
-                              <p>Atlas needs Ollama running and at least one installed chat model before the first turn.</p>
-                            </div>
-                            <span className="workspace-onboarding-step-state">
-                              {ollamaOnline && hasLocalModels ? "Ready" : !currentUserId ? "Waiting" : "Needed"}
-                            </span>
-                          </div>
-                          <div className="workspace-onboarding-step-body">
-                            {!currentUserId ? (
-                              <div className="workspace-onboarding-summary">Finish step 1 first.</div>
-                            ) : !ollamaOnline ? (
-                              <>
-                                <div className="workspace-onboarding-summary">
-                                  Atlas is online, but Ollama is not responding at <strong>{ollamaUrl}</strong>.
-                                </div>
-                                <div className="workspace-onboarding-inline-form">
-                                  <code className="workspace-onboarding-command">ollama serve</code>
-                                  <button className="ghost-button compact-button" onClick={() => void refreshModels()} type="button">
-                                    Refresh
-                                  </button>
-                                </div>
-                              </>
-                            ) : !hasLocalModels ? (
-                              <>
-                                <div className="workspace-onboarding-summary">
-                                  Ollama is running, but there are no local chat models installed yet.
-                                </div>
-                                <div className="workspace-onboarding-inline-form">
-                                  <code className="workspace-onboarding-command">ollama pull qwen3.5:9b</code>
-                                  <button className="ghost-button compact-button" onClick={() => void refreshModels()} type="button">
-                                    Refresh
-                                  </button>
-                                </div>
-                              </>
-                            ) : (
-                              <div className="workspace-onboarding-summary">
-                                Ready with <strong>{formatModelLabel(selectedModel)}</strong> at{" "}
-                                <strong>{formatTemperatureLabel(selectedTemperature)}</strong>. You can still change both in the header before the first message.
-                              </div>
-                            )}
-                          </div>
-                        </section>
-
-                        <section className={`workspace-onboarding-step ${canStartChat ? "complete" : "blocked"}`}>
-                          <div className="workspace-onboarding-step-head">
-                            <span className="workspace-onboarding-step-index">3</span>
-                            <div className="workspace-onboarding-step-copy">
-                              <strong>Start the first chat</strong>
-                              <p>Once the profile and model are ready, use the composer below to send the first message.</p>
-                            </div>
-                            <span className="workspace-onboarding-step-state">{canStartChat ? "Ready" : "Waiting"}</span>
-                          </div>
-                          <div className="workspace-onboarding-step-body">
-                            {canStartChat ? (
-                              <div className="workspace-onboarding-inline-form">
-                                <button
-                                  className="primary-button compact-button"
-                                  onClick={() => promptInputRef.current?.focus()}
-                                  type="button"
-                                >
-                                  Focus composer
-                                </button>
-                                <span className="muted-text">Type the first prompt below and click Send.</span>
-                              </div>
-                            ) : (
-                              <div className="workspace-onboarding-summary">
-                                Complete the first two steps to unlock the composer.
-                              </div>
-                            )}
-                          </div>
-                        </section>
-                      </div>
-                    ) : null}
                   </div>
                 </div>
               ) : null}
@@ -1224,13 +1131,13 @@ export function WorkspacePage() {
                   <article
                     className={`message-card ${message.role}${message.historyIndex === highlightedHistoryIndex ? " search-hit-active" : ""}`}
                     data-history-index={message.historyIndex}
-                    key={`${message.role}-${index}-${message.content.length}`}
+                    key={messageRenderKey(message, index)}
                   >
                     <div className="message-meta message-meta-row">
                       <span>{formatMessageRoleLabel(message.role)}</span>
                       <div className="message-actions" aria-label="Message actions">
                         <button
-                          className="ghost-button icon-button compact-button"
+                          className="ghost-button compact-button message-action-button"
                           onClick={() => void handleCopyMessage(message, index)}
                           type="button"
                         >
@@ -1238,7 +1145,7 @@ export function WorkspacePage() {
                           <span>{copiedMessageKey === messageActionKey(message, index, "copy") ? "Copied" : "Copy"}</span>
                         </button>
                         <button
-                          className="ghost-button icon-button compact-button"
+                          className="ghost-button compact-button message-action-button"
                           onClick={() => handleQuoteMessage(message)}
                           type="button"
                         >
@@ -1247,7 +1154,7 @@ export function WorkspacePage() {
                         </button>
                         {canBranchMessage ? (
                           <button
-                            className="ghost-button icon-button compact-button"
+                            className="ghost-button compact-button message-action-button"
                             disabled={branchMessage.isPending || retryAssistantTurn.isPending}
                             onClick={() => branchMessage.mutate({ afterMessageCount: branchAfterMessageCount })}
                             type="button"
@@ -1258,7 +1165,7 @@ export function WorkspacePage() {
                         ) : null}
                         {retryContext ? (
                           <button
-                            className="ghost-button icon-button compact-button"
+                            className="ghost-button compact-button message-action-button"
                             disabled={retryAssistantTurn.isPending || branchMessage.isPending || isStreaming}
                             onClick={() =>
                               retryAssistantTurn.mutate({
@@ -1278,12 +1185,19 @@ export function WorkspacePage() {
                     {message.attachments?.length ? (
                       <div className="message-attachments">
                         {message.attachments.map((item, attachmentIndex) => (
-                          <img
-                            alt={item.name || `attachment-${attachmentIndex + 1}`}
-                            className="message-attachment-image"
-                            key={`${item.data_url}-${attachmentIndex}`}
-                            src={item.data_url}
-                          />
+                          attachmentIsImage(item) ? (
+                            <img
+                              alt={item.name || `attachment-${attachmentIndex + 1}`}
+                              className="message-attachment-image"
+                              key={`${item.data_url}-${attachmentIndex}`}
+                              src={item.data_url}
+                            />
+                          ) : (
+                            <div className="message-attachment-file" key={`${item.name}-${attachmentIndex}`}>
+                              <FileText size={16} />
+                              <span>{item.name || `file-${attachmentIndex + 1}`}</span>
+                            </div>
+                          )
                         ))}
                       </div>
                     ) : null}
@@ -1298,44 +1212,26 @@ export function WorkspacePage() {
                   </div>
                   {currentRunMode === "compact" ? (
                     <div className="stream-waiting-line" aria-live="polite">
-                      <span>{compactWaitingLabel(currentStage)}</span>
-                      <span className="stream-dots" aria-hidden="true">
-                        <span />
-                        <span />
-                        <span />
-                      </span>
+                      <span className="stream-waiting-text">{compactWaitingLabel(currentStage)}</span>
                     </div>
                   ) : (
-                    <>
-                      <button
-                        aria-expanded={liveThinking ? isThinkingExpanded : false}
-                        className={`thinking-toggle ${liveThinking ? "interactive" : ""}`}
-                        onClick={() => {
-                          if (!liveThinking) {
-                            return;
-                          }
-                          setIsThinkingExpanded((current) => !current);
-                        }}
-                        type="button"
-                      >
-                        <span className="stream-waiting-line" aria-live="polite">
-                          <span>{chatWaitingLabel(currentStage)}</span>
-                          <span className="stream-dots" aria-hidden="true">
-                            <span />
-                            <span />
-                            <span />
-                          </span>
+                    <button
+                      aria-expanded={isThinkingPanelOpen}
+                      className={`thinking-toggle ${canToggleThinkingPanel ? "interactive" : ""}`}
+                      onClick={() => {
+                        if (!canToggleThinkingPanel) {
+                          return;
+                        }
+                        openThinkingPanel();
+                      }}
+                      type="button"
+                    >
+                      <span className="stream-waiting-line" aria-live="polite">
+                        <span className={`stream-waiting-text${currentChatWaitingLabel === "Deciding" ? " deciding-sweep" : ""}`}>
+                          {currentChatWaitingLabel}
                         </span>
-                        {liveThinking ? (
-                          isThinkingExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />
-                        ) : null}
-                      </button>
-                      {isThinkingExpanded && liveThinking ? (
-                        <div className="thinking-panel">
-                          <pre className="thinking-panel-text">{liveThinking}</pre>
-                        </div>
-                      ) : null}
-                    </>
+                      </span>
+                    </button>
                   )}
                 </article>
               ) : null}
@@ -1351,19 +1247,34 @@ export function WorkspacePage() {
       <form className="composer composer-shell" onSubmit={submitPrompt}>
         {attachments.length ? (
           <div className="composer-attachments">
-            {attachments.map((item, index) => (
-              <div className="composer-attachment-card" key={`${item.data_url}-${index}`}>
-                <img alt={item.name || `attachment-${index + 1}`} className="composer-attachment-image" src={item.data_url} />
-                <button
-                  aria-label={`Remove ${item.name || "image"}`}
-                  className="ghost-button icon-button composer-attachment-remove"
-                  onClick={() => setAttachments((current) => current.filter((_, currentIndex) => currentIndex !== index))}
-                  type="button"
-                >
-                  <X size={14} />
-                </button>
-              </div>
-            ))}
+            {attachments.map((item, index) => {
+              const isImage = attachmentIsImage(item);
+              return (
+                <div className={`composer-attachment-card${isImage ? " image" : " file"}`} key={`${item.name}-${item.data_url || index}`}>
+                  {isImage ? (
+                    <img alt={item.name || `attachment-${index + 1}`} className="composer-attachment-image" src={item.data_url} />
+                  ) : (
+                    <div className="composer-attachment-file-icon" aria-hidden="true">
+                      <FileText size={16} />
+                    </div>
+                  )}
+                  <div className="composer-attachment-copy">
+                    <div className="composer-attachment-title" title={item.name || `attachment-${index + 1}`}>
+                      {item.name || `attachment-${index + 1}`}
+                    </div>
+                    <div className="composer-attachment-meta">{formatAttachmentMeta(item)}</div>
+                  </div>
+                  <button
+                    aria-label={`Remove ${item.name || "attachment"}`}
+                    className="ghost-button icon-button composer-attachment-remove"
+                    onClick={() => setAttachments((current) => current.filter((_, currentIndex) => currentIndex !== index))}
+                    type="button"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              );
+            })}
           </div>
         ) : null}
 
@@ -1378,21 +1289,22 @@ export function WorkspacePage() {
         />
 
         <div className="composer-actions">
-          {selectedModelSupportsImages ? (
-            <>
-              <input
-                accept="image/*"
-                className="hidden-file-input"
-                onChange={handleFileSelection}
-                ref={fileInputRef}
-                type="file"
-              />
-              <button className="ghost-button" onClick={() => fileInputRef.current?.click()} type="button">
-                <ImagePlus size={16} />
-                Upload photo
-              </button>
-            </>
-          ) : null}
+          <input
+            accept="image/*"
+            className="hidden-file-input"
+            onChange={handleImageSelection}
+            multiple
+            ref={imageInputRef}
+            type="file"
+          />
+          <input
+            accept={DOCUMENT_FILE_ACCEPT}
+            className="hidden-file-input"
+            onChange={handleAttachmentSelection}
+            multiple
+            ref={attachmentInputRef}
+            type="file"
+          />
 
           <button
             className="ghost-button"
@@ -1402,10 +1314,93 @@ export function WorkspacePage() {
           >
             {startManualCompact.isPending || (isStreaming && currentRunMode === "compact") ? "Compacting..." : "Compact now"}
           </button>
-          <button className="primary-button" disabled={isStreaming || (!prompt.trim() && attachments.length === 0) || !canStartChat} type="submit">
-            <Send size={16} />
-            {isStreaming ? (currentRunMode === "compact" ? "Compacting..." : "Running...") : "Send"}
-          </button>
+          <div className="composer-send-cluster">
+            <div className="composer-menu-shell" ref={attachmentMenuRef}>
+              <button
+                aria-expanded={isAttachmentMenuOpen}
+                aria-haspopup="menu"
+                className="ghost-button icon-button"
+                onClick={() => {
+                  setIsReasoningMenuOpen(false);
+                  setIsAttachmentMenuOpen((current) => !current);
+                }}
+                type="button"
+              >
+                <Plus size={16} />
+              </button>
+              {isAttachmentMenuOpen ? (
+                <div className="composer-menu" role="menu">
+                  <button
+                    className="composer-menu-item"
+                    disabled={!selectedModelSupportsImages}
+                    onClick={() => imageInputRef.current?.click()}
+                    type="button"
+                  >
+                    <ImagePlus size={15} />
+                    <span>Add image</span>
+                  </button>
+                  <button className="composer-menu-item" onClick={() => attachmentInputRef.current?.click()} type="button">
+                    <FileText size={15} />
+                    <span>Add file</span>
+                  </button>
+                </div>
+              ) : null}
+            </div>
+            {selectedModelSupportsReasoning ? (
+              <div className="composer-select-shell" ref={reasoningMenuRef}>
+                <button
+                  aria-expanded={isReasoningMenuOpen}
+                  aria-haspopup="menu"
+                  className="composer-control-pill composer-control-trigger"
+                  onClick={() => {
+                    setIsAttachmentMenuOpen(false);
+                    setIsReasoningMenuOpen((current) => !current);
+                  }}
+                  title="Reasoning mode"
+                  type="button"
+                >
+                  <span className="composer-control-trigger-main">
+                    <Lightbulb size={14} />
+                    <span className="composer-control-trigger-label">{activeReasoningOption?.label ?? "Reasoning"}</span>
+                  </span>
+                  <ChevronDown className={`composer-control-trigger-chevron${isReasoningMenuOpen ? " open" : ""}`} size={14} />
+                </button>
+                {isReasoningMenuOpen ? (
+                  <div className="composer-select-menu" role="menu">
+                    {reasoningOptions.map((option) => (
+                      <button
+                        className={`composer-select-option${option.value === effectiveReasoningMode ? " active" : ""}`}
+                        key={option.value}
+                        onClick={() => {
+                          setReasoningMode(option.value as ReasoningMode);
+                          setIsReasoningMenuOpen(false);
+                        }}
+                        role="menuitemradio"
+                        type="button"
+                      >
+                        <span>{option.label}</span>
+                        {option.value === effectiveReasoningMode ? <Check size={14} /> : null}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+            {webSearchAvailable ? (
+              <button
+                className={`ghost-button icon-button${effectiveWebSearchEnabled ? " active-toggle" : ""}`}
+                onClick={toggleWebSearch}
+                title={effectiveWebSearchEnabled ? "Web search is on" : "Turn on web search"}
+                type="button"
+              >
+                <Globe size={16} />
+              </button>
+            ) : null}
+            <button className="primary-button" disabled={isStreaming || (!prompt.trim() && attachments.length === 0) || !canStartChat} type="submit">
+              <Send size={16} />
+              {isStreaming ? (currentRunMode === "compact" ? "Compacting..." : "Running...") : "Send"}
+            </button>
+          </div>
           {isStreaming ? (
             <button
               className="ghost-button stop-button"
@@ -1419,15 +1414,130 @@ export function WorkspacePage() {
           ) : null}
         </div>
       </form>
+      </div>
+      {isThinkingPanelOpen ? (
+        <aside className="workspace-thinking-inspector" aria-label="Thinking panel">
+          <div className="workspace-thinking-panel">
+            <div className="workspace-thinking-panel-header">
+              <div className="workspace-thinking-panel-copy">
+                <p className="workspace-section-label">Deciding</p>
+                <h2>{currentThread?.title || currentThreadTitle || currentThreadId || "Run details"}</h2>
+                <p className="workspace-thinking-panel-summary">
+                  {currentThreadHasActiveChatRun
+                    ? "New deciding traces append here and stay in order for this thread."
+                    : "Saved deciding traces stay here in order for this thread."}
+                </p>
+              </div>
+              <button
+                aria-label="Close thinking panel"
+                className="ghost-button icon-button"
+                onClick={closeThinkingPanel}
+                type="button"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="workspace-thinking-panel-meta">
+              <span className={`status-pill ${thinkingPanelStatusClass}`}>
+                <span className="status-dot" />
+                <span>{thinkingPanelStatusLabel}</span>
+              </span>
+              {latestThinkingEntry?.chatModel ? <span className="workspace-thinking-meta-chip">{latestThinkingEntry.chatModel}</span> : null}
+              {latestThinkingEntry?.durationMs ? (
+                <span className="workspace-thinking-meta-chip">
+                  {formatDurationLabel(latestThinkingEntry.durationMs)}
+                </span>
+              ) : null}
+              {latestThinkingEntry?.startedAt ? (
+                <span className="workspace-thinking-meta-chip">{formatInspectorTimestamp(latestThinkingEntry.startedAt)}</span>
+              ) : null}
+              {thinkingEntries.length > 1 ? (
+                <span className="workspace-thinking-meta-chip">{`${thinkingEntries.length} runs`}</span>
+              ) : null}
+            </div>
+
+            <div className="workspace-thinking-panel-body">
+              <div className="workspace-thinking-detail">
+                {thinkingEntries.length ? (
+                  <div className="workspace-thinking-sequence">
+                    {thinkingEntries.map((entry) => (
+                      <section className={`workspace-thinking-entry${entry.isLive ? " live" : ""}`} key={entry.runId}>
+                        <div className="workspace-thinking-entry-meta">
+                          {entry.chatModel ? <span className="workspace-thinking-meta-chip">{entry.chatModel}</span> : null}
+                          {entry.durationMs ? (
+                            <span className="workspace-thinking-meta-chip">{formatDurationLabel(entry.durationMs)}</span>
+                          ) : null}
+                          {entry.startedAt ? (
+                            <span className="workspace-thinking-meta-chip">{formatInspectorTimestamp(entry.startedAt)}</span>
+                          ) : null}
+                          {entry.isLive ? <span className="workspace-thinking-meta-chip accent">Live</span> : null}
+                        </div>
+                        <pre className="workspace-thinking-text">{entry.text}</pre>
+                      </section>
+                    ))}
+                  </div>
+                ) : canToggleThinkingPanel ? (
+                  <div className="workspace-thinking-placeholder">
+                    Atlas has not emitted any deciding trace yet.
+                  </div>
+                ) : (
+                  <div className="workspace-thinking-empty">No deciding trace yet for this thread.</div>
+                )}
+              </div>
+            </div>
+          </div>
+        </aside>
+      ) : null}
     </section>
   );
 }
 
 const MODEL_DEFAULT_TEMPERATURE_VALUE = "model-default";
 const TEMPERATURE_OPTIONS = Array.from({ length: 21 }, (_, index) => Number((index / 10).toFixed(1)));
+const DOCUMENT_FILE_ACCEPT = [
+  ".txt", ".md", ".markdown", ".json", ".csv", ".pdf", ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+  ".html", ".css", ".scss", ".sass", ".sql", ".yaml", ".yml", ".xml", ".sh", ".ps1", ".java", ".c",
+  ".cc", ".cpp", ".h", ".hpp", ".go", ".rs", ".rb", ".php", ".swift", ".kt", ".kts", ".toml", ".ini",
+].join(",");
+const BOOLEAN_REASONING_OPTIONS: Array<{ value: ReasoningMode; label: string }> = [
+  { value: "off", label: "Off" },
+  { value: "on", label: "On" },
+];
+const LEVEL_REASONING_OPTIONS: Array<{ value: ReasoningMode; label: string }> = [
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+];
 
 function formatModelLabel(value: string) {
   return value || "Select model";
+}
+
+function buildReasoningOptions(strategy: "none" | "boolean" | "levels") {
+  if (strategy === "levels") {
+    return LEVEL_REASONING_OPTIONS;
+  }
+  if (strategy === "boolean") {
+    return BOOLEAN_REASONING_OPTIONS;
+  }
+  return [];
+}
+
+function normalizeReasoningModeForModel(
+  value: ReasoningMode,
+  strategy: "none" | "boolean" | "levels",
+): ReasoningMode {
+  if (strategy === "levels") {
+    if (value === "low" || value === "medium" || value === "high") {
+      return value;
+    }
+    return "medium";
+  }
+  if (strategy === "boolean") {
+    return value === "off" ? "off" : "on";
+  }
+  return "off";
 }
 
 function readStoredTemperature(value: { temperature?: number | null } | undefined): number | null | undefined {
@@ -1559,6 +1669,9 @@ function chatWaitingLabel(stage: string) {
   if (stage === "queued") {
     return "Queued";
   }
+  if (stage === "web_search") {
+    return "Searching";
+  }
   if (stage === "stopping") {
     return "Stopping";
   }
@@ -1619,30 +1732,208 @@ function messageActionKey(message: ConversationMessage, index: number, action: s
   return `${action}:${message.runId || message.timestamp || message.historyIndex || index}:${message.role}`;
 }
 
-function describeUserProtection(user: { protection?: string; locked?: boolean }) {
-  if (user.protection === "password") {
-    return user.locked ? "Password protected - Locked" : "Password protected";
+function messageRenderKey(message: ConversationMessage, index: number) {
+  if (message.runId) {
+    return `message:${message.runId}:${message.role}:${message.kind || "plain"}`;
   }
-  return "Passwordless";
+  if (message.timestamp) {
+    return `message:${message.timestamp}:${message.role}:${message.kind || "plain"}`;
+  }
+  if (message.historyIndex !== undefined && message.historyIndex !== null) {
+    return `message:${message.historyIndex}:${message.role}:${message.kind || "plain"}`;
+  }
+  return `message:${index}:${message.role}:${message.kind || "plain"}`;
 }
 
-function getMutationErrorMessage(error: unknown) {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
+function extractThinkingText(events: RunStatusEvent[]) {
+  return events
+    .filter((event) => event.type === "thinking_token")
+    .map((event) => String(event.payload.text ?? ""))
+    .join("");
+}
+
+function preferLongerText(primary: string, fallback: string) {
+  return primary.length >= fallback.length ? primary : fallback;
+}
+
+function formatInspectorStageLabel(value?: string) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) {
+    return "Trace";
   }
-  return "The request did not complete.";
+  return normalized
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatRunStatusLabel(run: RunSummary | undefined) {
+  if (!run) {
+    return "No run";
+  }
+  if (run.status === "completed") {
+    return "Completed";
+  }
+  if (run.status === "failed") {
+    return "Failed";
+  }
+  if (run.status === "cancelling") {
+    return "Stopping";
+  }
+  if (run.status === "queued") {
+    return "Queued";
+  }
+  if (run.status === "running") {
+    return "Running";
+  }
+  return formatInspectorStageLabel(run.status);
+}
+
+function formatDurationLabel(value?: number | null) {
+  if (typeof value !== "number" || Number.isNaN(value) || value <= 0) {
+    return "";
+  }
+  if (value < 1000) {
+    return `${value} ms`;
+  }
+  return `${(value / 1000).toFixed(1)} s`;
+}
+
+function formatInspectorTimestamp(value?: string | null) {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) {
+    return "";
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
 }
 
 async function fileToAttachment(file: File): Promise<ImageAttachment> {
-  const dataUrl = await new Promise<string>((resolve, reject) => {
+  const normalizedName = file.name || "attachment";
+  const mediaType = file.type || fallbackMediaTypeForFile(normalizedName);
+  if (attachmentIsImage({ name: normalizedName, media_type: mediaType })) {
+    return {
+      kind: "image",
+      name: normalizedName,
+      media_type: mediaType || "image/png",
+      data_url: await readFileAsDataUrl(file),
+      byte_size: file.size,
+    };
+  }
+
+  if (isTextLikeFile(normalizedName, mediaType)) {
+    return {
+      kind: "file",
+      name: normalizedName,
+      media_type: mediaType || "text/plain",
+      text_content: await file.text(),
+      byte_size: file.size,
+    };
+  }
+
+  return {
+    kind: "file",
+    name: normalizedName,
+    media_type: mediaType || "application/octet-stream",
+    data_url: await readFileAsDataUrl(file),
+    byte_size: file.size,
+  };
+}
+
+function attachmentIsImage(attachment: Pick<ImageAttachment, "kind" | "media_type" | "data_url" | "name">) {
+  if (attachment.kind === "image") {
+    return true;
+  }
+  const mediaType = String(attachment.media_type || "").toLowerCase();
+  if (mediaType.startsWith("image/")) {
+    return true;
+  }
+  return String(attachment.data_url || "").startsWith("data:image/");
+}
+
+function formatAttachmentMeta(attachment: ImageAttachment) {
+  const extension = getAttachmentExtensionLabel(attachment.name);
+  const typeLabel = extension || (attachmentIsImage(attachment) ? "IMAGE" : "FILE");
+  const sizeLabel = formatAttachmentSize(attachment.byte_size);
+  return [typeLabel, sizeLabel].filter(Boolean).join(" · ");
+}
+
+function getAttachmentExtensionLabel(name?: string) {
+  const normalized = String(name || "").trim();
+  if (!normalized.includes(".")) {
+    return "";
+  }
+  const extension = normalized.split(".").pop()?.trim().toUpperCase() ?? "";
+  if (!extension || extension.length > 6) {
+    return "";
+  }
+  return extension;
+}
+
+function formatAttachmentSize(value?: number) {
+  if (!value || value <= 0) {
+    return "";
+  }
+  const units = ["B", "KB", "MB", "GB"];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  const precision = size >= 10 || unitIndex === 0 ? 0 : 1;
+  return `${size.toFixed(precision)} ${units[unitIndex]}`;
+}
+
+function isTextLikeFile(name: string, mediaType: string) {
+  const normalizedName = name.toLowerCase();
+  const normalizedType = mediaType.toLowerCase();
+  if (normalizedType.startsWith("text/")) {
+    return true;
+  }
+  if (["application/json", "application/xml", "application/x-yaml", "text/x-python"].includes(normalizedType)) {
+    return true;
+  }
+  return [
+    ".txt", ".md", ".markdown", ".json", ".csv", ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+    ".html", ".css", ".scss", ".sass", ".sql", ".yaml", ".yml", ".xml", ".sh", ".ps1", ".java", ".c",
+    ".cc", ".cpp", ".h", ".hpp", ".go", ".rs", ".rb", ".php", ".swift", ".kt", ".kts", ".toml", ".ini",
+  ].some((extension) => normalizedName.endsWith(extension));
+}
+
+function fallbackMediaTypeForFile(name: string) {
+  const normalizedName = name.toLowerCase();
+  if (normalizedName.endsWith(".pdf")) {
+    return "application/pdf";
+  }
+  if (normalizedName.endsWith(".json")) {
+    return "application/json";
+  }
+  if (normalizedName.endsWith(".csv")) {
+    return "text/csv";
+  }
+  if (normalizedName.endsWith(".md") || normalizedName.endsWith(".markdown")) {
+    return "text/markdown";
+  }
+  if (isTextLikeFile(normalizedName, "")) {
+    return "text/plain";
+  }
+  return "application/octet-stream";
+}
+
+async function readFileAsDataUrl(file: File): Promise<string> {
+  return await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(reader.error ?? new Error("Could not read image."));
+    reader.onerror = () => reject(reader.error ?? new Error("Could not read file."));
     reader.onload = () => resolve(String(reader.result || ""));
     reader.readAsDataURL(file);
   });
-  return {
-    name: file.name,
-    media_type: file.type || "image/png",
-    data_url: dataUrl,
-  };
 }

@@ -17,7 +17,7 @@ class LLMProviderTemperatureTests(unittest.TestCase):
     def test_chat_omits_temperature_when_using_model_default(self, chat_ollama_mock) -> None:
         provider = LLMProvider(self.config)
 
-        provider.chat("gpt-oss:20b", temperature=None)
+        provider.chat("gpt-oss:20b", temperature=None, reasoning=True)
 
         _, kwargs = chat_ollama_mock.call_args
         self.assertTrue(kwargs["reasoning"])
@@ -27,7 +27,7 @@ class LLMProviderTemperatureTests(unittest.TestCase):
     def test_chat_passes_explicit_temperature_override(self, chat_ollama_mock) -> None:
         provider = LLMProvider(self.config)
 
-        provider.chat("gpt-oss:20b", temperature=0.7)
+        provider.chat("gpt-oss:20b", temperature=0.7, reasoning=True)
 
         _, kwargs = chat_ollama_mock.call_args
         self.assertTrue(kwargs["reasoning"])

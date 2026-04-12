@@ -14,11 +14,12 @@ from ..memory.mem0_service import Mem0Service
 from ..providers.base import ChatModelProvider
 from ..security import open_application_sqlite
 from ..session import scoped_thread_id
+from ..web_search import OllamaWebSearchService
 from .context import GraphContext
 from .nodes import GraphNodes
 from .state import AgentState
 
-PRE_SYNTHESIS_NODE_SEQUENCE = ("retrieve_memories",)
+PRE_SYNTHESIS_NODE_SEQUENCE = ("retrieve_memories", "retrieve_web")
 POST_SYNTHESIS_NODE_SEQUENCE = ("extract_updates", "persist")
 
 
@@ -39,6 +40,8 @@ class AgentApplication:
         thread_id: str,
         chat_model: str | None = None,
         chat_temperature: float | None = None,
+        reasoning_mode: str | None = "on",
+        web_search_enabled: bool = False,
         cross_chat_memory: bool = True,
         auto_compact_long_chats: bool = True,
         effective_context_window: int | None = None,
@@ -53,6 +56,8 @@ class AgentApplication:
                 session_id=session_id,
                 chat_model=chat_model or self.config.chat_model,
                 chat_temperature=chat_temperature,
+                reasoning_mode=reasoning_mode,
+                web_search_enabled=web_search_enabled,
                 cross_chat_memory=cross_chat_memory,
                 auto_compact_long_chats=auto_compact_long_chats,
                 effective_context_window=effective_context_window,
@@ -101,7 +106,8 @@ def build_chat_application(config: AppConfig | None = None) -> AgentApplication:
 
     llm_provider = LLMProvider(resolved)
     memory_service = Mem0Service(resolved)
-    nodes = GraphNodes(resolved, llm_provider, memory_service)
+    web_search_service = OllamaWebSearchService(resolved)
+    nodes = GraphNodes(resolved, llm_provider, memory_service, web_search_service)
     graph = _compile_graph(nodes, checkpointer=checkpointer)
 
     return AgentApplication(
