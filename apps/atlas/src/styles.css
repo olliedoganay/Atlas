@@ -1422,19 +1422,26 @@ pre {
 
 .advanced-page {
   display: grid;
-  gap: 24px;
+  align-content: start;
+  gap: 18px;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 20px 22px 24px;
+  overflow: auto;
 }
 
 .advanced-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
 }
 
 .advanced-card,
 .advanced-run-card,
 .advanced-empty-state {
-  gap: 16px;
+  gap: 12px;
+  padding: 12px 14px;
 }
 
 .advanced-card-head,
@@ -1454,15 +1461,16 @@ pre {
 .advanced-stat-list,
 .advanced-metric-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
 }
 
 .advanced-stat-list div,
 .advanced-metric-grid div {
   display: grid;
   gap: 4px;
-  padding: 10px 12px;
+  min-width: 0;
+  padding: 8px 10px;
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--surface) 88%, transparent);
 }
@@ -1481,20 +1489,23 @@ pre {
   margin: 0;
   color: var(--text);
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .advanced-runs {
   display: grid;
-  gap: 16px;
+  gap: 12px;
+  min-height: 0;
 }
 
 .advanced-run-list {
   display: grid;
-  gap: 14px;
+  gap: 12px;
 }
 
 .advanced-run-head strong {
   display: block;
+  overflow-wrap: anywhere;
 }
 
 .advanced-run-head p,
@@ -1509,6 +1520,14 @@ pre {
   justify-content: space-between;
   gap: 12px;
   font-size: 0.86rem;
+  flex-wrap: wrap;
+}
+
+.advanced-card-head p,
+.advanced-runs-head p,
+.advanced-empty-state p,
+.advanced-run-foot span {
+  overflow-wrap: anywhere;
 }
 
 .timeline-system-meta {
