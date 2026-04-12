@@ -28,6 +28,12 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "installerHooks": "windows/nsis/hooks.nsh"
+      }
+    },
     "resources": [
       "resources/backend/**/*",
       "resources/prompts/**/*"
