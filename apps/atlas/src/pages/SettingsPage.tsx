@@ -45,7 +45,7 @@ export function SettingsPage() {
   const [pendingDeleteUserId, setPendingDeleteUserId] = useState<string | null>(null);
   const [unlockTargetUserId, setUnlockTargetUserId] = useState<string | null>(null);
   const [unlockPassword, setUnlockPassword] = useState("");
-  const [appVersion, setAppVersion] = useState("1.0.3");
+  const [appVersion, setAppVersion] = useState("1.0.5");
   const [aboutHowToOpen, setAboutHowToOpen] = useState(false);
   const { data: status } = useQuery({
     queryKey: ["status"],
@@ -279,52 +279,56 @@ export function SettingsPage() {
           : "Version, local storage, and basic usage.";
   const aboutHowToSteps = [
     {
-      title: "Create or select a profile",
-      body: "Open Settings, go to Users, then create a profile or switch to an existing one before starting chats.",
+      title: "1. Profiles and access",
+      body: "Open Settings > Users to create, rename, or delete a profile. Passwordless profiles open instantly; password-protected profiles require an unlock on each session. Use Lock to close an active profile without closing Atlas. Each profile keeps its own chats, memories, and saved runs.",
     },
     {
-      title: "Start a new chat",
-      body: "Go to Workspace and click the plus button in the Chats column to open a fresh thread.",
+      title: "2. Models and temperature",
+      body: "Pick a chat model and an optional embedding model in Settings > Models (for example gpt-oss:20b and nomic-embed-text). Before the first message in a thread, set the Model and Temp pickers at the top of the workspace; after the first turn both are locked to keep the conversation consistent. Temperature accepts Model default or an exact numeric value.",
     },
     {
-      title: "Choose the model",
-      body: "Use the Model picker at the top right before sending the first message. After the first message, that thread keeps its model.",
+      title: "3. Chats and navigation",
+      body: "The sidebar lists every chat for the active profile. Click + to start a new one, the duplicate icon to fork a thread, and the delete icon to remove it. Press Ctrl+K (or click Search chats) to search inside the current thread or across every local chat. Click the pencil next to a chat title to rename it.",
     },
     {
-      title: "Choose the temperature",
-      body: "Use the Temp picker next to the model picker before the first message. Pick Model default or an exact value.",
+      title: "4. Sending, streaming, and stopping",
+      body: "Type in the composer at the bottom and press Enter (Shift+Enter for a newline) or click Send. Responses stream token-by-token. Click Stop to end the current run at any point. When a model exposes its reasoning trace, the Deciding card expands into the available thinking stream.",
     },
     {
-      title: "Send a message",
-      body: "Type in the composer at the bottom and click Send. Atlas starts answering in the active thread.",
+      title: "5. Context length and compaction",
+      body: "Long threads are compacted automatically when auto compact is on (Settings > General). Click Compact now at any time to summarize older turns in the active thread, freeing context space without losing the summary. The compaction summary becomes part of the thread and is included in future replies.",
     },
     {
-      title: "Stop a running answer",
-      body: "Click Stop while the model is still responding. This ends the current run for that thread.",
+      title: "6. Memories (cross-chat recall)",
+      body: "Atlas can remember durable facts across chats when cross-chat memory is enabled. Use Remember in Settings > Data to store a memory manually, Forget to remove one, and the recall toggle to control whether the current chat pulls from memory. Memories are stored locally in an encrypted vector store.",
     },
     {
-      title: "Open model thinking",
-      body: "While the model is deciding, click the Deciding card to expand the available thinking stream when the model provides it.",
+      title: "7. Run code from a response",
+      body: "Every code block has Copy and Run. Run opens a separate Atlas Run window that executes the snippet inside a disposable Docker container and streams stdout/stderr live. Closing the window kills the container. Supported languages include Python, JavaScript, TypeScript, Go, Rust, C, C++, Java, Ruby, PHP, Bash, C#, Kotlin, Swift, Perl, Lua, R, Elixir, and Dart. HTML code runs in a sandboxed client-side preview with no container needed.",
     },
     {
-      title: "Search your chats",
-      body: "Click Search chats in the sidebar or press Ctrl+K. You can search inside the current chat or across all local chats.",
+      title: "8. Automatic dependency installs",
+      body: "The runner inspects each snippet, extracts imports, and installs missing packages before running (pip, npm, cargo, go mod, gem, cpanm, install.packages, dart pub, and more). Progress appears as [atlas-runner] installing: ... in the output pane. Docker Desktop (or any Docker daemon on PATH) must be running; the run window shows a clear prompt when it isn't.",
     },
     {
-      title: "Compact a long chat",
-      body: "Click Compact now to summarize older context in the current thread. Atlas also does this automatically if auto compact is on.",
+      title: "9. Graphical Python programs",
+      body: "When Atlas detects a GUI-capable import (pygame, tkinter, turtle, PyQt5/6, PySide2/6, wx, kivy, matplotlib), the run is routed through a prebuilt GUI image that bundles Xvfb, fluxbox, x11vnc, websockify, and noVNC. The run window renders the live GUI in an embedded viewer alongside the output pane. The image builds once in the background on first use (a few minutes); subsequent runs are fast.",
     },
     {
-      title: "Duplicate or delete a chat",
-      body: "Use the duplicate and delete buttons on each chat card in the sidebar to copy a thread or remove it.",
+      title: "10. Advanced view",
+      body: "Open Advanced from the left nav for a deeper view of the last run: checkpoints, graph node activity, and saved run artifacts under .data/runs. Use it when you want to inspect what the agent actually did, not just its final message.",
     },
     {
-      title: "Manage memories",
-      body: "Open Settings, go to Data, then use Remember to save a manual memory or Forget to remove one for the current profile.",
+      title: "11. Local data and reset",
+      body: "All state lives under .data/ on this machine: SQLite checkpoints, memory history, the Qdrant vector store, and saved runs. Settings > Data offers Wipe all local data (every chat, run, and memory for every profile) and per-user deletion. Both are irreversible.",
     },
     {
-      title: "Lock or unlock protected profiles",
-      body: "If a profile has a password, use Lock in Users to close it for the session and Unlock to open it again.",
+      title: "12. Keyboard shortcuts",
+      body: "Ctrl+K opens chat search. Enter sends a message; Shift+Enter inserts a newline. Esc closes open dialogs and the search popover. The Workspace/Advanced/Settings tabs in the left nav are always one click away.",
+    },
+    {
+      title: "13. Troubleshooting",
+      body: "If the backend badge shows offline, fully close and reopen Atlas — Python changes require a real restart. If no models appear, confirm Ollama is running and that the models in Settings > Models have been pulled locally. If Docker-based runs fail to start, open Docker Desktop and click Retry in the run window.",
     },
   ];
 

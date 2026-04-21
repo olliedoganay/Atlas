@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 import queue
+import threading
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -15,6 +16,14 @@ from pydantic import BaseModel, Field
 import uvicorn
 
 from .api_service import AtlasBackendService
+from .code_runner import (
+    CLIENT_LANGUAGES,
+    LANGUAGES,
+    docker_status,
+    get_runner,
+    resolve_language,
+    supported_languages,
+)
 from .runtime import configure_console
 from .run_contract import TERMINAL_EVENT_TYPES
 
@@ -67,6 +76,11 @@ class ResetAllRequest(BaseModel):
     confirmation: str
 
 
+class RunnerExecRequest(BaseModel):
+    language: str = Field(..., min_length=1)
+    code: str = Field(..., min_length=1)
+
+
 DEFAULT_ALLOWED_ORIGINS = (
     "http://localhost:1420",
     "http://127.0.0.1:1420",
@@ -94,13 +108,34 @@ def create_api_app(service: AtlasBackendService | None = None) -> FastAPI:
         if managed_service is None:
             managed_service = AtlasBackendService.create()
         app.state.service = managed_service
+
+        def _warm_gui_image() -> None:
+            try:
+                from atlas_local.code_runner import (
+                    PYTHON_GUI_IMAGE,
+                    _ensure_python_gui_image,
+                    _image_exists,
+                    docker_status,
+                )
+
+                if _image_exists(PYTHON_GUI_IMAGE):
+                    return
+                if not docker_status().get("available"):
+                    return
+                _ensure_python_gui_image()
+            except Exception:  # pragma: no cover - best-effort warm-up
+                pass
+
+        warm_thread = threading.Thread(target=_warm_gui_image, name="atlas-gui-warm", daemon=True)
+        warm_thread.start()
+
         try:
             yield
         finally:
             if service is None and managed_service is not None:
                 managed_service.close()
 
-    app = FastAPI(title="Atlas API", version="1.0.4", lifespan=lifespan)
+    app = FastAPI(title="Atlas API", version="1.0.5", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(allowed_origins),
@@ -267,6 +302,37 @@ def create_api_app(service: AtlasBackendService | None = None) -> FastAPI:
     def reset_all(request: ResetAllRequest) -> dict[str, Any]:
         return _handle_runtime(lambda: backend().reset_all(confirmation=request.confirmation))
 
+    @app.get("/runner/status")
+    def runner_status() -> dict[str, Any]:
+        status_payload = docker_status()
+        status_payload["supported_languages"] = supported_languages()
+        status_payload["server_languages"] = sorted(LANGUAGES.keys())
+        status_payload["client_languages"] = sorted(CLIENT_LANGUAGES)
+        return status_payload
+
+    @app.post("/runner/exec")
+    def runner_exec(request: RunnerExecRequest) -> dict[str, Any]:
+        resolved = resolve_language(request.language)
+        if not resolved:
+            raise HTTPException(status_code=400, detail=f"Language '{request.language}' is not supported.")
+        if resolved in CLIENT_LANGUAGES:
+            raise HTTPException(status_code=400, detail="HTML runs in the client sandbox, not via the backend runner.")
+        docker_state = docker_status()
+        if not docker_state.get("available"):
+            raise HTTPException(status_code=503, detail=docker_state.get("reason", "Docker is unavailable."))
+        try:
+            return get_runner().start(language=resolved, code=request.code)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/runner/stream/{run_id}")
+    async def runner_stream(run_id: str) -> StreamingResponse:
+        return _runner_streaming_response(run_id)
+
+    @app.post("/runner/stop/{run_id}")
+    def runner_stop(run_id: str) -> dict[str, Any]:
+        return get_runner().stop(run_id)
+
     return app
 
 
@@ -309,6 +375,34 @@ def _streaming_response(service: AtlasBackendService, run_id: str) -> StreamingR
 
 def _format_sse(event: dict[str, Any]) -> str:
     return f"event: {event.get('type', 'message')}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
+def _runner_streaming_response(run_id: str) -> StreamingResponse:
+    runner = get_runner()
+    try:
+        history, subscriber, finished = runner.subscribe(run_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    async def generator():
+        for event in history:
+            yield _format_sse(event)
+        if finished:
+            return
+        try:
+            while True:
+                try:
+                    event = await asyncio.to_thread(subscriber.get, True, 5.0)
+                except queue.Empty:
+                    yield ": keepalive\n\n"
+                    continue
+                yield _format_sse(event)
+                if event.get("type") == "exit":
+                    return
+        finally:
+            runner.unsubscribe(run_id, subscriber)
+
+    return StreamingResponse(generator(), media_type="text/event-stream")
 
 
 def _handle_runtime(callback):

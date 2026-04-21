@@ -4,6 +4,7 @@ import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { AtlasShell } from "./components/AtlasShell";
 import { AdvancedPage } from "./pages/AdvancedPage";
+import { CodeRunnerPage } from "./pages/CodeRunnerPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { WorkspacePage } from "./pages/WorkspacePage";
 import { useAtlasStore } from "./store/useAtlasStore";
@@ -27,6 +28,7 @@ function App() {
       <ThemeBridge />
       <HashRouter>
         <Routes>
+          <Route element={<CodeRunnerPage />} path="/runner/:token" />
           <Route element={<AtlasShell />} path="/">
             <Route element={<Navigate replace to="/workspace" />} index />
             <Route element={<WorkspacePage />} path="workspace" />
