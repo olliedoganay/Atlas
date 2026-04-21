@@ -11,7 +11,9 @@ Chats, memories, and run state stay on your machine.
 - search across the current chat and all local chats
 - automatic and manual context compaction for long threads
 - optional cross-chat memory retrieval with manual memory controls
+- one-click **Run** on model-generated code blocks, executed in sandboxed Docker containers with GUI support for Python (pygame, tkinter, PyQt, matplotlib, and more) via an embedded noVNC viewer
 - requires Ollama server running
+- optional Docker Desktop for the code runner
 
 ## Install from Release
 
@@ -174,6 +176,27 @@ python -m atlas_local.api
 ```
 
 Windows helper scripts under `scripts/*.ps1` are Windows-only.
+
+## Code Runner
+
+Every code block in a model response gets a **Run** button next to **Copy**. Clicking it opens a separate Atlas run window that executes the snippet inside an ephemeral Docker container and streams the output live. Closing the run window kills the container.
+
+Supported server-side languages (any of these, plus common aliases like `py`, `js`, `ts`, `rs`, `rb`, `sh`, `kt`, `cs`):
+
+- Python, JavaScript, TypeScript, Go, Rust, C, C++, Java, Ruby, PHP, Bash, C#, Kotlin, Swift, Perl, Lua, R, Elixir, Dart
+
+HTML code blocks render in a sandboxed client-side iframe and do not need Docker.
+
+**Dependency auto-install.** Each language spec extracts imports from the snippet and installs them on demand before running (for example `pip install`, `npm install`, `go mod tidy`, `cargo add`, `gem install`, `cpanm`, `install.packages`, `dart pub add`). Progress is surfaced as `[atlas-runner] installing: …` lines in the output pane.
+
+**Python GUI programs.** When Atlas detects a GUI-capable import in the snippet (pygame, tkinter, turtle, PyQt5/6, PySide2/6, wx, kivy, matplotlib), it routes the run through a prebuilt GUI image (`atlas-python-gui:latest`) that bundles Xvfb, fluxbox, x11vnc, websockify, and noVNC. The run window renders the live GUI in an embedded noVNC iframe next to stdout/stderr. The image is built automatically on first backend startup and takes a few minutes; subsequent runs are fast.
+
+**Requirements:**
+
+- Docker Desktop (or any Docker daemon on PATH) must be running for server-side runs.
+- If Docker is down, the run window shows a clear message with a **Retry** button.
+- The container is run with `--rm`, `--memory=2g`, `--cpus=2`, `--pids-limit=512`, a read-only bind mount of the snippet, and the container-scoped network it needs for package installs.
+- GUI runs additionally publish the noVNC port on `127.0.0.1` for the embedded viewer.
 
 ## Security Model
 

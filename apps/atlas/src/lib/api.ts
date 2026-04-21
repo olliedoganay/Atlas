@@ -378,6 +378,142 @@ export function resetAll() {
   });
 }
 
+export type RunnerStatus = {
+  available: boolean;
+  reason?: string;
+  server_version?: string;
+  supported_languages: string[];
+  server_languages: string[];
+  client_languages: string[];
+};
+
+export type RunnerStartResponse = {
+  run_id: string;
+  language: string;
+  container: string;
+  vnc_url?: string;
+};
+
+export type RunnerEvent =
+  | { type: "output"; stream: "stdout" | "stderr"; chunk: string }
+  | { type: "exit"; code: number; duration_ms: number };
+
+export function getRunnerStatus() {
+  return request<RunnerStatus>("/runner/status");
+}
+
+export function execCode(language: string, code: string) {
+  return request<RunnerStartResponse>("/runner/exec", {
+    method: "POST",
+    body: JSON.stringify({ language, code }),
+  });
+}
+
+export function stopRunnerRun(runId: string) {
+  return request<{ run_id: string; status: string }>(`/runner/stop/${encodeURIComponent(runId)}`, {
+    method: "POST",
+  });
+}
+
+export function streamRunnerRun(
+  runId: string,
+  onEvent: (event: RunnerEvent) => void,
+  onError: (message: string) => void,
+): () => void {
+  const controller = new AbortController();
+  let closed = false;
+
+  void getBackendRuntime()
+    .then((runtime) => {
+      if (closed) {
+        return;
+      }
+
+      void fetch(`${buildApiUrl(runtime)}/runner/stream/${encodeURIComponent(runId)}`, {
+        method: "GET",
+        headers: {
+          Accept: "text/event-stream",
+          ...(runtime.token ? { "X-Atlas-Instance-Token": runtime.token } : {}),
+        },
+        signal: controller.signal,
+      })
+        .then(async (response) => {
+          if (!response.ok) {
+            const contentType = response.headers.get("content-type") ?? "";
+            const payload =
+              contentType.includes("application/json")
+                ? await response.json()
+                : { detail: await response.text() };
+            throw new Error(String(payload.detail ?? payload.error ?? response.statusText));
+          }
+
+          const body = response.body;
+          if (!body) {
+            throw new Error("Runner stream body was empty.");
+          }
+
+          const reader = body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+
+          const dispatch = (block: string) => {
+            const dataLines: string[] = [];
+            for (const line of block.split(/\r?\n/)) {
+              if (!line || line.startsWith(":") || line.startsWith("event:")) {
+                continue;
+              }
+              if (line.startsWith("data:")) {
+                dataLines.push(line.slice(5).trimStart());
+              }
+            }
+            if (!dataLines.length) {
+              return;
+            }
+            try {
+              const parsed = JSON.parse(dataLines.join("\n")) as RunnerEvent;
+              onEvent(parsed);
+            } catch (error) {
+              onError(error instanceof Error ? error.message : "Failed to parse runner event.");
+            }
+          };
+
+          while (!closed) {
+            const { value, done } = await reader.read();
+            buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+            let idx = buffer.search(/\r?\n\r?\n/);
+            while (idx !== -1) {
+              const match = buffer.slice(idx).match(/^\r?\n\r?\n/);
+              const sepLen = match?.[0].length ?? 2;
+              const block = buffer.slice(0, idx);
+              buffer = buffer.slice(idx + sepLen);
+              dispatch(block);
+              idx = buffer.search(/\r?\n\r?\n/);
+            }
+            if (done) {
+              if (buffer.trim()) {
+                dispatch(buffer);
+              }
+              break;
+            }
+          }
+        })
+        .catch((error) => {
+          if (closed || controller.signal.aborted) {
+            return;
+          }
+          onError(error instanceof Error ? error.message : "Runner stream disconnected.");
+        });
+    })
+    .catch((error) => {
+      onError(error instanceof Error ? error.message : "Atlas runtime is unavailable.");
+    });
+
+  return () => {
+    closed = true;
+    controller.abort();
+  };
+}
+
 export function streamRun(
   mode: RunMode,
   runId: string,

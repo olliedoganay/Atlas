@@ -1,4 +1,4 @@
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, Play } from "lucide-react";
 import { useState } from "react";
 import bash from "react-syntax-highlighter/dist/esm/languages/prism/bash";
 import diff from "react-syntax-highlighter/dist/esm/languages/prism/diff";
@@ -13,6 +13,8 @@ import tsx from "react-syntax-highlighter/dist/esm/languages/prism/tsx";
 import typescript from "react-syntax-highlighter/dist/esm/languages/prism/typescript";
 import yaml from "react-syntax-highlighter/dist/esm/languages/prism/yaml";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+
+import { openRunnerWindow, RUNNABLE_LANGUAGES, resolveRunnableLanguage } from "../lib/runner";
 
 type MarkdownCodeBlockProps = {
   code: string;
@@ -40,6 +42,8 @@ SyntaxHighlighter.registerLanguage("yml", yaml);
 
 export function MarkdownCodeBlock({ code, language }: MarkdownCodeBlockProps) {
   const [copied, setCopied] = useState(false);
+  const [launching, setLaunching] = useState(false);
+  const runnable = resolveRunnableLanguage(language);
 
   const copy = async () => {
     await navigator.clipboard.writeText(code);
@@ -47,11 +51,28 @@ export function MarkdownCodeBlock({ code, language }: MarkdownCodeBlockProps) {
     window.setTimeout(() => setCopied(false), 1200);
   };
 
+  const run = async () => {
+    if (!runnable || launching) {
+      return;
+    }
+    setLaunching(true);
+    try {
+      await openRunnerWindow({ language: runnable, code });
+    } catch (error) {
+      console.error("Atlas runner window failed to open", error);
+    } finally {
+      window.setTimeout(() => setLaunching(false), 800);
+    }
+  };
+
   return (
     <div className="code-block-shell">
       <div className="code-block-header">
         <span>{language}</span>
-        <CopyButton copied={copied} onCopy={copy} />
+        <div className="code-block-actions">
+          {runnable ? <RunButton launching={launching} onRun={run} /> : null}
+          <CopyButton copied={copied} onCopy={copy} />
+        </div>
       </div>
       <SyntaxHighlighter
         PreTag="div"
@@ -64,6 +85,7 @@ export function MarkdownCodeBlock({ code, language }: MarkdownCodeBlockProps) {
         {code}
       </SyntaxHighlighter>
       <div className="code-block-footer">
+        {runnable ? <RunButton launching={launching} onRun={run} /> : null}
         <CopyButton copied={copied} onCopy={copy} />
       </div>
     </div>
@@ -78,3 +100,19 @@ function CopyButton({ copied, onCopy }: { copied: boolean; onCopy: () => Promise
     </button>
   );
 }
+
+function RunButton({ launching, onRun }: { launching: boolean; onRun: () => Promise<void> }) {
+  return (
+    <button
+      className="ghost-button compact-button code-run-button"
+      disabled={launching}
+      onClick={() => void onRun()}
+      type="button"
+    >
+      <Play size={14} />
+      {launching ? "Opening…" : "Run"}
+    </button>
+  );
+}
+
+export { RUNNABLE_LANGUAGES };
