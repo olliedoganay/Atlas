@@ -135,7 +135,7 @@ Copy `.env.example` to `.env` and adjust it if needed. The main settings are:
 | --- | --- | --- |
 | `OLLAMA_URL` | Local Ollama base URL | `http://127.0.0.1:11434` |
 | `CHAT_MODEL` | Default chat model for new threads | `gpt-oss:20b` |
-| `CHAT_TEMPERATURE` | Default temperature when a thread does not override it | `0.2` |
+| `CHAT_TEMPERATURE` | Optional explicit default temperature. Leave blank to use the selected model's default behavior. | blank (`Model default`) |
 | `EMBED_MODEL` | Embedding model used for memory retrieval | `nomic-embed-text:latest` |
 | `QDRANT_PATH` | Local vector-store directory | `.data/qdrant` |
 | `MEM0_COLLECTION` | Collection name for persistent memory | `atlas_local_memory` |

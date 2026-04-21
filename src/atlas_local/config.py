@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 DEFAULT_CHAT_MODEL = "gpt-oss:20b"
-DEFAULT_CHAT_TEMPERATURE = 0.2
+DEFAULT_CHAT_TEMPERATURE: float | None = None
 DEFAULT_EMBED_MODEL = "nomic-embed-text:latest"
 DEFAULT_MEM0_COLLECTION = "atlas_local_memory"
 DEFAULT_EMBED_DIM = 768
@@ -27,7 +27,7 @@ class AppConfig:
     mem0_history_db: Path
     ollama_url: str
     chat_model: str
-    chat_temperature: float
+    chat_temperature: float | None
     embed_model: str
     mem0_collection: str
     embed_dim: int
@@ -51,6 +51,16 @@ def _path_value(env: Mapping[str, str], key: str, default: Path, *, base: Path |
 def _value(env: Mapping[str, str], key: str, default: str) -> str:
     value = env.get(key, default)
     return value.strip() if isinstance(value, str) else default
+
+
+def _optional_float_value(env: Mapping[str, str], key: str, default: float | None) -> float | None:
+    raw = env.get(key)
+    if raw is None:
+        return default
+    text = raw.strip() if isinstance(raw, str) else str(raw).strip()
+    if not text:
+        return None
+    return float(text)
 
 
 def load_config(
@@ -95,7 +105,7 @@ def load_config(
         mem0_history_db=mem0_history_db,
         ollama_url=_value(source, "OLLAMA_URL", DEFAULT_OLLAMA_URL),
         chat_model=_value(source, "CHAT_MODEL", DEFAULT_CHAT_MODEL),
-        chat_temperature=float(_value(source, "CHAT_TEMPERATURE", str(DEFAULT_CHAT_TEMPERATURE))),
+        chat_temperature=_optional_float_value(source, "CHAT_TEMPERATURE", DEFAULT_CHAT_TEMPERATURE),
         embed_model=_value(source, "EMBED_MODEL", DEFAULT_EMBED_MODEL),
         mem0_collection=_value(source, "MEM0_COLLECTION", DEFAULT_MEM0_COLLECTION),
         embed_dim=int(_value(source, "EMBED_DIM", str(DEFAULT_EMBED_DIM))),

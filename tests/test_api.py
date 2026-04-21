@@ -39,8 +39,8 @@ class FakeService:
             "backend": "Atlas local runtime",
             "default_chat_model": "test-model",
             "chat_model": "test-model",
-            "default_chat_temperature": 0.2,
-            "chat_temperature": 0.2,
+            "default_chat_temperature": None,
+            "chat_temperature": None,
             "embed_model": "embed-model",
             "ollama_url": "http://127.0.0.1:11434",
             "runtime_mode": "chat-only",
@@ -50,7 +50,7 @@ class FakeService:
     def list_models(self):
         return {
             "default_model": "test-model",
-            "default_temperature": 0.2,
+            "default_temperature": None,
             "ollama_online": True,
             "has_local_models": True,
             "catalog_source": "ollama",
@@ -254,7 +254,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(memories.status_code, 200)
         self.assertEqual(health.json()["product"], "Atlas")
         self.assertEqual(models.json()["models"], ["test-model", "model-b"])
-        self.assertEqual(models.json()["default_temperature"], 0.2)
+        self.assertIsNone(models.json()["default_temperature"])
         self.assertTrue(models.json()["ollama_online"])
         self.assertTrue(models.json()["has_local_models"])
         self.assertTrue(models.json()["model_details"][1]["supports_images"])

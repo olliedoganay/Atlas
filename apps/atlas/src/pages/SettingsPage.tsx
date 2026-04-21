@@ -330,7 +330,7 @@ export function SettingsPage() {
     },
     {
       title: "13. Troubleshooting",
-      body: "If the backend badge shows offline, fully close and reopen Atlas — Python changes require a real restart. If no models appear, confirm Ollama is running and that the models in Settings > Models have been pulled locally. If Docker-based runs fail to start, open Docker Desktop and click Retry in the run window.",
+      body: "If the backend badge shows offline, fully close and reopen Atlas. Python changes require a real restart. If no models appear, confirm Ollama is running and that the models in Settings > Models have been pulled locally. If Docker-based runs fail to start, open Docker Desktop and click Retry in the run window.",
     },
   ];
 
@@ -914,7 +914,10 @@ export function SettingsPage() {
   );
 }
 
-function formatTemperature(value?: number) {
+function formatTemperature(value?: number | null) {
+  if (value === null) {
+    return "Model default";
+  }
   if (typeof value !== "number" || Number.isNaN(value)) {
     return "...";
   }

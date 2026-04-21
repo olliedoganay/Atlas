@@ -2099,8 +2099,8 @@ def _build_search_snippet(content: str, normalized_query: str, *, radius: int = 
         return cleaned[: radius * 2].rstrip()
     start = max(0, index - radius)
     end = min(len(cleaned), index + len(normalized_query) + radius)
-    prefix = "… " if start > 0 else ""
-    suffix = " …" if end < len(cleaned) else ""
+    prefix = "... " if start > 0 else ""
+    suffix = " ..." if end < len(cleaned) else ""
     return f"{prefix}{cleaned[start:end].strip()}{suffix}"
 
 

@@ -46,9 +46,7 @@ export function AdvancedPage() {
       <div className="workspace-header">
         <div className="workspace-header-copy">
           <h1>Advanced</h1>
-          <p className="workspace-header-summary">
-            Runtime health and recent run metrics.
-          </p>
+          <p className="workspace-header-summary">Runtime health and recent run metrics.</p>
         </div>
       </div>
 
@@ -128,9 +126,11 @@ export function AdvancedPage() {
                 <div className="advanced-run-head">
                   <div>
                     <strong>{run.thread_title || run.thread_id}</strong>
-                    <p>{run.chat_model || "Local model"} • {run.mode}</p>
+                    <p>{run.chat_model || "Local model"} - {run.mode}</p>
                   </div>
-                  <span className={`status-pill subtle ${run.status === "completed" ? "online" : run.status === "failed" ? "offline" : "muted"}`}>
+                  <span
+                    className={`status-pill subtle ${run.status === "completed" ? "online" : run.status === "failed" ? "offline" : "muted"}`}
+                  >
                     {run.status}
                   </span>
                 </div>
@@ -179,7 +179,10 @@ export function AdvancedPage() {
 }
 
 function formatTemperature(value: number | null | undefined) {
-  if (value === null || value === undefined || Number.isNaN(value)) {
+  if (value === undefined) {
+    return "Not set";
+  }
+  if (value === null || Number.isNaN(value)) {
     return "Model default";
   }
   return value.toFixed(1);
@@ -187,11 +190,11 @@ function formatTemperature(value: number | null | undefined) {
 
 function formatDate(value?: string) {
   if (!value) {
-    return "—";
+    return "-";
   }
   const date = new Date(value);
   if (Number.isNaN(date.valueOf())) {
-    return "—";
+    return "-";
   }
   return new Intl.DateTimeFormat(undefined, {
     month: "short",
@@ -203,7 +206,7 @@ function formatDate(value?: string) {
 
 function formatDuration(value?: number | null) {
   if (typeof value !== "number" || Number.isNaN(value)) {
-    return "—";
+    return "-";
   }
   if (value < 1000) {
     return `${value} ms`;
@@ -213,14 +216,14 @@ function formatDuration(value?: number | null) {
 
 function formatTokensPerSecond(value?: number | null) {
   if (typeof value !== "number" || Number.isNaN(value)) {
-    return "—";
+    return "-";
   }
   return `${value.toFixed(2)} tok/s`;
 }
 
 function formatInteger(value?: number | null) {
   if (typeof value !== "number" || Number.isNaN(value) || value <= 0) {
-    return "—";
+    return "-";
   }
   return value.toLocaleString();
 }
@@ -230,5 +233,5 @@ function truncateText(value: string, maxLength: number) {
   if (normalized.length <= maxLength) {
     return normalized;
   }
-  return `${normalized.slice(0, maxLength).trimEnd()}…`;
+  return `${normalized.slice(0, maxLength).trimEnd()}...`;
 }

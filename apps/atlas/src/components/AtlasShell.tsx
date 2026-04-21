@@ -21,6 +21,7 @@ import { ResetDialog } from "./ResetDialog";
 import { RunStreamCoordinator } from "./RunStreamCoordinator";
 import { useAtlasStore } from "../store/useAtlasStore";
 import { useBackendPhase } from "../lib/backendPhase";
+import { resolveStartupState } from "../lib/startupState";
 
 const navigation = [
   { to: "/workspace", label: "Workspace", icon: Workflow },
@@ -167,7 +168,16 @@ export function AtlasShell() {
   const defaultModel =
     models?.default_model || status?.default_chat_model || status?.chat_model || draftThreadModel || "";
   const defaultTemperature =
-    models?.default_temperature ?? status?.default_chat_temperature ?? status?.chat_temperature ?? 0.2;
+    models?.default_temperature ?? status?.default_chat_temperature ?? status?.chat_temperature ?? null;
+  const startupState = resolveStartupState({
+    backendPhase,
+    currentUserId,
+    currentUserLocked,
+    modelCatalogLoaded: Boolean(models),
+    ollamaOnline: Boolean(models?.ollama_online),
+    hasLocalModels: Boolean(models?.has_local_models),
+    selectedModel: defaultModel,
+  });
   const threadItems = useMemo(() => {
     const seen = new Set<string>();
     return threads.filter((thread) => {
@@ -254,8 +264,6 @@ export function AtlasShell() {
   };
 
   const userLabel = currentUserId || "No user selected";
-  const backendOnline = backendPhase === "online";
-  const backendStarting = backendPhase === "starting";
 
   return (
     <div className={`app-shell ${navCollapsed ? "nav-collapsed" : ""}`}>
@@ -408,11 +416,11 @@ export function AtlasShell() {
               <span>Active profile</span>
             </div>
           </div>
-          <div className={`status-pill ${backendOnline ? "online" : backendStarting ? "starting" : "offline"}`}>
+          <div className={`status-pill ${startupState.tone}`}>
             <span className="status-dot" />
-            <span>{backendOnline ? "Backend online" : backendStarting ? "Starting backend" : "Backend offline"}</span>
+            <span>{startupState.shellLabel}</span>
           </div>
-          {!backendOnline && !backendStarting ? (
+          {startupState.key === "backend-offline" ? (
             <button className="ghost-button full-width" onClick={restartBackend} type="button">
               <RotateCcw size={16} />
               Restart backend
@@ -499,7 +507,7 @@ function formatChatCount(count: number) {
   return `${count} ${count === 1 ? "chat" : "chats"}`;
 }
 
-function resolveThreadTemperature(thread: ThreadSummary | null | undefined, fallback: number): number | null {
+function resolveThreadTemperature(thread: ThreadSummary | null | undefined, fallback: number | null): number | null {
   if (!thread || !Object.prototype.hasOwnProperty.call(thread, "temperature")) {
     return fallback;
   }
