@@ -300,6 +300,23 @@ export function getThreadHistory(threadId: string, userId?: string) {
   return request<ThreadMessage[]>(`/threads/${encodeURIComponent(threadId)}/history${query}`);
 }
 
+export type ThreadContextUsage = {
+  thread_id: string;
+  user_id: string;
+  chat_model: string;
+  context_window: number;
+  auto_compact_ratio: number;
+  auto_compact_threshold: number;
+  representation_tokens: number;
+  compacted_message_count: number;
+  message_count: number;
+};
+
+export function getThreadContextUsage(threadId: string, userId?: string) {
+  const query = userId ? `?user_id=${encodeURIComponent(userId)}` : "";
+  return request<ThreadContextUsage>(`/threads/${encodeURIComponent(threadId)}/context${query}`);
+}
+
 export function getThreadRuns(threadId: string, userId?: string) {
   const query = userId ? `?user_id=${encodeURIComponent(userId)}` : "";
   return request<RunSummary[]>(`/threads/${encodeURIComponent(threadId)}/runs${query}`);
