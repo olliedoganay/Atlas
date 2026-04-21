@@ -36,6 +36,7 @@ type AtlasState = {
   webSearchEnabled: boolean;
   crossChatMemoryEnabled: boolean;
   autoCompactLongChats: boolean;
+  crtScanlines: boolean;
   navCollapsed: boolean;
   settingsSidebarCollapsed: boolean;
   currentRunId: string | null;
@@ -63,6 +64,7 @@ type AtlasState = {
   setWebSearchEnabled: (value: boolean) => void;
   setCrossChatMemoryEnabled: (value: boolean) => void;
   setAutoCompactLongChats: (value: boolean) => void;
+  setCrtScanlines: (value: boolean) => void;
   toggleNavCollapsed: () => void;
   toggleSettingsSidebarCollapsed: () => void;
   beginRun: (
@@ -103,6 +105,7 @@ export const useAtlasStore = create<AtlasState>()(
       webSearchEnabled: false,
       crossChatMemoryEnabled: true,
       autoCompactLongChats: true,
+      crtScanlines: true,
       navCollapsed: false,
       settingsSidebarCollapsed: false,
       currentRunId: null,
@@ -130,6 +133,7 @@ export const useAtlasStore = create<AtlasState>()(
       setWebSearchEnabled: (value) => set({ webSearchEnabled: value }),
       setCrossChatMemoryEnabled: (value) => set({ crossChatMemoryEnabled: value }),
       setAutoCompactLongChats: (value) => set({ autoCompactLongChats: value }),
+      setCrtScanlines: (value) => set({ crtScanlines: value }),
       toggleNavCollapsed: () => set((state) => ({ navCollapsed: !state.navCollapsed })),
       toggleSettingsSidebarCollapsed: () =>
         set((state) => ({ settingsSidebarCollapsed: !state.settingsSidebarCollapsed })),

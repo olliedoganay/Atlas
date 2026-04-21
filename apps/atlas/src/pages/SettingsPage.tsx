@@ -29,6 +29,8 @@ export function SettingsPage() {
   const currentUserId = useAtlasStore((state) => state.currentUserId);
   const crossChatMemoryEnabled = useAtlasStore((state) => state.crossChatMemoryEnabled);
   const autoCompactLongChats = useAtlasStore((state) => state.autoCompactLongChats);
+  const crtScanlines = useAtlasStore((state) => state.crtScanlines);
+  const setCrtScanlines = useAtlasStore((state) => state.setCrtScanlines);
   const setCurrentUserId = useAtlasStore((state) => state.setCurrentUserId);
   const setCurrentThreadId = useAtlasStore((state) => state.setCurrentThreadId);
   const setCurrentThreadTitle = useAtlasStore((state) => state.setCurrentThreadTitle);
@@ -360,7 +362,7 @@ export function SettingsPage() {
               <div className="settings-row">
                 <div className="settings-row-copy">
                   <strong>Theme</strong>
-                  <p>Choose the desktop appearance.</p>
+                  <p>Choose the desktop appearance. CRT modes apply a retro terminal look with phosphor bloom.</p>
                 </div>
                 <div className="segmented-control">
                   <button
@@ -377,8 +379,61 @@ export function SettingsPage() {
                   >
                     Dark
                   </button>
+                  <button
+                    className={`segmented-button ${theme === "crt-green" ? "active" : ""}`}
+                    onClick={() => setTheme("crt-green")}
+                    type="button"
+                  >
+                    CRT Green
+                  </button>
+                  <button
+                    className={`segmented-button ${theme === "crt-amber" ? "active" : ""}`}
+                    onClick={() => setTheme("crt-amber")}
+                    type="button"
+                  >
+                    CRT Amber
+                  </button>
+                  <button
+                    className={`segmented-button ${theme === "synthwave" ? "active" : ""}`}
+                    onClick={() => setTheme("synthwave")}
+                    type="button"
+                  >
+                    Synthwave
+                  </button>
+                  <button
+                    className={`segmented-button ${theme === "nasa" ? "active" : ""}`}
+                    onClick={() => setTheme("nasa")}
+                    type="button"
+                  >
+                    NASA
+                  </button>
                 </div>
               </div>
+
+              {theme === "crt-green" || theme === "crt-amber" ? (
+                <div className="settings-row">
+                  <div className="settings-row-copy">
+                    <strong>Scanlines</strong>
+                    <p>Overlay horizontal scanlines and a subtle vignette for the full CRT effect.</p>
+                  </div>
+                  <div className="segmented-control">
+                    <button
+                      className={`segmented-button ${crtScanlines ? "active" : ""}`}
+                      onClick={() => setCrtScanlines(true)}
+                      type="button"
+                    >
+                      On
+                    </button>
+                    <button
+                      className={`segmented-button ${!crtScanlines ? "active" : ""}`}
+                      onClick={() => setCrtScanlines(false)}
+                      type="button"
+                    >
+                      Off
+                    </button>
+                  </div>
+                </div>
+              ) : null}
 
               <div className="settings-row">
                 <div className="settings-row-copy">

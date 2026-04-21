@@ -13,11 +13,18 @@ const queryClient = new QueryClient();
 
 function ThemeBridge() {
   const theme = useAtlasStore((state) => state.theme);
+  const crtScanlines = useAtlasStore((state) => state.crtScanlines);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
+    const isCrt = theme === "crt-green" || theme === "crt-amber";
+    if (isCrt && crtScanlines) {
+      document.documentElement.dataset.scanlines = "on";
+    } else {
+      delete document.documentElement.dataset.scanlines;
+    }
     document.title = "Atlas";
-  }, [theme]);
+  }, [theme, crtScanlines]);
 
   return null;
 }
