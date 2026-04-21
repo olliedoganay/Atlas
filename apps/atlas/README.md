@@ -8,6 +8,7 @@ If you need to work inside this folder directly, these are the only commands tha
 
 ```powershell
 npm run dev
+npm test
 npm run build
 npm run tauri dev
 ```

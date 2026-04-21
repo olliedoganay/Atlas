@@ -1,5 +1,5 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Play, Square, RotateCcw } from "lucide-react";
+import { Play, RotateCcw, Square } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 
@@ -59,7 +59,7 @@ export function CodeRunnerPage() {
       return;
     }
     void getCurrentWindow()
-      .setTitle(`Atlas Run · ${language}`)
+      .setTitle(`Atlas Run - ${language}`)
       .catch(() => undefined);
   }, [language]);
 
@@ -192,7 +192,7 @@ export function CodeRunnerPage() {
     return (
       <div className="runner-shell">
         <div className="runner-center">
-          <p>{errorMessage ?? "Preparing run…"}</p>
+          <p>{errorMessage ?? "Preparing run..."}</p>
         </div>
       </div>
     );
@@ -261,7 +261,7 @@ function RunnerStatusBadge({ phase, exitCode }: { phase: Phase; exitCode: number
     return <span className="runner-status running">Running</span>;
   }
   if (phase === "loading") {
-    return <span className="runner-status pending">Starting…</span>;
+    return <span className="runner-status pending">Starting...</span>;
   }
   if (phase === "finished") {
     const ok = exitCode === 0;
@@ -291,7 +291,7 @@ function ServerOutputPanel({
     <div className="runner-output" ref={outputRef}>
       {errorMessage ? <div className="runner-line stderr">{errorMessage}</div> : null}
       {output.length === 0 && phase !== "error" ? (
-        <div className="runner-placeholder">{phase === "running" ? "Waiting for output…" : "No output."}</div>
+        <div className="runner-placeholder">{phase === "running" ? "Waiting for output..." : "No output."}</div>
       ) : null}
       {output.map((line, idx) => (
         <div className={`runner-line ${line.stream}`} key={idx}>
@@ -362,7 +362,7 @@ function VncPane({ url }: { url: string }) {
       {ready && src ? (
         <iframe className="runner-vnc-frame" src={src} title="Atlas GUI preview" />
       ) : (
-        <div className="runner-vnc-placeholder">Starting GUI…</div>
+        <div className="runner-vnc-placeholder">Starting GUI...</div>
       )}
     </div>
   );

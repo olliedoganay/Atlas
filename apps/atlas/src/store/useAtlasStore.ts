@@ -33,7 +33,6 @@ type AtlasState = {
   draftThreadModel: string;
   draftThreadTemperature: number | null;
   reasoningMode: ReasoningMode;
-  webSearchEnabled: boolean;
   crossChatMemoryEnabled: boolean;
   autoCompactLongChats: boolean;
   crtScanlines: boolean;
@@ -61,7 +60,6 @@ type AtlasState = {
   setDraftThreadModel: (value: string) => void;
   setDraftThreadTemperature: (value: number | null) => void;
   setReasoningMode: (value: ReasoningMode) => void;
-  setWebSearchEnabled: (value: boolean) => void;
   setCrossChatMemoryEnabled: (value: boolean) => void;
   setAutoCompactLongChats: (value: boolean) => void;
   setCrtScanlines: (value: boolean) => void;
@@ -102,7 +100,6 @@ export const useAtlasStore = create<AtlasState>()(
       draftThreadModel: "",
       draftThreadTemperature: null,
       reasoningMode: "on",
-      webSearchEnabled: false,
       crossChatMemoryEnabled: true,
       autoCompactLongChats: true,
       crtScanlines: true,
@@ -130,7 +127,6 @@ export const useAtlasStore = create<AtlasState>()(
       setDraftThreadModel: (value) => set({ draftThreadModel: value }),
       setDraftThreadTemperature: (value) => set({ draftThreadTemperature: value }),
       setReasoningMode: (value) => set({ reasoningMode: value }),
-      setWebSearchEnabled: (value) => set({ webSearchEnabled: value }),
       setCrossChatMemoryEnabled: (value) => set({ crossChatMemoryEnabled: value }),
       setAutoCompactLongChats: (value) => set({ autoCompactLongChats: value }),
       setCrtScanlines: (value) => set({ crtScanlines: value }),
@@ -240,7 +236,7 @@ export const useAtlasStore = create<AtlasState>()(
     }),
     {
       name: "atlas-ui-state",
-      version: 8,
+      version: 9,
       migrate: (persistedState, version) => {
         if (!persistedState || typeof persistedState !== "object") {
           return persistedState as AtlasState;
@@ -263,9 +259,6 @@ export const useAtlasStore = create<AtlasState>()(
         if (version < 7) {
           migrated.reasoningMode = "on";
         }
-        if (version < 8) {
-          migrated.webSearchEnabled = false;
-        }
         return migrated as AtlasState;
       },
       partialize: (state) => ({
@@ -276,7 +269,6 @@ export const useAtlasStore = create<AtlasState>()(
         draftThreadModel: state.draftThreadModel,
         draftThreadTemperature: state.draftThreadTemperature,
         reasoningMode: state.reasoningMode,
-        webSearchEnabled: state.webSearchEnabled,
         crossChatMemoryEnabled: state.crossChatMemoryEnabled,
         autoCompactLongChats: state.autoCompactLongChats,
         navCollapsed: state.navCollapsed,

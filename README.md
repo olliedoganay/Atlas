@@ -1,163 +1,93 @@
 # Atlas
 
-Atlas is a desktop app for chatting with local Ollama models.
+Atlas is a local-first desktop app for working with local Ollama models.
 
-Chats, memories, and run state stay on your machine.
+It combines a multi-thread chat workspace, profile-scoped memory, run inspection, and a built-in code runner. Atlas-managed state stays local to the machine: chats, thread history, checkpoints, memories, run artifacts, and local vector storage.
 
-## Scope
+## What Atlas Does
 
-- local chat workspace for long-running conversations
+- desktop chat workspace for long-running local conversations
 - per-user profiles with passwordless or password-protected access
-- search across the current chat and all local chats
+- local chat search across the current thread and other threads for the active profile
+- thread rename, duplicate, and branch workflows
+- reasoning traces, live token streaming, stop controls, and saved run diagnostics
 - automatic and manual context compaction for long threads
-- optional cross-chat memory retrieval with manual memory controls
-- one-click **Run** on model-generated code blocks, executed in sandboxed Docker containers with GUI support for Python (pygame, tkinter, PyQt, matplotlib, and more) via an embedded noVNC viewer
-- requires Ollama server running
-- optional Docker Desktop for the code runner
+- optional cross-chat memory retrieval with manual remember/forget controls
+- image and file attachments in the composer
+- multiple desktop themes, including CRT, Synthwave, and NASA variants
+- one-click code execution for model-generated snippets in isolated run windows
 
-## Install from Release
+Atlas requires a local Ollama runtime. Docker is optional, but required for server-side code execution.
 
-For normal Windows use, install the latest release.
+## Install a Release
 
-1. Open the latest release on GitHub:
+For normal Windows usage, install the packaged desktop release instead of running from source.
+
+1. Open the latest release:
    `https://github.com/olliedoganay/Atlas/releases/latest`
-2. Download the latest Windows installer or packaged `.exe`.
+2. Download the current Windows installer or packaged `.exe`.
 3. Install and launch `Atlas`.
 
-## Requirements for Source Builds
+## Work From Source
+
+These steps are for development. They launch Atlas against the current repository checkout. They are not a packaging flow.
+
+### Requirements
 
 - Python 3.11+
 - Node.js 20+
 - Rust stable toolchain with Cargo
 - Ollama running locally
-- a chat model such as `gpt-oss:20b`
-- an embedding model such as `nomic-embed-text:latest`
+- a local chat model such as `gpt-oss:20b`
+- a local embedding model such as `nomic-embed-text:latest`
 - Tauri prerequisites for your platform:
   `https://v2.tauri.app/start/prerequisites/`
 
-### Windows source prerequisites
-
-- Windows 10 or 11
-- PowerShell
-
-### macOS and Linux source use
-
-- Atlas does not publish macOS or Linux installers.
-- macOS and Linux are supported through source builds.
-- Use the generic source steps below instead of the Windows-only PowerShell helpers.
-- For local secret protection, the machine should have a working OS keychain or secret-store backend.
-
-## Install from Source
-
-### Windows
-
-1. Create and activate the Python environment.
+### Windows Setup
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-```
-
-2. Install the Python runtime.
-
-```powershell
 pip install -r requirements.txt
 pip install -e .
-```
-
-3. Create the local config file.
-
-```powershell
 Copy-Item .env.example .env
-```
-
-4. Pull the local Ollama models.
-
-```powershell
 ollama pull gpt-oss:20b
 ollama pull nomic-embed-text:latest
-```
-
-5. Install the desktop dependencies.
-
-```powershell
 Set-Location apps\atlas
 npm install
 Set-Location ..\..
 ```
 
-### macOS and Linux
+### macOS and Linux Setup
 
-1. Create and activate the Python environment.
+Atlas does not publish macOS or Linux installers. Use the source workflow instead.
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-```
-
-2. Install the Python runtime.
-
-```bash
 pip install -r requirements.txt
 pip install -e .
-```
-
-3. Create the local config file.
-
-```bash
 cp .env.example .env
-```
-
-4. Pull the local Ollama models.
-
-```bash
 ollama pull gpt-oss:20b
 ollama pull nomic-embed-text:latest
-```
-
-5. Install the desktop dependencies.
-
-```bash
 cd apps/atlas
 npm install
 cd ../..
 ```
 
-## Run from Source
+## Run Atlas From Source
+
+This starts the desktop app itself. It is the normal developer workflow, not a builder.
 
 ### Windows
-
-Start the desktop app from source:
 
 ```powershell
 .\scripts\start_atlas_dev.ps1
 ```
 
-On first launch:
-
-1. Open `Settings`
-2. Create or select a user
-3. Return to `Workspace`
-4. Pick a model and start the first chat
-
-If you open a new terminal later, reactivate the repo environment first:
-
-```powershell
-.venv\Scripts\Activate.ps1
-```
-
-Optional source commands:
-
-```powershell
-.venv\Scripts\atlas-backend.exe
-.venv\Scripts\atlas.exe --user-id your_user
-.venv\Scripts\atlas.exe --user-id your_user --ask "What should I build next?"
-python -m atlas_local.api
-```
+That launcher starts `npm run tauri dev` in `apps/atlas` and runs Atlas against the current repo state.
 
 ### macOS and Linux
-
-Start the desktop shell from source:
 
 ```bash
 source .venv/bin/activate
@@ -165,54 +95,108 @@ cd apps/atlas
 npm run tauri dev
 ```
 
-Optional source commands:
+### First Launch
+
+1. Open `Settings`.
+2. Create or select a profile.
+3. Return to `Workspace`.
+4. Pick a model and start the first chat.
+
+### Optional Low-Level Commands
+
+Most contributors can ignore these. They are useful for diagnostics and CLI workflows, not for normal desktop usage.
+
+```powershell
+.venv\Scripts\atlas-backend.exe
+.venv\Scripts\atlas.exe --user-id your_user
+.venv\Scripts\atlas.exe --user-id your_user --ask "Summarize this project in three bullets."
+python -m atlas_local.api
+```
 
 ```bash
 source .venv/bin/activate
 atlas-backend
 atlas --user-id your_user
-atlas --user-id your_user --ask "What should I build next?"
+atlas --user-id your_user --ask "Summarize this project in three bullets."
 python -m atlas_local.api
 ```
 
+- `atlas-backend` or `python -m atlas_local.api` runs only the local API/backend.
+- `atlas --user-id your_user` starts the terminal chat CLI.
+- `atlas --user-id your_user --ask "..."` runs a single CLI turn.
+
 Windows helper scripts under `scripts/*.ps1` are Windows-only.
+
+## Configuration
+
+Copy `.env.example` to `.env` and adjust it if needed. The main settings are:
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `OLLAMA_URL` | Local Ollama base URL | `http://127.0.0.1:11434` |
+| `CHAT_MODEL` | Default chat model for new threads | `gpt-oss:20b` |
+| `CHAT_TEMPERATURE` | Default temperature when a thread does not override it | `0.2` |
+| `EMBED_MODEL` | Embedding model used for memory retrieval | `nomic-embed-text:latest` |
+| `QDRANT_PATH` | Local vector-store directory | `.data/qdrant` |
+| `MEM0_COLLECTION` | Collection name for persistent memory | `atlas_local_memory` |
+| `EMBED_DIM` | Embedding dimension expected by local memory storage | `768` |
+| `LANGGRAPH_CHECKPOINT_DB` | SQLite checkpoint path for thread state | `.data/langgraph/checkpoints.sqlite` |
+| `MEM0_HISTORY_DB` | SQLite history path for memory records | `.data/mem0_history.sqlite` |
+| `MEMORY_TOP_K` | Number of recalled memories to inject into a turn | `5` |
 
 ## Code Runner
 
-Every code block in a model response gets a **Run** button next to **Copy**. Clicking it opens a separate Atlas run window that executes the snippet inside an ephemeral Docker container and streams the output live. Closing the run window kills the container.
+Every code block in a model response gets a **Run** button next to **Copy**. Clicking it opens a separate Atlas Run window that executes the snippet in an isolated environment and streams the output live. Closing the run window stops the run.
 
-Supported server-side languages (any of these, plus common aliases like `py`, `js`, `ts`, `rs`, `rb`, `sh`, `kt`, `cs`):
+Supported server-side languages include:
 
-- Python, JavaScript, TypeScript, Go, Rust, C, C++, Java, Ruby, PHP, Bash, C#, Kotlin, Swift, Perl, Lua, R, Elixir, Dart
+- Python
+- JavaScript
+- TypeScript
+- Go
+- Rust
+- C
+- C++
+- Java
+- Ruby
+- PHP
+- Bash
+- C#
+- Kotlin
+- Swift
+- Perl
+- Lua
+- R
+- Elixir
+- Dart
 
-HTML code blocks render in a sandboxed client-side iframe and do not need Docker.
+HTML code blocks render in a sandboxed client-side preview and do not require Docker.
 
-**Dependency auto-install.** Each language spec extracts imports from the snippet and installs them on demand before running (for example `pip install`, `npm install`, `go mod tidy`, `cargo add`, `gem install`, `cpanm`, `install.packages`, `dart pub add`). Progress is surfaced as `[atlas-runner] installing: …` lines in the output pane.
+Key runner behavior:
 
-**Python GUI programs.** When Atlas detects a GUI-capable import in the snippet (pygame, tkinter, turtle, PyQt5/6, PySide2/6, wx, kivy, matplotlib), it routes the run through a prebuilt GUI image (`atlas-python-gui:latest`) that bundles Xvfb, fluxbox, x11vnc, websockify, and noVNC. The run window renders the live GUI in an embedded noVNC iframe next to stdout/stderr. The image is built automatically on first backend startup and takes a few minutes; subsequent runs are fast.
+- dependencies are installed on demand based on snippet imports
+- Python GUI snippets can open a live embedded noVNC view for supported toolkits
+- Docker-backed runs use disposable containers with CPU, memory, and PID limits
+- if Docker is unavailable, Atlas shows a clear retry path in the run window
 
-**Requirements:**
+## Architecture and Security
 
-- Docker Desktop (or any Docker daemon on PATH) must be running for server-side runs.
-- If Docker is down, the run window shows a clear message with a **Retry** button.
-- The container is run with `--rm`, `--memory=2g`, `--cpus=2`, `--pids-limit=512`, a read-only bind mount of the snippet, and the container-scoped network it needs for package installs.
-- GUI runs additionally publish the noVNC port on `127.0.0.1` for the embedded viewer.
+For the full threat model and protection boundaries, see [SECURITY.md](SECURITY.md).
 
-## Security Model
+Atlas is built as a local desktop system:
 
-For the threat model and supported protection boundaries, see [SECURITY.md](SECURITY.md).
+- the Tauri desktop shell starts and manages a local backend automatically
+- the backend binds to loopback on a random local port instead of a public interface
+- the frontend authenticates every request with a per-launch instance token
+- the backend rejects unexpected origins unless you explicitly opt into an insecure localhost override for development
+- Ollama is expected to run locally on the same machine
+- local state is stored under Atlas-managed directories, with additional at-rest protection where the runtime supports it
 
-Atlas is built for local desktop use:
-
-- the desktop app talks to a local backend on the same machine
-- Ollama is expected to run locally
-- saved runs and profile keys are protected with local OS secret storage
-- runtime SQLite and local vector-store storage use encrypted local storage when SQLCipher support is available
-- password-protected profiles add an extra unlock step inside Atlas
+For source runs, local data is written under `.data/`. For packaged builds, Atlas uses the app data directory for the current user.
 
 ## Verify the Repo
 
-Run the repo verification script:
+On Windows, the canonical verification command is:
 
 ```powershell
 .\scripts\verify_repo.ps1
@@ -220,7 +204,9 @@ Run the repo verification script:
 
 That script runs:
 
-- Python unit tests under `tests/`
+- version consistency checks
+- Python tests under `tests/`
+- `npm test` in `apps/atlas`
 - `npm run build:release` in `apps/atlas`
 - `cargo check` in `apps\atlas\src-tauri`
 
@@ -229,13 +215,15 @@ Optional flags:
 - `-SkipBackend`
 - `-SkipFrontend`
 
+If you prefer `pytest`, the repo is configured to scope test discovery to `tests/`, so plain `pytest` from the repo root is safe.
+
 Build a Windows release bundle locally:
 
 ```powershell
 .\scripts\build_atlas_release.ps1
 ```
 
-That writes installer artifacts under:
+Artifacts are written under:
 
 ```text
 apps\atlas\src-tauri\target\release\bundle\
@@ -243,26 +231,26 @@ apps\atlas\src-tauri\target\release\bundle\
 
 ## Repository Layout
 
-- `src/atlas_local`: Python runtime, API, graph execution, memory integration, security helpers, and CLI entrypoints
+- `src/atlas_local`: Python backend, API, graph execution, memory integration, security helpers, and CLI entrypoints
 - `apps/atlas`: Tauri, React, and Vite desktop shell
 - `prompts`: backend prompt templates
-- `scripts`: dev, verify, package, and cleanup helpers
-- `tests`: backend and API test suite
+- `scripts`: development, verification, packaging, and cleanup helpers
+- `tests`: backend and API tests
 
 ## Local Data
 
-Atlas writes runtime data under `.data/`:
+For source runs, Atlas writes runtime data under `.data/`:
 
 - `langgraph/checkpoints.sqlite`: thread checkpoint state
-- `mem0_history.sqlite`: Mem0 history database
+- `mem0_history.sqlite`: memory history database
 - `qdrant/`: local vector storage for semantic memory
 - `runs/`: saved run artifacts and run index
 
-These paths should stay out of Git. The repo ignore rules already cover them.
+These paths should remain untracked. The repo ignore rules already cover them.
 
 ## Troubleshooting
 
-If PowerShell blocks repo scripts, run them in the current session with:
+If PowerShell blocks repo scripts, allow them for the current session:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
@@ -274,6 +262,6 @@ If the desktop app opens but no models appear:
 2. Make sure the models in `.env` have been pulled locally.
 3. Restart Atlas.
 
-If the backend is offline after a code change, fully close and reopen the app. Backend Python changes require a real restart, not only a frontend refresh.
+If the backend shows offline after a Python code change, fully close and reopen the app. A frontend refresh is not enough for backend changes.
 
-If Atlas only stays open while the terminal that launched it stays open, you are running the source build in dev mode. The Windows release runs as a normal installed desktop app.
+If Atlas only stays open while the terminal that launched it stays open, you are running the source build in dev mode. The packaged Windows release runs as a normal installed desktop app.

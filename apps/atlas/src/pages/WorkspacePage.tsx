@@ -1,6 +1,6 @@
 import * as ScrollArea from "@radix-ui/react-scroll-area";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Copy, CornerUpLeft, Edit3, FileText, GitBranch, Globe, ImagePlus, Lightbulb, Lock, Plus, RotateCcw, Search, Send, Square, X } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Copy, CornerUpLeft, Edit3, FileText, GitBranch, ImagePlus, Lightbulb, Lock, Plus, RotateCcw, Search, Send, Square, X } from "lucide-react";
 import { ChangeEvent, FormEvent, KeyboardEvent, UIEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { MessageContent } from "../components/MessageContent";
@@ -73,7 +73,6 @@ export function WorkspacePage() {
   const draftThreadModel = useAtlasStore((state) => state.draftThreadModel);
   const draftThreadTemperature = useAtlasStore((state) => state.draftThreadTemperature);
   const reasoningMode = useAtlasStore((state) => state.reasoningMode);
-  const webSearchEnabled = useAtlasStore((state) => state.webSearchEnabled);
   const crossChatMemoryEnabled = useAtlasStore((state) => state.crossChatMemoryEnabled);
   const autoCompactLongChats = useAtlasStore((state) => state.autoCompactLongChats);
   const currentRunId = useAtlasStore((state) => state.currentRunId);
@@ -94,7 +93,6 @@ export function WorkspacePage() {
   const setDraftThreadModel = useAtlasStore((state) => state.setDraftThreadModel);
   const setDraftThreadTemperature = useAtlasStore((state) => state.setDraftThreadTemperature);
   const setReasoningMode = useAtlasStore((state) => state.setReasoningMode);
-  const setWebSearchEnabled = useAtlasStore((state) => state.setWebSearchEnabled);
   const beginRun = useAtlasStore((state) => state.beginRun);
   const setStage = useAtlasStore((state) => state.setStage);
   const failRun = useAtlasStore((state) => state.failRun);
@@ -188,7 +186,6 @@ export function WorkspacePage() {
   const ollamaOnline = Boolean(models?.ollama_online);
   const hasLocalModels = Boolean(models?.has_local_models);
   const ollamaUrl = status?.ollama_url || "http://127.0.0.1:11434";
-  const webSearchAvailable = Boolean(status?.web_search_available);
 
   const currentThread = useMemo(() => {
     const existing = threadItems.find((item) => item.thread_id === currentThreadId);
@@ -278,7 +275,6 @@ export function WorkspacePage() {
     () => normalizeReasoningModeForModel(reasoningMode, selectedModelReasoningStrategy),
     [reasoningMode, selectedModelReasoningStrategy],
   );
-  const effectiveWebSearchEnabled = webSearchAvailable && webSearchEnabled;
   const reasoningOptions = useMemo(
     () => buildReasoningOptions(selectedModelReasoningStrategy),
     [selectedModelReasoningStrategy],
@@ -493,12 +489,6 @@ export function WorkspacePage() {
     return () => window.removeEventListener("pointerdown", handlePointerDown);
   }, [isReasoningMenuOpen]);
 
-  useEffect(() => {
-    if (!webSearchAvailable && webSearchEnabled) {
-      setWebSearchEnabled(false);
-    }
-  }, [setWebSearchEnabled, webSearchAvailable, webSearchEnabled]);
-
   const startRun = useMutation({
     mutationFn: async (value: string) => {
       if (!currentUserId) {
@@ -522,7 +512,6 @@ export function WorkspacePage() {
         modelForRun,
         temperatureForRun,
         effectiveReasoningMode,
-        effectiveWebSearchEnabled,
         (currentThreadTitle || currentThreadId).trim(),
         crossChatMemoryEnabled,
         autoCompactLongChats,
@@ -609,7 +598,6 @@ export function WorkspacePage() {
         thread.chat_model || selectedModel,
         readStoredTemperature(thread) ?? selectedTemperature ?? null,
         effectiveReasoningMode,
-        effectiveWebSearchEnabled,
         thread.title || thread.thread_id,
         crossChatMemoryEnabled,
         autoCompactLongChats,
@@ -855,13 +843,6 @@ export function WorkspacePage() {
     await appendAttachmentsFromFiles(files);
     event.currentTarget.value = "";
     setIsAttachmentMenuOpen(false);
-  };
-
-  const toggleWebSearch = () => {
-    if (!webSearchAvailable) {
-      return;
-    }
-    setWebSearchEnabled(!webSearchEnabled);
   };
 
   const toggleCompactionSummary = (key: string) => {
@@ -1386,16 +1367,6 @@ export function WorkspacePage() {
                 ) : null}
               </div>
             ) : null}
-            {webSearchAvailable ? (
-              <button
-                className={`ghost-button icon-button${effectiveWebSearchEnabled ? " active-toggle" : ""}`}
-                onClick={toggleWebSearch}
-                title={effectiveWebSearchEnabled ? "Web search is on" : "Turn on web search"}
-                type="button"
-              >
-                <Globe size={16} />
-              </button>
-            ) : null}
             <button className="primary-button" disabled={isStreaming || (!prompt.trim() && attachments.length === 0) || !canStartChat} type="submit">
               <Send size={16} />
               {isStreaming ? (currentRunMode === "compact" ? "Compacting..." : "Running...") : "Send"}
@@ -1671,9 +1642,6 @@ function chatWaitingLabel(stage: string) {
   }
   if (stage === "compaction") {
     return "Compacting";
-  }
-  if (stage === "web_search") {
-    return "Searching";
   }
   if (stage === "stopping") {
     return "Stopping";

@@ -66,8 +66,6 @@ export type BackendStatus = {
   chat_temperature: number;
   embed_model: string;
   ollama_url: string;
-  web_search_available: boolean;
-  web_search_provider: string;
   runtime_mode: string;
   busy: boolean;
   security: {
@@ -336,7 +334,6 @@ export function startChat(
   chatModel?: string,
   temperature?: number | null,
   reasoningMode?: ReasoningMode,
-  webSearchEnabled?: boolean,
   threadTitle?: string,
   crossChatMemory = true,
   autoCompactLongChats = true,
@@ -351,7 +348,6 @@ export function startChat(
       chat_model: chatModel,
       temperature,
       reasoning_mode: reasoningMode,
-      web_search_enabled: webSearchEnabled,
       thread_title: threadTitle,
       cross_chat_memory: crossChatMemory,
       auto_compact_long_chats: autoCompactLongChats,

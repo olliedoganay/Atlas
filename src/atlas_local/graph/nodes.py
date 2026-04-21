@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Callable
-from typing import Any
+from typing import Any, Callable
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.runtime import Runtime
@@ -14,7 +13,6 @@ from ..memory.mem0_service import Mem0Service
 from ..memory.models import MemoryCandidate, MemoryRecord
 from ..memory.policy import fallback_local_memory_candidates_from_text
 from ..providers.base import ChatModelProvider
-from ..web_search import OllamaWebSearchService
 from .context import GraphContext
 from .state import AgentState
 
@@ -27,12 +25,10 @@ class GraphNodes:
         config: AppConfig,
         llm_provider: ChatModelProvider,
         memory_service: Mem0Service,
-        web_search_service: OllamaWebSearchService,
     ):
         self.config = config
         self.llm_provider = llm_provider
         self.memory_service = memory_service
-        self.web_search_service = web_search_service
 
     def retrieve_memories(
         self,
@@ -82,28 +78,6 @@ class GraphNodes:
             "messages": [AIMessage(content=answer)],
             "answer": answer,
         }
-
-    def retrieve_web(
-        self,
-        state: AgentState,
-        runtime: Runtime[GraphContext],
-    ) -> dict[str, Any]:
-        if not runtime.context.web_search_enabled or not self.web_search_service.available:
-            return {"web_search_results": []}
-
-        latest_user_message = _latest_user_text(state)
-        if not latest_user_message:
-            return {"web_search_results": []}
-
-        try:
-            results = self.web_search_service.search(
-                latest_user_message,
-                max_results=self.config.web_search_max_results,
-            )
-        except Exception as exc:  # pragma: no cover - integration path
-            LOGGER.warning("Web search failed: %s", exc)
-            return {"web_search_results": []}
-        return {"web_search_results": [item.to_dict() for item in results]}
 
     def extract_updates(
         self,
@@ -200,17 +174,15 @@ def _build_answer_messages(
     token_counter: MessageTokenCounter | None = None,
 ) -> list[HumanMessage | AIMessage | SystemMessage]:
     memory_message = _memory_context_message(state=state, runtime_context=runtime_context)
-    web_message = _web_context_message(state=state, runtime_context=runtime_context)
     summary_message = _thread_summary_message(state)
     recent_messages = _recent_prompt_messages(
         state=state,
         runtime_context=runtime_context,
         memory_message=memory_message,
-        web_message=web_message,
         summary_message=summary_message,
         token_counter=token_counter,
     )
-    prefix = [item for item in (memory_message, web_message, summary_message) if item is not None]
+    prefix = [item for item in (memory_message, summary_message) if item is not None]
     return prefix + recent_messages
 
 
@@ -231,38 +203,11 @@ def _thread_summary_message(state: AgentState) -> SystemMessage | None:
     return SystemMessage(content=f"Conversation summary from earlier in this thread:\n{summary}")
 
 
-def _web_context_message(*, state: AgentState, runtime_context: GraphContext) -> SystemMessage | None:
-    if not getattr(runtime_context, "web_search_enabled", False):
-        return None
-
-    results = state.get("web_search_results", [])
-    if not isinstance(results, list) or not results:
-        return None
-
-    lines = [
-        "Recent web search results. Use them only when relevant and cite the source URL when you rely on them.",
-    ]
-    for index, item in enumerate(results, start=1):
-        if not isinstance(item, dict):
-            continue
-        title = str(item.get("title", "") or "").strip() or f"Result {index}"
-        url = str(item.get("url", "") or "").strip()
-        content = str(item.get("content", "") or "").strip()
-        entry = f"[{index}] {title}"
-        if url:
-            entry += f" — {url}"
-        if content:
-            entry += f"\n{content}"
-        lines.append(entry)
-    return SystemMessage(content="\n\n".join(lines).strip())
-
-
 def _recent_prompt_messages(
     *,
     state: AgentState,
     runtime_context: GraphContext,
     memory_message: SystemMessage | None,
-    web_message: SystemMessage | None,
     summary_message: SystemMessage | None,
     token_counter: MessageTokenCounter | None,
 ) -> list[BaseMessage]:
@@ -278,7 +223,7 @@ def _recent_prompt_messages(
         return candidate_messages
 
     prompt_budget = max(1024, int(effective_context_window * 0.72))
-    reserved_tokens = _count_messages_tokens([memory_message, web_message, summary_message], token_counter=token_counter) + 64
+    reserved_tokens = _count_messages_tokens([memory_message, summary_message], token_counter=token_counter) + 64
     available_tokens = max(256, prompt_budget - reserved_tokens)
 
     selected: list[BaseMessage] = []

@@ -84,7 +84,7 @@ export function stashPendingRun(token: string, payload: PendingRun) {
   try {
     window.localStorage.setItem(storageKey(token), JSON.stringify(payload));
   } catch {
-    // ignore quota / privacy failures — the consumer will show an error
+    // Ignore quota or privacy failures; the consumer will show an error.
   }
 }
 
@@ -102,7 +102,7 @@ export function consumePendingRun(token: string): PendingRun | null {
   try {
     window.localStorage.removeItem(key);
   } catch {
-    // best-effort cleanup
+    // Best-effort cleanup.
   }
   try {
     return JSON.parse(raw) as PendingRun;
@@ -124,7 +124,7 @@ export async function openRunnerWindow(payload: PendingRun) {
   stashPendingRun(token, payload);
 
   const label = `runner-${token}`;
-  const title = `Atlas Run · ${payload.language}`;
+  const title = `Atlas Run - ${payload.language}`;
   const url = `index.html#/runner/${token}`;
 
   const runner = new WebviewWindow(label, {

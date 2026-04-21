@@ -35,7 +35,6 @@ class PromptRequest(BaseModel):
     chat_model: str | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     reasoning_mode: str | None = None
-    web_search_enabled: bool = False
     thread_title: str | None = None
     cross_chat_memory: bool = True
     auto_compact_long_chats: bool = True
@@ -278,7 +277,6 @@ def create_api_app(service: AtlasBackendService | None = None) -> FastAPI:
                 chat_model=request.chat_model,
                 temperature=request.temperature,
                 reasoning_mode=request.reasoning_mode,
-                web_search_enabled=request.web_search_enabled,
                 thread_title=request.thread_title,
                 cross_chat_memory=request.cross_chat_memory,
                 auto_compact_long_chats=request.auto_compact_long_chats,
