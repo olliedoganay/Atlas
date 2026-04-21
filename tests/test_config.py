@@ -11,7 +11,7 @@ class ConfigTests(unittest.TestCase):
             root = Path(tmp)
             config = load_config(project_root=root, env={})
             self.assertEqual(config.chat_model, "gpt-oss:20b")
-            self.assertEqual(config.chat_temperature, 0.2)
+            self.assertIsNone(config.chat_temperature)
             self.assertEqual(config.embed_model, "nomic-embed-text:latest")
             self.assertEqual(config.embed_dim, 768)
             self.assertTrue(config.qdrant_path.exists())

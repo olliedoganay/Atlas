@@ -207,7 +207,7 @@ class ModelCatalogCachingTests(unittest.TestCase):
 class ThreadTemperatureResolutionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.service = AtlasBackendService.__new__(AtlasBackendService)
-        self.service.config = SimpleNamespace(chat_model="qwen", chat_temperature=0.2)
+        self.service.config = SimpleNamespace(chat_model="qwen", chat_temperature=None)
         self.service.run_store = SimpleNamespace(get_thread=lambda **_: None)
 
     def test_new_thread_without_requested_temperature_uses_model_default(self) -> None:
@@ -259,14 +259,13 @@ class ThreadTemperatureResolutionTests(unittest.TestCase):
     def test_legacy_thread_without_temperature_field_falls_back_to_config_default(self) -> None:
         self.service.run_store = SimpleNamespace(get_thread=lambda **_: {"thread_id": "main", "last_run_id": "run-1"})
 
-        self.assertEqual(
+        self.assertIsNone(
             AtlasBackendService._resolve_thread_temperature(
                 self.service,
                 user_id="research_user",
                 thread_id="main",
                 requested_temperature=None,
-            ),
-            0.2,
+            )
         )
 
 

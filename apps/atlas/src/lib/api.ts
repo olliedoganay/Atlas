@@ -62,8 +62,8 @@ export type BackendStatus = {
   backend: string;
   default_chat_model: string;
   chat_model: string;
-  default_chat_temperature: number;
-  chat_temperature: number;
+  default_chat_temperature: number | null;
+  chat_temperature: number | null;
   embed_model: string;
   ollama_url: string;
   runtime_mode: string;
@@ -88,7 +88,7 @@ export type TemperaturePreset = {
 
 export type ModelCatalog = {
   default_model: string;
-  default_temperature: number;
+  default_temperature: number | null;
   ollama_online: boolean;
   has_local_models: boolean;
   catalog_source: "ollama" | "fallback";

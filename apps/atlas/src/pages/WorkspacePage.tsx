@@ -24,6 +24,7 @@ import {
   type ThreadMessage,
 } from "../lib/api";
 import { useBackendPhase } from "../lib/backendPhase";
+import { resolveStartupState } from "../lib/startupState";
 import { useAtlasStore } from "../store/useAtlasStore";
 
 type ConversationMessage = {
@@ -125,7 +126,6 @@ export function WorkspacePage() {
     bootStartedAt: backendStartupStartedAt,
   });
   const backendOnline = backendPhase === "online";
-  const backendStarting = backendPhase === "starting";
   const { data: models } = useQuery({
     queryKey: ["models"],
     queryFn: getModels,
@@ -180,7 +180,7 @@ export function WorkspacePage() {
   const defaultModel =
     models?.default_model || status?.default_chat_model || status?.chat_model || draftThreadModel || "";
   const defaultTemperature =
-    models?.default_temperature ?? status?.default_chat_temperature ?? status?.chat_temperature ?? 0.2;
+    models?.default_temperature ?? status?.default_chat_temperature ?? status?.chat_temperature ?? null;
   const modelCatalogLoaded = Boolean(models);
   const availableModels = (models?.models ?? []).filter(Boolean);
   const ollamaOnline = Boolean(models?.ollama_online);
@@ -283,67 +283,22 @@ export function WorkspacePage() {
     () => reasoningOptions.find((option) => option.value === effectiveReasoningMode) ?? reasoningOptions[0] ?? null,
     [effectiveReasoningMode, reasoningOptions],
   );
-  const headerSummary = backendStarting
-    ? "Atlas is starting the local runtime."
-    : !backendOnline
-    ? "Local runtime offline. Restart Atlas from the sidebar to continue."
-    : !currentUserId
-      ? "Choose a profile before starting the first chat."
-    : !modelCatalogLoaded
-      ? "Checking the local Ollama model list."
-    : !ollamaOnline
-      ? "Atlas is online, but Ollama is not responding yet."
-    : !hasLocalModels
-      ? "Ollama is running, but there are no local chat models installed yet."
-    : selectedModel
-      ? "Model and temperature lock after the first message in this thread."
-      : "Choose a local model and temperature before the first message.";
-  const idleTitle = backendStarting
-    ? "Starting backend"
-    : !backendOnline
-    ? "Backend offline"
-    : "New thread";
-  const idleDescription = backendStarting
-    ? "Atlas is starting the managed local runtime. Chats, profiles, and models will appear as soon as it comes online."
-    : !backendOnline
-    ? "Atlas cannot load chats or models until the managed backend comes back online. Use the restart control in the sidebar when the runtime is ready."
-    : !currentUserId
-      ? "Choose a profile first. Atlas keeps chats, memory, and search scoped to the active profile."
-    : !modelCatalogLoaded
-      ? "Atlas is checking the local Ollama model list before the first message."
-    : !ollamaOnline
-      ? "Open Ollama on this machine, then refresh the local model list before sending the first message."
-    : !hasLocalModels
-      ? "Pull at least one local chat model with Ollama, then refresh Atlas to use it in new chats."
-      : selectedModelSupportsImages
-      ? "Ask a question, upload a photo for context, or use this thread as a clean branch for a new line of thinking."
-      : "Use this thread to compare ideas, condense notes, or sketch the next move.";
-  const composerPlaceholder = backendStarting
-    ? "Starting local runtime..."
-    : !backendOnline
-    ? "Backend offline. Restart the local runtime to continue."
-    : !currentUserId
-      ? "Choose a profile before sending the first message."
-      : !modelCatalogLoaded
-        ? "Checking the local Ollama model list."
-      : !ollamaOnline
-        ? "Start Ollama on this machine first."
-        : !hasLocalModels
-          ? "Pull a local Ollama model before sending the first message."
-          : !selectedModel
-            ? "Choose a local model to start this chat."
-            : selectedModelSupportsImages
-              ? "Drop a photo, a rough brief, or the first line."
-              : "Start with a question, a draft, or the next move.";
-  const canStartChat = Boolean(
-    backendOnline &&
-      currentUserId &&
-      !currentUserLocked &&
-      modelCatalogLoaded &&
-      ollamaOnline &&
-      hasLocalModels &&
-      selectedModel,
-  );
+  const startupState = resolveStartupState({
+    backendPhase,
+    currentUserId,
+    currentUserLocked,
+    modelCatalogLoaded,
+    ollamaOnline,
+    hasLocalModels,
+    selectedModel,
+    selectedModelSupportsImages,
+    threadHasHistory,
+  });
+  const headerSummary = startupState.headerSummary;
+  const idleTitle = startupState.idleTitle;
+  const idleDescription = startupState.idleDescription;
+  const composerPlaceholder = startupState.composerPlaceholder;
+  const canStartChat = startupState.canStartChat;
   const currentThreadCompactionNotice = useMemo(() => {
     if (!compactionNotice) {
       return null;
@@ -683,11 +638,11 @@ export function WorkspacePage() {
     }
     return items;
   }, [currentRunId, currentThreadCompactionNotice, currentThreadHasActiveRun, history, liveAnswer, pendingAttachments, pendingPrompt]);
-  const showOllamaWarning = Boolean(
-    backendOnline &&
-      modelCatalogLoaded &&
-      !ollamaOnline,
-  );
+  const showOllamaWarning = startupState.key === "ollama-offline";
+  const idleKicker =
+    startupState.key === "ready" && selectedModel
+      ? formatModelLabel(selectedModel)
+      : startupState.idleKicker;
 
   useEffect(() => {
     autoScrollToLatestRef.current = true;
@@ -1035,9 +990,7 @@ export function WorkspacePage() {
                     <div className="workspace-idle-mark">
                       <img alt="Atlas" className="workspace-idle-logo workspace-idle-logo-large" src="/AtlasLogo.png" />
                     </div>
-                    <span className="workspace-idle-kicker">
-                      {selectedModel ? formatModelLabel(selectedModel) : "New thread"}
-                    </span>
+                    <span className="workspace-idle-kicker">{idleKicker}</span>
                     <h2>{idleTitle}</h2>
                     <p>{idleDescription}</p>
                   </div>
@@ -1834,7 +1787,7 @@ function formatAttachmentMeta(attachment: ImageAttachment) {
   const extension = getAttachmentExtensionLabel(attachment.name);
   const typeLabel = extension || (attachmentIsImage(attachment) ? "IMAGE" : "FILE");
   const sizeLabel = formatAttachmentSize(attachment.byte_size);
-  return [typeLabel, sizeLabel].filter(Boolean).join(" · ");
+  return [typeLabel, sizeLabel].filter(Boolean).join(" - ");
 }
 
 function getAttachmentExtensionLabel(name?: string) {
