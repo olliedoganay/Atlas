@@ -2153,9 +2153,33 @@ pre {
   padding: 2px 6px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-muted);
+  color: var(--text);
   font-family: "IBM Plex Mono", "Cascadia Code", monospace;
   font-size: 0.92em;
+}
+
+.message-content table {
+  width: 100%;
+  margin: 0 0 12px;
+  border-collapse: collapse;
+  color: var(--text);
+}
+
+.message-content th,
+.message-content td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  text-align: left;
+  vertical-align: top;
+}
+
+.message-content th {
+  font-weight: 700;
+  color: var(--muted-strong);
+  border-bottom: 2px solid var(--border-strong);
+  background: color-mix(in srgb, var(--surface-muted) 60%, transparent);
 }
 
 .code-block-shell {
@@ -3490,3 +3514,639 @@ pre {
     width: 100%;
   }
 }
+
+/* ============================================================
+   CRT themes (retro sci-fi) — Alien / WarGames / Fallout style
+   Monochrome phosphor, scanlines, subtle bloom.
+   ============================================================ */
+
+:root[data-theme="crt-green"] {
+  color-scheme: dark;
+  --crt-phosphor: #33ff66;
+  --crt-phosphor-dim: #1fb34a;
+  --crt-phosphor-bright: #8cffb0;
+  --crt-bg: #030a05;
+  --crt-bg-elevated: #061309;
+  --crt-bg-panel: #081b0e;
+  --crt-border-faint: rgba(51, 255, 102, 0.18);
+  --crt-border: rgba(51, 255, 102, 0.34);
+  --crt-border-strong: rgba(51, 255, 102, 0.55);
+  --crt-glow: 0 0 1px currentColor, 0 0 6px rgba(51, 255, 102, 0.45);
+  --crt-glow-soft: 0 0 1px currentColor, 0 0 3px rgba(51, 255, 102, 0.35);
+
+  --bg: var(--crt-bg);
+  --bg-elevated: var(--crt-bg-elevated);
+  --bg-sidebar: var(--crt-bg);
+  --surface: var(--crt-bg-elevated);
+  --surface-muted: var(--crt-bg-panel);
+  --surface-strong: #0c2614;
+  --border: var(--crt-border-faint);
+  --border-strong: var(--crt-border);
+  --text: var(--crt-phosphor);
+  --muted: var(--crt-phosphor-dim);
+  --muted-strong: var(--crt-phosphor);
+  --accent: var(--crt-phosphor-bright);
+  --accent-soft: rgba(51, 255, 102, 0.12);
+  --danger: #ff6b6b;
+  --danger-soft: rgba(255, 107, 107, 0.14);
+  --success: var(--crt-phosphor-bright);
+  --workspace-bg: var(--crt-bg);
+  --workspace-sidebar-bg: var(--crt-bg);
+  --workspace-inspector-bg: var(--crt-bg);
+  --panel-tint: rgba(51, 255, 102, 0.03);
+  --composer-bg: var(--crt-bg-elevated);
+  --message-assistant-bg: var(--crt-bg-elevated);
+  --message-assistant-border: var(--crt-border);
+  --message-user-bg: #0a2012;
+  --message-user-border: var(--crt-border-strong);
+  --message-system-bg: #1a0a0a;
+  --message-waiting-bg: var(--crt-bg-elevated);
+  --shadow: none;
+}
+
+:root[data-theme="crt-amber"] {
+  color-scheme: dark;
+  --crt-phosphor: #ffb000;
+  --crt-phosphor-dim: #b87800;
+  --crt-phosphor-bright: #ffd166;
+  --crt-bg: #0a0500;
+  --crt-bg-elevated: #130a02;
+  --crt-bg-panel: #1b0f04;
+  --crt-border-faint: rgba(255, 176, 0, 0.18);
+  --crt-border: rgba(255, 176, 0, 0.34);
+  --crt-border-strong: rgba(255, 176, 0, 0.55);
+  --crt-glow: 0 0 1px currentColor, 0 0 6px rgba(255, 176, 0, 0.45);
+  --crt-glow-soft: 0 0 1px currentColor, 0 0 3px rgba(255, 176, 0, 0.35);
+
+  --bg: var(--crt-bg);
+  --bg-elevated: var(--crt-bg-elevated);
+  --bg-sidebar: var(--crt-bg);
+  --surface: var(--crt-bg-elevated);
+  --surface-muted: var(--crt-bg-panel);
+  --surface-strong: #261604;
+  --border: var(--crt-border-faint);
+  --border-strong: var(--crt-border);
+  --text: var(--crt-phosphor);
+  --muted: var(--crt-phosphor-dim);
+  --muted-strong: var(--crt-phosphor);
+  --accent: var(--crt-phosphor-bright);
+  --accent-soft: rgba(255, 176, 0, 0.12);
+  --danger: #ff6b6b;
+  --danger-soft: rgba(255, 107, 107, 0.14);
+  --success: var(--crt-phosphor-bright);
+  --workspace-bg: var(--crt-bg);
+  --workspace-sidebar-bg: var(--crt-bg);
+  --workspace-inspector-bg: var(--crt-bg);
+  --panel-tint: rgba(255, 176, 0, 0.03);
+  --composer-bg: var(--crt-bg-elevated);
+  --message-assistant-bg: var(--crt-bg-elevated);
+  --message-assistant-border: var(--crt-border);
+  --message-user-bg: #1f1405;
+  --message-user-border: var(--crt-border-strong);
+  --message-system-bg: #1a0a0a;
+  --message-waiting-bg: var(--crt-bg-elevated);
+  --shadow: none;
+}
+
+/* Shared CRT typography + component treatment
+   NOTE: root font stays Inter/Plex Sans to keep control widths stable across
+   themes. Monospace is applied only to elements where widening does not shift
+   neighboring layout (headings in their own row, status pills, message copy). */
+:root[data-theme="crt-green"] body,
+:root[data-theme="crt-amber"] body {
+  background: var(--crt-bg);
+  color: var(--text);
+  text-shadow: var(--crt-glow-soft);
+}
+
+:root[data-theme="crt-green"] strong,
+:root[data-theme="crt-amber"] strong,
+:root[data-theme="crt-green"] h1,
+:root[data-theme="crt-amber"] h1,
+:root[data-theme="crt-green"] h2,
+:root[data-theme="crt-amber"] h2,
+:root[data-theme="crt-green"] h3,
+:root[data-theme="crt-amber"] h3,
+:root[data-theme="crt-green"] h4,
+:root[data-theme="crt-amber"] h4 {
+  color: var(--accent);
+  text-shadow: var(--crt-glow);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+:root[data-theme="crt-green"] button,
+:root[data-theme="crt-amber"] button,
+:root[data-theme="crt-green"] input,
+:root[data-theme="crt-amber"] input,
+:root[data-theme="crt-green"] textarea,
+:root[data-theme="crt-amber"] textarea,
+:root[data-theme="crt-green"] select,
+:root[data-theme="crt-amber"] select {
+  font-family: inherit;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* Borders: sharp 1px in the phosphor hue */
+:root[data-theme="crt-green"] .global-nav,
+:root[data-theme="crt-amber"] .global-nav,
+:root[data-theme="crt-green"] .settings-nav,
+:root[data-theme="crt-amber"] .settings-nav,
+:root[data-theme="crt-green"] .settings-rows,
+:root[data-theme="crt-amber"] .settings-rows,
+:root[data-theme="crt-green"] .settings-row,
+:root[data-theme="crt-amber"] .settings-row,
+:root[data-theme="crt-green"] .workspace-main-header,
+:root[data-theme="crt-amber"] .workspace-main-header,
+:root[data-theme="crt-green"] .conversation-shell,
+:root[data-theme="crt-amber"] .conversation-shell,
+:root[data-theme="crt-green"] .composer-shell,
+:root[data-theme="crt-amber"] .composer-shell,
+:root[data-theme="crt-green"] .thread-card,
+:root[data-theme="crt-amber"] .thread-card,
+:root[data-theme="crt-green"] .text-input,
+:root[data-theme="crt-amber"] .text-input,
+:root[data-theme="crt-green"] .select-input,
+:root[data-theme="crt-amber"] .select-input,
+:root[data-theme="crt-green"] .ghost-button,
+:root[data-theme="crt-amber"] .ghost-button,
+:root[data-theme="crt-green"] .primary-button,
+:root[data-theme="crt-amber"] .primary-button,
+:root[data-theme="crt-green"] .segmented-control,
+:root[data-theme="crt-amber"] .segmented-control,
+:root[data-theme="crt-green"] .runner-header,
+:root[data-theme="crt-amber"] .runner-header,
+:root[data-theme="crt-green"] .runner-footer,
+:root[data-theme="crt-amber"] .runner-footer,
+:root[data-theme="crt-green"] .runner-output,
+:root[data-theme="crt-amber"] .runner-output {
+  border-color: var(--border-strong) !important;
+}
+
+/* Buttons: bracket-style hover invert */
+:root[data-theme="crt-green"] .ghost-button,
+:root[data-theme="crt-amber"] .ghost-button,
+:root[data-theme="crt-green"] .primary-button,
+:root[data-theme="crt-amber"] .primary-button,
+:root[data-theme="crt-green"] .danger-button,
+:root[data-theme="crt-amber"] .danger-button,
+:root[data-theme="crt-green"] .segmented-button,
+:root[data-theme="crt-amber"] .segmented-button {
+  background: transparent;
+  color: var(--text);
+  text-shadow: var(--crt-glow-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  transition: none;
+}
+
+:root[data-theme="crt-green"] .ghost-button:hover,
+:root[data-theme="crt-amber"] .ghost-button:hover,
+:root[data-theme="crt-green"] .primary-button:hover,
+:root[data-theme="crt-amber"] .primary-button:hover,
+:root[data-theme="crt-green"] .segmented-button:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+:root[data-theme="crt-green"] .primary-button,
+:root[data-theme="crt-amber"] .primary-button {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+:root[data-theme="crt-green"] .segmented-button.active,
+:root[data-theme="crt-amber"] .segmented-button.active,
+:root[data-theme="crt-green"] .settings-nav-button.active,
+:root[data-theme="crt-amber"] .settings-nav-button.active,
+:root[data-theme="crt-green"] .nav-link.active,
+:root[data-theme="crt-amber"] .nav-link.active,
+:root[data-theme="crt-green"] .thread-card.active,
+:root[data-theme="crt-amber"] .thread-card.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  text-shadow: var(--crt-glow);
+  border-color: var(--border-strong) !important;
+}
+
+/* Inputs: flat black with phosphor caret */
+:root[data-theme="crt-green"] .text-input,
+:root[data-theme="crt-amber"] .text-input,
+:root[data-theme="crt-green"] .select-input,
+:root[data-theme="crt-amber"] .select-input,
+:root[data-theme="crt-green"] textarea,
+:root[data-theme="crt-amber"] textarea {
+  background: var(--crt-bg);
+  color: var(--text);
+  caret-color: var(--accent);
+}
+
+:root[data-theme="crt-green"] *::selection,
+:root[data-theme="crt-amber"] *::selection {
+  background: var(--accent);
+  color: var(--crt-bg);
+  text-shadow: none;
+}
+
+:root[data-theme="crt-green"] *:focus-visible,
+:root[data-theme="crt-amber"] *:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+  box-shadow: var(--crt-glow);
+}
+
+/* Chat messages: thin bordered boxes with accent label */
+:root[data-theme="crt-green"] .message-bubble,
+:root[data-theme="crt-amber"] .message-bubble {
+  border: 1px solid var(--border-strong);
+  background: var(--message-assistant-bg);
+  box-shadow: none;
+}
+
+/* Status pills: phosphor-tinted brackets */
+:root[data-theme="crt-green"] .status-pill,
+:root[data-theme="crt-amber"] .status-pill {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* Runner window: terminal panel */
+:root[data-theme="crt-green"] .runner-shell,
+:root[data-theme="crt-amber"] .runner-shell {
+  background: var(--crt-bg);
+}
+
+:root[data-theme="crt-green"] .runner-output,
+:root[data-theme="crt-amber"] .runner-output {
+  background: var(--crt-bg);
+  color: var(--text);
+  text-shadow: var(--crt-glow-soft);
+}
+
+:root[data-theme="crt-green"] .runner-line.stderr,
+:root[data-theme="crt-amber"] .runner-line.stderr {
+  color: var(--crt-phosphor-bright);
+  opacity: 0.85;
+}
+
+:root[data-theme="crt-green"] .runner-status.running,
+:root[data-theme="crt-amber"] .runner-status.running,
+:root[data-theme="crt-green"] .runner-status.ok,
+:root[data-theme="crt-amber"] .runner-status.ok {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--accent);
+}
+
+/* Scrollbars in monochrome */
+:root[data-theme="crt-green"] *::-webkit-scrollbar,
+:root[data-theme="crt-amber"] *::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+:root[data-theme="crt-green"] *::-webkit-scrollbar-track,
+:root[data-theme="crt-amber"] *::-webkit-scrollbar-track {
+  background: var(--crt-bg);
+}
+
+:root[data-theme="crt-green"] *::-webkit-scrollbar-thumb,
+:root[data-theme="crt-amber"] *::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+}
+
+/* Blinking caret accent on loading indicators */
+@keyframes crt-blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+:root[data-theme="crt-green"] .runner-placeholder::after,
+:root[data-theme="crt-amber"] .runner-placeholder::after {
+  content: "_";
+  display: inline-block;
+  margin-left: 4px;
+  animation: crt-blink 1s steps(1) infinite;
+}
+
+/* Scanlines overlay (toggle via :root[data-scanlines="on"]) */
+:root[data-scanlines="on"] body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9998;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      rgba(0, 0, 0, 0) 0px,
+      rgba(0, 0, 0, 0) 2px,
+      rgba(0, 0, 0, 0.18) 2px,
+      rgba(0, 0, 0, 0.18) 3px
+    );
+  mix-blend-mode: multiply;
+}
+
+:root[data-scanlines="on"] body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0) 55%, rgba(0, 0, 0, 0.45) 100%);
+  mix-blend-mode: multiply;
+}
+
+/* =========================================================================
+   Synthwave — 80s / Tron: deep navy, magenta + cyan neons, grid, glow
+   ========================================================================= */
+:root[data-theme="synthwave"] {
+  color-scheme: dark;
+  --sw-bg-deep: #07031a;
+  --sw-bg: #0c0628;
+  --sw-bg-elevated: #140a3d;
+  --sw-bg-panel: #1a0f4a;
+  --sw-magenta: #ff3bd4;
+  --sw-magenta-bright: #ff8be0;
+  --sw-cyan: #25f0ff;
+  --sw-cyan-bright: #a8fbff;
+  --sw-purple: #8b5cf6;
+  --sw-border: rgba(255, 59, 212, 0.34);
+  --sw-border-strong: rgba(37, 240, 255, 0.5);
+  --sw-glow-magenta: 0 0 8px rgba(255, 59, 212, 0.6), 0 0 16px rgba(255, 59, 212, 0.35);
+  --sw-glow-cyan: 0 0 8px rgba(37, 240, 255, 0.6), 0 0 16px rgba(37, 240, 255, 0.35);
+
+  --bg: var(--sw-bg-deep);
+  --bg-elevated: var(--sw-bg);
+  --bg-sidebar: var(--sw-bg-deep);
+  --surface: var(--sw-bg-elevated);
+  --surface-muted: var(--sw-bg);
+  --surface-strong: var(--sw-bg-panel);
+  --border: var(--sw-border);
+  --border-strong: var(--sw-border-strong);
+  --text: #e8e4ff;
+  --muted: #a498d9;
+  --muted-strong: var(--sw-cyan-bright);
+  --accent: var(--sw-magenta);
+  --accent-soft: rgba(255, 59, 212, 0.14);
+  --danger: #ff4d88;
+  --danger-soft: rgba(255, 77, 136, 0.18);
+  --success: var(--sw-cyan);
+  --workspace-bg: var(--sw-bg-deep);
+  --workspace-sidebar-bg: var(--sw-bg-deep);
+  --workspace-inspector-bg: var(--sw-bg-deep);
+  --panel-tint: rgba(139, 92, 246, 0.06);
+  --composer-bg: var(--sw-bg-elevated);
+  --message-assistant-bg: var(--sw-bg-elevated);
+  --message-assistant-border: var(--sw-border);
+  --message-user-bg: #1d1053;
+  --message-user-border: var(--sw-border-strong);
+  --message-system-bg: #2a0a3a;
+  --message-waiting-bg: var(--sw-bg-elevated);
+  --shadow: 0 0 20px rgba(139, 92, 246, 0.25);
+}
+
+:root[data-theme="synthwave"] body {
+  background:
+    linear-gradient(180deg, #07031a 0%, #0c0628 55%, #1a0646 100%) fixed,
+    radial-gradient(ellipse at 50% 110%, rgba(255, 59, 212, 0.25) 0%, transparent 55%) fixed;
+  color: var(--text);
+}
+
+:root[data-theme="synthwave"] body::before {
+  content: "";
+  position: fixed;
+  inset: auto 0 0 0;
+  height: 45vh;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(to right, rgba(255, 59, 212, 0.28) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(37, 240, 255, 0.22) 1px, transparent 1px);
+  background-size: 60px 60px, 60px 60px;
+  transform: perspective(600px) rotateX(62deg);
+  transform-origin: center top;
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0) 85%);
+  -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0) 85%);
+}
+
+:root[data-theme="synthwave"] h1,
+:root[data-theme="synthwave"] h2,
+:root[data-theme="synthwave"] h3,
+:root[data-theme="synthwave"] h4,
+:root[data-theme="synthwave"] strong {
+  color: var(--sw-cyan-bright);
+  text-shadow: var(--sw-glow-cyan);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+:root[data-theme="synthwave"] .primary-button,
+:root[data-theme="synthwave"] .segmented-button.active,
+:root[data-theme="synthwave"] .settings-nav-button.active,
+:root[data-theme="synthwave"] .nav-link.active,
+:root[data-theme="synthwave"] .thread-card.active {
+  background: linear-gradient(135deg, #ff3bd4 0%, #8b5cf6 100%);
+  color: #fff;
+  border: 1px solid var(--sw-magenta-bright);
+  box-shadow: var(--sw-glow-magenta);
+}
+
+:root[data-theme="synthwave"] .ghost-button,
+:root[data-theme="synthwave"] .segmented-button,
+:root[data-theme="synthwave"] .text-input,
+:root[data-theme="synthwave"] .select-input,
+:root[data-theme="synthwave"] textarea {
+  border: 1px solid var(--sw-border);
+  background: rgba(20, 10, 61, 0.55);
+  color: var(--text);
+}
+
+:root[data-theme="synthwave"] .ghost-button:hover,
+:root[data-theme="synthwave"] .segmented-button:hover {
+  border-color: var(--sw-cyan);
+  color: var(--sw-cyan-bright);
+  box-shadow: var(--sw-glow-cyan);
+}
+
+:root[data-theme="synthwave"] *:focus-visible {
+  outline: 1px solid var(--sw-cyan);
+  outline-offset: 2px;
+  box-shadow: var(--sw-glow-cyan);
+}
+
+:root[data-theme="synthwave"] *::selection {
+  background: rgba(255, 59, 212, 0.45);
+  color: #fff;
+}
+
+:root[data-theme="synthwave"] .status-pill {
+  border: 1px solid var(--sw-border-strong);
+  background: rgba(37, 240, 255, 0.08);
+  color: var(--sw-cyan-bright);
+  text-shadow: var(--sw-glow-cyan);
+}
+
+:root[data-theme="synthwave"] *::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--sw-magenta) 0%, var(--sw-purple) 100%);
+  border-radius: 6px;
+}
+
+/* =========================================================================
+   NASA — 70s Mission Control: orange / cream / brown, boxy, data-dense
+   ========================================================================= */
+:root[data-theme="nasa"] {
+  color-scheme: light;
+  --nasa-cream: #efe3c9;
+  --nasa-cream-dim: #dfcfa8;
+  --nasa-paper: #f5ecd4;
+  --nasa-panel: #cfbd97;
+  --nasa-brown: #3a2410;
+  --nasa-brown-dark: #1a1208;
+  --nasa-orange: #d85519;
+  --nasa-orange-dark: #9a3a0c;
+  --nasa-ink: #10080a;
+
+  --bg: var(--nasa-cream);
+  --bg-elevated: var(--nasa-paper);
+  --bg-sidebar: var(--nasa-cream-dim);
+  --surface: var(--nasa-paper);
+  --surface-muted: var(--nasa-cream-dim);
+  --surface-strong: var(--nasa-panel);
+  --border: #8a6f3e;
+  --border-strong: var(--nasa-brown-dark);
+  --text: var(--nasa-ink);
+  --muted: #3a2410;
+  --muted-strong: var(--nasa-ink);
+  --accent: var(--nasa-orange);
+  --accent-soft: rgba(216, 85, 25, 0.14);
+  --danger: #9a2420;
+  --danger-soft: rgba(154, 36, 32, 0.14);
+  --success: #2d5520;
+  --workspace-bg: var(--nasa-cream);
+  --workspace-sidebar-bg: var(--nasa-cream-dim);
+  --workspace-inspector-bg: var(--nasa-cream-dim);
+  --panel-tint: rgba(58, 36, 16, 0.06);
+  --composer-bg: var(--nasa-paper);
+  --message-assistant-bg: var(--nasa-paper);
+  --message-assistant-border: #8a6f3e;
+  --message-user-bg: #d9c28a;
+  --message-user-border: var(--nasa-brown-dark);
+  --message-system-bg: #e8c98a;
+  --message-waiting-bg: var(--nasa-paper);
+  --shadow: none;
+}
+
+:root[data-theme="nasa"] body {
+  background: var(--nasa-cream);
+  color: var(--nasa-ink);
+}
+
+:root[data-theme="nasa"] h1,
+:root[data-theme="nasa"] h2,
+:root[data-theme="nasa"] h3,
+:root[data-theme="nasa"] h4,
+:root[data-theme="nasa"] strong {
+  color: var(--nasa-brown-dark);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+:root[data-theme="nasa"] .primary-button,
+:root[data-theme="nasa"] .ghost-button,
+:root[data-theme="nasa"] .segmented-button,
+:root[data-theme="nasa"] .text-input,
+:root[data-theme="nasa"] .select-input,
+:root[data-theme="nasa"] textarea,
+:root[data-theme="nasa"] .thread-card,
+:root[data-theme="nasa"] .status-pill,
+:root[data-theme="nasa"] .message-bubble {
+  border-radius: 2px;
+  border: 1px solid var(--nasa-brown);
+  box-shadow: inset 0 -2px 0 rgba(58, 36, 16, 0.2);
+}
+
+:root[data-theme="nasa"] .primary-button {
+  background: linear-gradient(180deg, #f07a3a 0%, #e85d1a 55%, #b84210 100%);
+  color: #fff1dc;
+  border: 1px solid var(--nasa-brown-dark);
+  font-weight: 700;
+}
+
+:root[data-theme="nasa"] .ghost-button,
+:root[data-theme="nasa"] .segmented-button {
+  background: linear-gradient(180deg, #f7efdc 0%, #e3d5b3 100%);
+  color: var(--nasa-brown-dark);
+  font-weight: 600;
+}
+
+:root[data-theme="nasa"] .segmented-button.active,
+:root[data-theme="nasa"] .settings-nav-button.active,
+:root[data-theme="nasa"] .nav-link.active {
+  background: var(--nasa-orange);
+  color: #fff1dc;
+  border-color: var(--nasa-brown-dark);
+  box-shadow: inset 0 2px 0 rgba(0, 0, 0, 0.15);
+}
+
+:root[data-theme="nasa"] .thread-card.active {
+  background: var(--nasa-panel);
+  color: var(--nasa-ink);
+  border-color: var(--nasa-brown-dark);
+  box-shadow: inset 0 0 0 2px var(--nasa-orange);
+}
+
+:root[data-theme="nasa"] .thread-card.active p,
+:root[data-theme="nasa"] .thread-card.active .thread-card-foot,
+:root[data-theme="nasa"] .thread-card.active .thread-card-mode {
+  color: var(--nasa-brown);
+}
+
+:root[data-theme="nasa"] *:focus-visible {
+  outline: 2px solid var(--nasa-orange);
+  outline-offset: 1px;
+}
+
+:root[data-theme="nasa"] *::selection {
+  background: var(--nasa-orange);
+  color: #fff1dc;
+}
+
+:root[data-theme="nasa"] .global-nav,
+:root[data-theme="nasa"] .settings-nav,
+:root[data-theme="nasa"] .workspace-main-header,
+:root[data-theme="nasa"] .conversation-shell,
+:root[data-theme="nasa"] .composer-shell {
+  border: 1px solid var(--nasa-brown);
+  background: var(--nasa-paper);
+}
+
+:root[data-theme="nasa"] .status-pill {
+  background: var(--nasa-panel);
+  color: var(--nasa-brown-dark);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+}
+
+:root[data-theme="nasa"] *::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+:root[data-theme="nasa"] *::-webkit-scrollbar-track {
+  background: var(--nasa-cream-dim);
+  border-left: 1px solid var(--nasa-brown);
+}
+:root[data-theme="nasa"] *::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #8a6a3a 0%, #5a3a1a 100%);
+  border: 1px solid var(--nasa-brown-dark);
+  border-radius: 0;
+}
+
+

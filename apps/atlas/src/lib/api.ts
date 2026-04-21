@@ -9,7 +9,13 @@ type BackendRuntime = {
 let runtimePromise: Promise<BackendRuntime> | null = null;
 let lastRuntime: BackendRuntime | null = null;
 
-export type ThemeMode = "light" | "dark";
+export type ThemeMode =
+  | "light"
+  | "dark"
+  | "crt-green"
+  | "crt-amber"
+  | "synthwave"
+  | "nasa";
 export type RunMode = "chat" | "compact";
 export type ReasoningMode = "off" | "on" | "low" | "medium" | "high";
 export type AttachmentKind = "image" | "file";
