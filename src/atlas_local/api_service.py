@@ -46,7 +46,6 @@ class _QueuedRunJob:
     chat_model: str
     temperature: float | None
     reasoning_mode: str | None
-    web_search_enabled: bool
     cross_chat_memory: bool
     auto_compact_long_chats: bool
     attachments: list[dict[str, Any]]
@@ -123,8 +122,6 @@ class AtlasBackendService:
             "chat_temperature": self.config.chat_temperature,
             "embed_model": self.config.embed_model,
             "ollama_url": self.config.ollama_url,
-            "web_search_available": bool(self.config.ollama_api_key.strip()),
-            "web_search_provider": "ollama" if self.config.ollama_api_key.strip() else "disabled",
             "runtime_mode": "chat-only",
             "busy": busy,
             "security": {
@@ -205,7 +202,6 @@ class AtlasBackendService:
                             chat_model=job.chat_model,
                             temperature=job.temperature,
                             reasoning_mode=job.reasoning_mode,
-                            web_search_enabled=job.web_search_enabled,
                             cross_chat_memory=job.cross_chat_memory,
                             auto_compact_long_chats=job.auto_compact_long_chats,
                             attachments=job.attachments,
@@ -645,7 +641,6 @@ class AtlasBackendService:
         chat_model: str | None = None,
         temperature: float | None = None,
         reasoning_mode: str | None = None,
-        web_search_enabled: bool = False,
         thread_title: str | None = None,
         cross_chat_memory: bool = True,
         auto_compact_long_chats: bool = True,
@@ -660,7 +655,6 @@ class AtlasBackendService:
             chat_model=chat_model,
             temperature=temperature,
             reasoning_mode=reasoning_mode,
-            web_search_enabled=web_search_enabled,
             thread_title=thread_title,
             cross_chat_memory=cross_chat_memory,
             auto_compact_long_chats=auto_compact_long_chats,
@@ -686,7 +680,6 @@ class AtlasBackendService:
             chat_model=None,
             temperature=None,
             reasoning_mode="off",
-            web_search_enabled=False,
             thread_title=str(thread.get("title", "") or thread_id),
             cross_chat_memory=True,
             auto_compact_long_chats=True,
@@ -807,7 +800,6 @@ class AtlasBackendService:
         chat_model: str | None,
         temperature: float | None,
         reasoning_mode: str | None,
-        web_search_enabled: bool,
         thread_title: str | None,
         cross_chat_memory: bool,
         auto_compact_long_chats: bool,
@@ -866,7 +858,6 @@ class AtlasBackendService:
                     chat_model=resolved_chat_model,
                     temperature=resolved_temperature,
                     reasoning_mode=reasoning_mode,
-                    web_search_enabled=web_search_enabled,
                     cross_chat_memory=cross_chat_memory,
                     auto_compact_long_chats=auto_compact_long_chats,
                     attachments=attachments,
@@ -909,7 +900,6 @@ class AtlasBackendService:
         chat_model: str,
         temperature: float | None,
         reasoning_mode: str | None,
-        web_search_enabled: bool,
         cross_chat_memory: bool,
         auto_compact_long_chats: bool,
         attachments: list[dict[str, Any]],
@@ -944,7 +934,6 @@ class AtlasBackendService:
                 chat_model=chat_model,
                 chat_temperature=temperature,
                 reasoning_mode=reasoning_mode,
-                web_search_enabled=web_search_enabled,
                 cross_chat_memory=cross_chat_memory,
                 auto_compact_long_chats=auto_compact_long_chats,
                 effective_context_window=effective_context_window,
@@ -972,25 +961,6 @@ class AtlasBackendService:
                 inputs={"query": prompt},
                 outputs={"count": len(state.get("retrieved_memories", [])), "items": state.get("retrieved_memories", [])[:5]},
             )
-
-            if web_search_enabled:
-                self._raise_if_cancelled(run_id)
-                self._emit_stage(run_id, "web_search")
-                self._emit_event(run_id, "web_search_started", {"query": prompt})
-                self._run_graph_node(run_id=run_id, node_name="retrieve_web", state=state, runtime=runtime)
-                web_results = state.get("web_search_results", [])
-                self._emit_trace(
-                    run_id,
-                    stage="web search",
-                    rationale="Fetched recent web search results for the current prompt.",
-                    inputs={"query": prompt},
-                    outputs={"count": len(web_results), "items": web_results[:5]},
-                )
-                self._emit_event(
-                    run_id,
-                    "web_search_results",
-                    {"query": prompt, "count": len(web_results), "results": web_results[:5]},
-                )
 
             self._raise_if_cancelled(run_id)
             prior_compacted_count = int(state.get("compacted_message_count", 0) or 0)

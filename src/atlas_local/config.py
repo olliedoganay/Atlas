@@ -26,14 +26,12 @@ class AppConfig:
     langgraph_checkpoint_db: Path
     mem0_history_db: Path
     ollama_url: str
-    ollama_api_key: str
     chat_model: str
     chat_temperature: float
     embed_model: str
     mem0_collection: str
     embed_dim: int
     memory_top_k: int
-    web_search_max_results: int
 
 
 def _repo_root() -> Path:
@@ -96,12 +94,10 @@ def load_config(
         langgraph_checkpoint_db=checkpoint_db,
         mem0_history_db=mem0_history_db,
         ollama_url=_value(source, "OLLAMA_URL", DEFAULT_OLLAMA_URL),
-        ollama_api_key=_value(source, "OLLAMA_API_KEY", ""),
         chat_model=_value(source, "CHAT_MODEL", DEFAULT_CHAT_MODEL),
         chat_temperature=float(_value(source, "CHAT_TEMPERATURE", str(DEFAULT_CHAT_TEMPERATURE))),
         embed_model=_value(source, "EMBED_MODEL", DEFAULT_EMBED_MODEL),
         mem0_collection=_value(source, "MEM0_COLLECTION", DEFAULT_MEM0_COLLECTION),
         embed_dim=int(_value(source, "EMBED_DIM", str(DEFAULT_EMBED_DIM))),
         memory_top_k=int(_value(source, "MEMORY_TOP_K", str(DEFAULT_MEMORY_TOP_K))),
-        web_search_max_results=int(_value(source, "WEB_SEARCH_MAX_RESULTS", "5")),
     )

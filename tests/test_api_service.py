@@ -145,7 +145,7 @@ class GraphExecutionSequenceTests(unittest.TestCase):
     def test_sequences_match_chat_only_runtime(self) -> None:
         self.assertEqual(
             pre_synthesis_node_sequence(),
-            ("retrieve_memories", "retrieve_web"),
+            ("retrieve_memories",),
         )
         self.assertEqual(
             post_synthesis_node_sequence(),
@@ -155,7 +155,6 @@ class GraphExecutionSequenceTests(unittest.TestCase):
             execution_node_sequence(),
             (
                 "retrieve_memories",
-                "retrieve_web",
                 "synthesize_answer",
                 "extract_updates",
                 "persist",
@@ -462,7 +461,6 @@ class ContextCompactionTests(unittest.TestCase):
                 chat_model="gpt-oss:20b",
                 temperature=0.2,
                 reasoning_mode=None,
-                web_search_enabled=False,
                 cross_chat_memory=False,
                 auto_compact_long_chats=True,
                 attachments=[],

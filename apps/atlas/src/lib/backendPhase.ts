@@ -11,6 +11,23 @@ type BackendPhaseOptions = {
   bootStartedAt: number;
 };
 
+export function resolveBackendPhase({
+  hasStatus,
+  isPending,
+  isFetching,
+  bootStartedAt,
+  now,
+}: BackendPhaseOptions & { now: number }): BackendPhase {
+  const graceEndsAt = bootStartedAt + BACKEND_STARTUP_GRACE_MS;
+  if (hasStatus) {
+    return "online";
+  }
+  if (isPending || isFetching || now < graceEndsAt) {
+    return "starting";
+  }
+  return "offline";
+}
+
 export function useBackendPhase({
   hasStatus,
   isPending,
@@ -33,11 +50,11 @@ export function useBackendPhase({
     return () => window.clearTimeout(timer);
   }, [graceEndsAt, hasStatus, isFetching, isPending]);
 
-  if (hasStatus) {
-    return "online";
-  }
-  if (isPending || isFetching || now < graceEndsAt) {
-    return "starting";
-  }
-  return "offline";
+  return resolveBackendPhase({
+    hasStatus,
+    isPending,
+    isFetching,
+    bootStartedAt,
+    now,
+  });
 }

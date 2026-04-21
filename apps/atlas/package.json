@@ -10,6 +10,7 @@
     "build:backend": "..\\..\\.venv\\Scripts\\python.exe ..\\..\\scripts\\build_atlas_backend.py",
     "build:release": "npm run build:backend && npm run build",
     "preview": "vite preview",
+    "test": "vitest run",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -37,7 +38,9 @@
     "@types/react-dom": "^19.1.6",
     "@types/react-syntax-highlighter": "^15.5.13",
     "@vitejs/plugin-react": "^4.6.0",
+    "jsdom": "^26.1.0",
     "typescript": "~5.8.3",
-    "vite": "^7.0.4"
+    "vite": "^7.0.4",
+    "vitest": "^3.2.4"
   }
 }

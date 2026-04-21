@@ -49,6 +49,10 @@ if (-not $SkipFrontend) {
   Write-Host "Running desktop release build chain..." -ForegroundColor Cyan
   Push-Location $atlasDir
   try {
+    npm.cmd test
+    if ($LASTEXITCODE -ne 0) {
+      throw "Desktop test suite failed with exit code $LASTEXITCODE."
+    }
     npm.cmd run build:release
     if ($LASTEXITCODE -ne 0) {
       throw "Desktop release build failed with exit code $LASTEXITCODE."
