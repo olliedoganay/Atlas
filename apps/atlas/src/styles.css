@@ -2626,6 +2626,60 @@ pre {
   color: var(--text);
 }
 
+.composer-context-meter {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-right: auto;
+  min-height: var(--control-height);
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  color: var(--muted-strong);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.composer-context-meter:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+}
+
+.composer-context-meter:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.composer-context-meter-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: color-mix(in srgb, var(--success) 22%, transparent);
+  transition: width 240ms ease;
+  pointer-events: none;
+}
+
+.composer-context-meter-warning .composer-context-meter-fill {
+  background: color-mix(in srgb, #d28a2a 28%, transparent);
+}
+
+.composer-context-meter-critical .composer-context-meter-fill {
+  background: color-mix(in srgb, var(--danger) 32%, transparent);
+}
+
+.composer-context-meter-critical {
+  border-color: color-mix(in srgb, var(--danger) 48%, var(--border));
+  color: var(--danger);
+}
+
+.composer-context-meter-label {
+  position: relative;
+  z-index: 1;
+}
+
 .composer-select-shell {
   position: relative;
 }

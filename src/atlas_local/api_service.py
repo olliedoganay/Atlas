@@ -445,6 +445,63 @@ class AtlasBackendService:
             last_prompt=_latest_user_text({"messages": branch_messages}) if branch_messages else "",
         )
 
+    def get_thread_context_usage(
+        self, *, user_id: str | None, thread_id: str
+    ) -> dict[str, Any]:
+        if user_id:
+            self._ensure_user_unlocked(user_id)
+        snapshot = self._get_snapshot(user_id=user_id, thread_id=thread_id)
+        messages = list(snapshot.values.get("messages", []))
+        thread_summary = str(snapshot.values.get("thread_summary", "") or "")
+        compacted_message_count = int(snapshot.values.get("compacted_message_count", 0) or 0)
+        detected_context_window = int(snapshot.values.get("detected_context_window", 0) or 0)
+
+        chat_model = ""
+        if user_id:
+            try:
+                thread_record = self.run_store.get_thread(user_id=user_id, thread_id=thread_id)
+            except Exception:
+                thread_record = None
+            if thread_record:
+                chat_model = str(thread_record.get("chat_model", "") or "")
+        if not chat_model:
+            chat_model = self.config.default_chat_model
+
+        try:
+            effective_context_window = int(
+                self.app.llm_provider.effective_context_window(chat_model) or 0
+            )
+        except Exception:
+            effective_context_window = 0
+        if effective_context_window <= 0:
+            effective_context_window = detected_context_window
+
+        representation_tokens = self._count_thread_representation_tokens(
+            model=chat_model,
+            messages=messages,
+            thread_summary=thread_summary,
+            compacted_message_count=compacted_message_count,
+        )
+
+        auto_compact_ratio = 0.72
+        auto_compact_threshold = (
+            max(1024, int(effective_context_window * auto_compact_ratio))
+            if effective_context_window > 0
+            else 0
+        )
+
+        return {
+            "thread_id": thread_id,
+            "user_id": user_id or "",
+            "chat_model": chat_model,
+            "context_window": effective_context_window,
+            "auto_compact_ratio": auto_compact_ratio,
+            "auto_compact_threshold": auto_compact_threshold,
+            "representation_tokens": representation_tokens,
+            "compacted_message_count": compacted_message_count,
+            "message_count": len(messages),
+        }
+
     def get_thread_history(self, *, user_id: str | None, thread_id: str) -> list[dict[str, Any]]:
         if user_id:
             self._ensure_user_unlocked(user_id)

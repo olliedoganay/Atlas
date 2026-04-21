@@ -255,6 +255,10 @@ def create_api_app(service: AtlasBackendService | None = None) -> FastAPI:
     def thread_history(thread_id: str, user_id: str | None = Query(default=None)) -> list[dict[str, Any]]:
         return _handle_runtime(lambda: backend().get_thread_history(user_id=user_id, thread_id=thread_id))
 
+    @app.get("/threads/{thread_id}/context")
+    def thread_context_usage(thread_id: str, user_id: str | None = Query(default=None)) -> dict[str, Any]:
+        return _handle_runtime(lambda: backend().get_thread_context_usage(user_id=user_id, thread_id=thread_id))
+
     @app.get("/threads/{thread_id}/runs")
     def thread_runs(thread_id: str, user_id: str | None = Query(default=None)) -> list[dict[str, Any]]:
         return _handle_runtime(lambda: backend().list_thread_runs(user_id=user_id, thread_id=thread_id))
