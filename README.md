@@ -224,6 +224,23 @@ apps\atlas\src-tauri\target\release\bundle\
 
 Atlas builds MSI as the canonical Windows installer. Microsoft Store submissions can accept MSI/EXE apps, but Microsoft recommends MSIX for the most integrated Store experience; producing MSIX from this Tauri build requires a separate MSIX packaging step outside the Tauri bundler.
 
+Build a Microsoft Store MSIX package:
+
+```powershell
+$env:ATLAS_MSIX_IDENTITY_NAME = "<Package/Identity/Name from Partner Center>"
+$env:ATLAS_MSIX_PUBLISHER = "<Package/Identity/Publisher from Partner Center>"
+$env:ATLAS_MSIX_PUBLISHER_DISPLAY_NAME = "<PublisherDisplayName from Partner Center>"
+.\scripts\build_atlas_msix.ps1
+```
+
+The MSIX artifact is written under:
+
+```text
+output\msix\packages\
+```
+
+Use the exact Product identity values from Partner Center before uploading the MSIX. Placeholder identity values are only useful for checking the package layout locally.
+
 ## Repository Layout
 
 - `src/atlas_local`: Python backend, API, graph execution, memory, discovery, security helpers, code runner, and CLI entrypoints
