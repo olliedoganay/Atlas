@@ -823,6 +823,38 @@ class SearchTests(unittest.TestCase):
         self.assertEqual(payload["current_thread_results"][0]["match_type"], "thread")
         self.assertEqual(payload["current_thread_results"][1]["history_index"], 1)
 
+    def test_search_threads_uses_run_search_index_without_loading_snapshots(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = load_config(project_root=Path(temp_dir), env={})
+            store = RunStore(config)
+            run = store.create_run(
+                mode="chat",
+                user_id="research_user",
+                thread_id="archive",
+                chat_model="gpt-oss:20b",
+                temperature=0.2,
+                prompt="what do we know about Atlantis?",
+                thread_title="Island notes",
+                status="queued",
+                history_after_message_count=1,
+            )
+            store.complete_run(run["run_id"], answer="Atlantis is described as a lost island civilization.")
+            service = AtlasBackendService.__new__(AtlasBackendService)
+            service.run_store = store
+            service._get_snapshot = lambda **_: (_ for _ in ()).throw(AssertionError("snapshot loaded"))
+
+            payload = AtlasBackendService.search_threads(
+                service,
+                user_id="research_user",
+                query="lost island",
+                current_thread_id="archive",
+                limit=5,
+            )
+
+        self.assertEqual(payload["current_thread_results"][0]["match_type"], "message")
+        self.assertEqual(payload["current_thread_results"][0]["role"], "assistant")
+        self.assertEqual(payload["current_thread_results"][0]["history_index"], 1)
+
 
 class ManualCompactionTests(unittest.TestCase):
     def test_manual_compact_context_summarizes_older_turns(self) -> None:
@@ -1022,8 +1054,18 @@ class QueuedExecutionTests(unittest.TestCase):
 
             service._execute_run = fake_execute_run  # type: ignore[method-assign]
             try:
-                first = service.start_chat(prompt="first", user_id="research_user", thread_id="one")
-                second = service.start_chat(prompt="second", user_id="research_user", thread_id="two")
+                first = service.start_chat(
+                    prompt="first",
+                    user_id="research_user",
+                    thread_id="one",
+                    chat_model="queue-test-model",
+                )
+                second = service.start_chat(
+                    prompt="second",
+                    user_id="research_user",
+                    thread_id="two",
+                    chat_model="queue-test-model",
+                )
 
                 self.assertEqual(first["status"], "queued")
                 self.assertEqual(second["status"], "queued")
@@ -1078,8 +1120,18 @@ class QueuedExecutionTests(unittest.TestCase):
 
             service._execute_run = fake_execute_run  # type: ignore[method-assign]
             try:
-                first = service.start_chat(prompt="first", user_id="research_user", thread_id="one")
-                second = service.start_chat(prompt="second", user_id="research_user", thread_id="two")
+                first = service.start_chat(
+                    prompt="first",
+                    user_id="research_user",
+                    thread_id="one",
+                    chat_model="queue-test-model",
+                )
+                second = service.start_chat(
+                    prompt="second",
+                    user_id="research_user",
+                    thread_id="two",
+                    chat_model="queue-test-model",
+                )
 
                 self.assertTrue(first_started.wait(1.0))
                 response = service.cancel_run(second["run_id"])
@@ -1123,7 +1175,12 @@ class QueuedExecutionTests(unittest.TestCase):
 
             service._execute_run = fake_execute_run  # type: ignore[method-assign]
             try:
-                run = service.start_chat(prompt="first", user_id="research_user", thread_id="one")
+                run = service.start_chat(
+                    prompt="first",
+                    user_id="research_user",
+                    thread_id="one",
+                    chat_model="queue-test-model",
+                )
                 self.assertTrue(started.wait(1.0))
                 response = service.cancel_run(run["run_id"])
 

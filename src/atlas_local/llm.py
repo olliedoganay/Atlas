@@ -13,10 +13,15 @@ from .config import AppConfig
 
 
 def format_runtime_error(config: AppConfig, exc: Exception, *, chat_model: str | None = None) -> RuntimeError:
-    resolved_chat_model = chat_model or config.chat_model
+    resolved_chat_model = (chat_model or config.chat_model).strip()
+    model_detail = (
+        f"Requested chat_model={resolved_chat_model!r}, "
+        if resolved_chat_model
+        else "No chat model was selected. "
+    )
     message = (
         "Ollama request failed. "
-        f"Configured chat_model={resolved_chat_model!r}, "
+        f"{model_detail}"
         f"embed_model={config.embed_model!r}, "
         f"base_url={config.ollama_url!r}. "
         "Make sure Ollama is running and the required models are pulled."
@@ -39,6 +44,8 @@ class LLMProvider:
         reasoning: bool | str | None = None,
     ) -> ChatOllama:
         resolved_model = (model or self.config.chat_model).strip()
+        if not resolved_model:
+            raise RuntimeError("Select a local Ollama model before starting this chat.")
         resolved_temperature = None if temperature is None else float(temperature)
         resolved_reasoning = _resolve_reasoning_for_model(resolved_model, reasoning)
         cache_key = (resolved_model, resolved_temperature, repr(resolved_reasoning))
@@ -57,6 +64,8 @@ class LLMProvider:
 
     def json_chat(self, model: str | None = None) -> ChatOllama:
         resolved_model = (model or self.config.chat_model).strip()
+        if not resolved_model:
+            raise RuntimeError("Select a local Ollama model before starting this chat.")
         if resolved_model not in self._json_chat_models:
             self._json_chat_models[resolved_model] = ChatOllama(
                 model=resolved_model,

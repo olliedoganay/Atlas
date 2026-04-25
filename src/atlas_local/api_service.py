@@ -117,7 +117,7 @@ class AtlasBackendService:
             "status": "ok",
             "product_name": "Atlas",
             "backend": "Atlas local runtime",
-            "default_chat_model": self.config.chat_model,
+            "configured_chat_model": self.config.chat_model,
             "chat_model": self.config.chat_model,
             "default_chat_temperature": self.config.chat_temperature,
             "chat_temperature": self.config.chat_temperature,
@@ -235,7 +235,7 @@ class AtlasBackendService:
     def list_models(self) -> dict[str, Any]:
         catalog = self._get_model_catalog()
         return {
-            "default_model": self.config.chat_model,
+            "configured_chat_model": self.config.chat_model,
             "default_temperature": self.config.chat_temperature,
             "temperature_presets": [
                 {"label": f"{value:.1f}", "value": value}
@@ -398,7 +398,7 @@ class AtlasBackendService:
                 as_node="persist",
             )
 
-        return self.run_store.upsert_thread(
+        thread_record = self.run_store.upsert_thread(
             user_id=user_id,
             thread_id=duplicate_thread_id,
             title=duplicate_title,
@@ -407,6 +407,17 @@ class AtlasBackendService:
             last_mode=str(source_thread.get("last_mode", "chat") or "chat"),
             last_prompt=str(source_thread.get("last_prompt", "") or ""),
         )
+        replace_search_messages = getattr(self.run_store, "replace_thread_search_messages", None)
+        if callable(replace_search_messages):
+            replace_search_messages(
+                user_id=user_id,
+                thread_id=duplicate_thread_id,
+                title=str(thread_record.get("title", "") or duplicate_title),
+                chat_model=str(thread_record.get("chat_model", "") or ""),
+                updated_at=str(thread_record.get("updated_at", "") or ""),
+                messages=_messages_to_search_index_items(history_messages),
+            )
+        return thread_record
 
     def branch_thread(self, *, user_id: str, thread_id: str, after_message_count: int) -> dict[str, Any]:
         if not user_id.strip():
@@ -439,7 +450,7 @@ class AtlasBackendService:
                 as_node="persist",
             )
 
-        return self.run_store.upsert_thread(
+        thread_record = self.run_store.upsert_thread(
             user_id=user_id,
             thread_id=branch_thread_id,
             title=branch_title,
@@ -448,6 +459,17 @@ class AtlasBackendService:
             last_mode="chat",
             last_prompt=_latest_user_text({"messages": branch_messages}) if branch_messages else "",
         )
+        replace_search_messages = getattr(self.run_store, "replace_thread_search_messages", None)
+        if callable(replace_search_messages):
+            replace_search_messages(
+                user_id=user_id,
+                thread_id=branch_thread_id,
+                title=str(thread_record.get("title", "") or branch_title),
+                chat_model=str(thread_record.get("chat_model", "") or ""),
+                updated_at=str(thread_record.get("updated_at", "") or ""),
+                messages=_messages_to_search_index_items(branch_messages),
+            )
+        return thread_record
 
     def get_thread_context_usage(
         self, *, user_id: str | None, thread_id: str
@@ -469,14 +491,16 @@ class AtlasBackendService:
             if thread_record:
                 chat_model = str(thread_record.get("chat_model", "") or "")
         if not chat_model:
-            chat_model = self.config.default_chat_model
+            chat_model = self.config.chat_model
 
-        try:
-            effective_context_window = int(
-                self.app.llm_provider.effective_context_window(chat_model) or 0
-            )
-        except Exception:
-            effective_context_window = 0
+        effective_context_window = 0
+        if chat_model:
+            try:
+                effective_context_window = int(
+                    self.app.llm_provider.effective_context_window(chat_model) or 0
+                )
+            except Exception:
+                effective_context_window = 0
         if effective_context_window <= 0:
             effective_context_window = detected_context_window
 
@@ -551,6 +575,11 @@ class AtlasBackendService:
             }
 
         thread_items = self.list_threads(user_id=user_id)
+        indexed_message_matches = self._search_indexed_messages(
+            user_id=user_id,
+            query=query,
+            limit=max(50, limit * 12),
+        )
         current_results: list[dict[str, Any]] = []
         other_results: list[dict[str, Any]] = []
 
@@ -562,6 +591,7 @@ class AtlasBackendService:
                 user_id=user_id,
                 thread=thread,
                 normalized_query=normalized_query,
+                indexed_messages=indexed_message_matches.get(thread_id, []) if indexed_message_matches is not None else None,
             )
             if thread_id == (current_thread_id or ""):
                 current_results.extend(matches)
@@ -603,6 +633,7 @@ class AtlasBackendService:
         user_id: str,
         thread: dict[str, Any],
         normalized_query: str,
+        indexed_messages: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         thread_id = str(thread.get("thread_id", "") or "").strip()
         title = str(thread.get("title", "") or thread_id).strip() or thread_id
@@ -627,8 +658,19 @@ class AtlasBackendService:
                 }
             )
 
-        history = self.get_thread_history(user_id=user_id, thread_id=thread_id)
-        for history_index, item in enumerate(history):
+        if indexed_messages is None:
+            history = self.get_thread_history(user_id=user_id, thread_id=thread_id)
+            indexed_messages = [
+                {
+                    "role": str(item.get("role", "") or ""),
+                    "content": str(item.get("content", "") or ""),
+                    "history_index": history_index,
+                    "updated_at": updated_at,
+                    "chat_model": chat_model,
+                }
+                for history_index, item in enumerate(history)
+            ]
+        for item in indexed_messages:
             role = str(item.get("role", "") or "")
             if role not in {"user", "assistant"}:
                 continue
@@ -639,15 +681,28 @@ class AtlasBackendService:
                 {
                     "thread_id": thread_id,
                     "thread_title": title,
-                    "chat_model": chat_model,
-                    "updated_at": updated_at,
+                    "chat_model": str(item.get("chat_model", "") or chat_model),
+                    "updated_at": str(item.get("updated_at", "") or updated_at),
                     "match_type": "message",
                     "role": role,
-                    "history_index": history_index,
+                    "history_index": item.get("history_index"),
                     "snippet": _build_search_snippet(content, normalized_query),
                 }
             )
         return results
+
+    def _search_indexed_messages(self, *, user_id: str, query: str, limit: int) -> dict[str, list[dict[str, Any]]] | None:
+        search_messages = getattr(self.run_store, "search_messages", None)
+        if not callable(search_messages):
+            return None
+        rows = search_messages(user_id=user_id, query=query, limit=limit)
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            thread_id = str(row.get("thread_id", "") or "").strip()
+            if not thread_id:
+                continue
+            grouped.setdefault(thread_id, []).append(row)
+        return grouped
 
     def subscribe(self, run_id: str) -> queue.Queue[RunEvent]:
         return self.run_hub.subscribe(run_id)
@@ -1506,7 +1561,10 @@ class AtlasBackendService:
                     f"Thread '{thread_id}' is locked to chat model '{locked_model}'. Start a new chat to use '{requested}'."
                 )
             return locked_model
-        return requested or self.config.chat_model
+        resolved = requested or self.config.chat_model
+        if not resolved:
+            raise RuntimeError("Select a local Ollama model before starting this chat.")
+        return resolved
 
     def _resolve_thread_temperature(
         self,
@@ -1907,6 +1965,22 @@ def _message_to_history_parts(message: Any) -> tuple[str, list[dict[str, Any]]]:
         return content, attachments
     fallback_content, fallback_attachments = _message_content_to_history_parts(getattr(message, "content", ""))
     return content or fallback_content, fallback_attachments
+
+
+def _messages_to_search_index_items(messages: list[Any]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for message in messages:
+        role = ""
+        if isinstance(message, HumanMessage):
+            role = "user"
+        elif isinstance(message, AIMessage):
+            role = "assistant"
+        if not role:
+            continue
+        content, _attachments = _message_to_history_parts(message)
+        if content.strip():
+            items.append({"role": role, "content": content})
+    return items
 
 
 def _message_content_to_history_parts(content: Any) -> tuple[str, list[dict[str, Any]]]:

@@ -310,6 +310,12 @@ LANGUAGE_ALIASES: dict[str, str] = {
 
 
 CLIENT_LANGUAGES = {"html", "htm"}
+DEFAULT_RUNNER_TIMEOUT_SECONDS = 120
+DEFAULT_GUI_RUNNER_TIMEOUT_SECONDS = 900
+RUNNER_NETWORK_ENV = "ATLAS_RUNNER_NETWORK"
+RUNNER_TIMEOUT_ENV = "ATLAS_RUNNER_TIMEOUT_SECONDS"
+RUNNER_GUI_TIMEOUT_ENV = "ATLAS_RUNNER_GUI_TIMEOUT_SECONDS"
+RUNNER_ALLOWED_NETWORKS = {"none", "bridge"}
 
 
 def resolve_language(language: str) -> str | None:
@@ -450,6 +456,27 @@ def resolve_plan(language: str, code: str, progress: "Any | None" = None) -> Run
     return RunPlan(image=spec.image, filename=spec.filename, command=list(spec.command))
 
 
+def _runner_network_policy(plan: RunPlan) -> str:
+    configured = os.environ.get(RUNNER_NETWORK_ENV, "none").strip().lower() or "none"
+    if configured not in RUNNER_ALLOWED_NETWORKS:
+        configured = "none"
+    if plan.ports and configured == "none":
+        return "bridge"
+    return configured
+
+
+def _runner_timeout_seconds(plan: RunPlan) -> int:
+    env_key = RUNNER_GUI_TIMEOUT_ENV if plan.gui else RUNNER_TIMEOUT_ENV
+    default_value = DEFAULT_GUI_RUNNER_TIMEOUT_SECONDS if plan.gui else DEFAULT_RUNNER_TIMEOUT_SECONDS
+    raw = os.environ.get(env_key, "").strip()
+    if not raw:
+        return default_value
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return default_value
+
+
 def docker_status() -> dict[str, Any]:
     binary = _docker_binary()
     if not binary:
@@ -486,6 +513,8 @@ class RunnerProcess:
     container_name: str
     work_dir: Path
     started_at: float
+    timeout_seconds: int
+    network: str
     process: subprocess.Popen
     events: queue.Queue = field(default_factory=queue.Queue)
     history: list[dict[str, Any]] = field(default_factory=list)
@@ -511,12 +540,16 @@ class CodeRunner:
         if not binary:
             raise RuntimeError("Docker CLI was not found on PATH.")
 
+        self._cleanup_finished_runs()
+        self._cleanup_stale_containers(binary)
         plan = resolve_plan(resolved, code)
         run_id = uuid.uuid4().hex[:16]
         container_name = f"atlas-run-{run_id}"
         work_dir = Path(tempfile.mkdtemp(prefix=f"atlas-run-{run_id}-"))
         source_path = work_dir / plan.filename
         source_path.write_text(code, encoding="utf-8")
+        network = _runner_network_policy(plan)
+        timeout_seconds = _runner_timeout_seconds(plan)
 
         docker_args: list[str] = [
             binary,
@@ -531,6 +564,18 @@ class CodeRunner:
             "2",
             "--pids-limit",
             "512",
+            "--network",
+            network,
+            "--security-opt",
+            "no-new-privileges",
+            "--cap-drop",
+            "ALL",
+            "--label",
+            "atlas.runner=1",
+            "--label",
+            f"atlas.runner.run_id={run_id}",
+            "--label",
+            f"atlas.runner.owner_pid={os.getpid()}",
             "-v",
             f"{work_dir}:/work:ro",
             "-w",
@@ -567,6 +612,8 @@ class CodeRunner:
             container_name=container_name,
             work_dir=work_dir,
             started_at=time.time(),
+            timeout_seconds=timeout_seconds,
+            network=network,
             process=process,
         )
         with self._lock:
@@ -575,8 +622,15 @@ class CodeRunner:
         threading.Thread(target=self._pump_stream, args=(runner, process.stdout, "stdout"), daemon=True).start()
         threading.Thread(target=self._pump_stream, args=(runner, process.stderr, "stderr"), daemon=True).start()
         threading.Thread(target=self._wait_for_exit, args=(runner,), daemon=True).start()
+        threading.Thread(target=self._enforce_timeout, args=(runner,), daemon=True).start()
 
-        response: dict[str, Any] = {"run_id": run_id, "language": resolved, "container": container_name}
+        response: dict[str, Any] = {
+            "run_id": run_id,
+            "language": resolved,
+            "container": container_name,
+            "network": network,
+            "timeout_seconds": timeout_seconds,
+        }
         if plan.gui:
             host_port = next(iter(plan.ports.keys()))
             response["vnc_url"] = (
@@ -606,17 +660,7 @@ class CodeRunner:
         runner = self._runs.get(run_id)
         if not runner:
             return {"run_id": run_id, "status": "unknown"}
-        binary = _docker_binary()
-        if binary:
-            try:
-                subprocess.run(
-                    [binary, "kill", runner.container_name],
-                    capture_output=True,
-                    timeout=10,
-                    check=False,
-                )
-            except (OSError, subprocess.TimeoutExpired):
-                pass
+        self._kill_container(runner)
         try:
             runner.process.kill()
         except OSError:
@@ -668,6 +712,89 @@ class CodeRunner:
         for subscriber in subscribers:
             subscriber.put(event)
         shutil.rmtree(runner.work_dir, ignore_errors=True)
+
+    def _enforce_timeout(self, runner: RunnerProcess) -> None:
+        deadline = runner.started_at + max(1, runner.timeout_seconds)
+        while time.time() < deadline:
+            with runner.lock:
+                if runner.finished:
+                    return
+            time.sleep(min(1.0, max(0.05, deadline - time.time())))
+        with runner.lock:
+            if runner.finished:
+                return
+        self._emit(
+            runner,
+            {
+                "type": "output",
+                "stream": "stderr",
+                "chunk": f"[atlas-runner] stopped after {runner.timeout_seconds}s timeout\n",
+            },
+        )
+        self._kill_container(runner)
+        try:
+            runner.process.kill()
+        except OSError:
+            pass
+
+    def _kill_container(self, runner: RunnerProcess) -> None:
+        binary = _docker_binary()
+        if not binary:
+            return
+        try:
+            subprocess.run(
+                [binary, "kill", runner.container_name],
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+    def _cleanup_finished_runs(self) -> None:
+        with self._lock:
+            finished = [run_id for run_id, runner in self._runs.items() if runner.finished]
+            for run_id in finished:
+                self._runs.pop(run_id, None)
+
+    def _cleanup_stale_containers(self, binary: str) -> None:
+        with self._lock:
+            active_names = {runner.container_name for runner in self._runs.values() if not runner.finished}
+        try:
+            completed = subprocess.run(
+                [
+                    binary,
+                    "ps",
+                    "-a",
+                    "--filter",
+                    "label=atlas.runner=1",
+                    "--format",
+                    "{{.Names}}",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return
+        if completed.returncode != 0:
+            return
+        stale_names = [
+            line.strip()
+            for line in completed.stdout.splitlines()
+            if line.strip() and line.strip() not in active_names
+        ]
+        for name in stale_names:
+            try:
+                subprocess.run(
+                    [binary, "rm", "-f", name],
+                    capture_output=True,
+                    timeout=10,
+                    check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                continue
 
 
 _runner_singleton: CodeRunner | None = None

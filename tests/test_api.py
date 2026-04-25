@@ -37,7 +37,7 @@ class FakeService:
             "status": "ok",
             "product_name": "Atlas",
             "backend": "Atlas local runtime",
-            "default_chat_model": "test-model",
+            "configured_chat_model": "test-model",
             "chat_model": "test-model",
             "default_chat_temperature": None,
             "chat_temperature": None,
@@ -49,7 +49,7 @@ class FakeService:
 
     def list_models(self):
         return {
-            "default_model": "test-model",
+            "configured_chat_model": "test-model",
             "default_temperature": None,
             "ollama_online": True,
             "has_local_models": True,
@@ -79,7 +79,7 @@ class FakeService:
             "atlas": {
                 "status": "memory-degraded",
                 "summary": "Atlas can start chats, but memory retrieval is degraded until the embed model is installed.",
-                "notes": ["The configured default chat model 'test-model' is installed."],
+                "notes": ["Atlas is configured to preselect 'test-model'."],
                 "ollama_url": "http://127.0.0.1:11434",
                 "ollama_online": True,
                 "has_local_chat_models": True,
@@ -103,11 +103,11 @@ class FakeService:
             "recommended_models": [
                 {
                     "name": "test-model",
-                    "title": "Default chat model",
+                    "title": "Configured chat model",
                     "use_case": "chat",
                     "atlas_role": "chat",
                     "installed": True,
-                    "configured_default": True,
+                    "configured_model": True,
                     "supports_images": False,
                     "fit": "good",
                     "runtime": "GPU",

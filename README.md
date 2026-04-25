@@ -2,7 +2,7 @@
 
 Atlas is a local-first desktop app for working with local Ollama models. It provides a multi-thread chat workspace, profile-scoped memory, hardware-aware model discovery, run inspection, and a built-in code runner while keeping Atlas-managed state on the local machine.
 
-Current version: `1.0.6`
+Current version: `1.0.7`
 
 ## Highlights
 
@@ -35,7 +35,7 @@ Atlas does not currently publish macOS or Linux installers. Use the source workf
 - Node.js 20+
 - Rust stable toolchain with Cargo
 - Ollama running locally
-- A local chat model, for example `gpt-oss:20b`
+- At least one local chat model of your choice
 - A local embedding model, for example `nomic-embed-text:latest`
 - Tauri prerequisites for your platform: `https://v2.tauri.app/start/prerequisites/`
 
@@ -49,7 +49,8 @@ python -m venv .venv
 pip install -r requirements.txt
 pip install -e .
 Copy-Item .env.example .env
-ollama pull gpt-oss:20b
+# Pull any chat model you prefer. This is only an example.
+ollama pull llama3.1:8b
 ollama pull nomic-embed-text:latest
 Set-Location apps\atlas
 npm install
@@ -64,7 +65,8 @@ source .venv/bin/activate
 pip install -r requirements.txt
 pip install -e .
 cp .env.example .env
-ollama pull gpt-oss:20b
+# Pull any chat model you prefer. This is only an example.
+ollama pull llama3.1:8b
 ollama pull nomic-embed-text:latest
 cd apps/atlas
 npm install
@@ -133,7 +135,7 @@ Copy `.env.example` to `.env` and adjust it if needed.
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `OLLAMA_URL` | Local Ollama base URL | `http://127.0.0.1:11434` |
-| `CHAT_MODEL` | Default chat model for new threads | `gpt-oss:20b` |
+| `CHAT_MODEL` | Optional preselected chat model for new draft threads; leave blank to choose per thread | blank |
 | `CHAT_TEMPERATURE` | Optional default temperature; blank uses the selected model default | blank |
 | `EMBED_MODEL` | Embedding model used for memory retrieval | `nomic-embed-text:latest` |
 | `QDRANT_PATH` | Local vector-store directory | `.data/qdrant` |
@@ -154,6 +156,9 @@ Runtime overrides:
 | `ATLAS_API_PORT` | Port for direct backend runs | `8765` |
 | `ATLAS_ALLOWED_ORIGINS` | Comma-separated explicit origin allowlist override | built-in Tauri/dev origins |
 | `ATLAS_ALLOW_INSECURE_LOCALHOST` | Allow localhost-only direct backend development without the managed instance token | off |
+| `ATLAS_DISCOVERY_MANIFEST` | Optional path to a versioned Discovery recommendation manifest | bundled manifest |
+| `VITE_ATLAS_BACKEND_URL` | Frontend-only direct backend URL for plain browser/Vite development | unset |
+| `VITE_ATLAS_BACKEND_TOKEN` | Optional token paired with `VITE_ATLAS_BACKEND_URL` | unset |
 
 `ATLAS_INSTANCE_TOKEN` is managed automatically by the Tauri shell and direct launchers. Do not hardcode it in `.env` for normal usage.
 
@@ -169,7 +174,9 @@ Runner behavior:
 
 - Dependencies are installed on demand based on snippet imports.
 - Python GUI snippets can open a live embedded noVNC view for supported toolkits.
-- Docker-backed runs use disposable containers with CPU, memory, and PID limits.
+- Docker-backed runs use disposable containers with CPU, memory, PID, timeout, and network controls.
+- Non-GUI Docker runs default to `--network none`; set `ATLAS_RUNNER_NETWORK=bridge` only when snippets need outbound dependency resolution.
+- `ATLAS_RUNNER_TIMEOUT_SECONDS` controls non-GUI run TTL and `ATLAS_RUNNER_GUI_TIMEOUT_SECONDS` controls GUI run TTL.
 - If Docker is unavailable, Atlas shows a retry path in the run window.
 
 ## Architecture and Security

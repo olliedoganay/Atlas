@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "models": [
+    {
+      "name": "llama3.1:8b",
+      "title": "Popular general chat",
+      "use_case": "chat",
+      "atlas_role": "chat",
+      "min_ram_gb": 12.0,
+      "good_ram_gb": 16.0,
+      "min_vram_gb": 8.0,
+      "good_vram_gb": 10.0,
+      "supports_images": false
+    },
+    {
+      "name": "qwen3:8b",
+      "title": "Current Qwen all-rounder",
+      "use_case": "reasoning",
+      "atlas_role": "chat",
+      "min_ram_gb": 12.0,
+      "good_ram_gb": 18.0,
+      "min_vram_gb": 8.0,
+      "good_vram_gb": 12.0,
+      "supports_images": false
+    },
+    {
+      "name": "qwen2.5-coder:7b",
+      "title": "Popular coding model",
+      "use_case": "coding",
+      "atlas_role": "chat",
+      "min_ram_gb": 12.0,
+      "good_ram_gb": 16.0,
+      "min_vram_gb": 8.0,
+      "good_vram_gb": 10.0,
+      "supports_images": false
+    },
+    {
+      "name": "gemma3:4b",
+      "title": "Lightweight vision starter",
+      "use_case": "vision",
+      "atlas_role": "chat",
+      "min_ram_gb": 8.0,
+      "good_ram_gb": 12.0,
+      "min_vram_gb": 6.0,
+      "good_vram_gb": 8.0,
+      "supports_images": true
+    },
+    {
+      "name": "deepseek-r1:8b",
+      "title": "Reasoning-focused model",
+      "use_case": "reasoning",
+      "atlas_role": "chat",
+      "min_ram_gb": 16.0,
+      "good_ram_gb": 24.0,
+      "min_vram_gb": 10.0,
+      "good_vram_gb": 14.0,
+      "supports_images": false
+    },
+    {
+      "name": "gpt-oss:20b",
+      "title": "High-end reasoning",
+      "use_case": "reasoning",
+      "atlas_role": "chat",
+      "min_ram_gb": 24.0,
+      "good_ram_gb": 32.0,
+      "min_vram_gb": 16.0,
+      "good_vram_gb": 20.0,
+      "supports_images": false
+    },
+    {
+      "name": "nomic-embed-text",
+      "title": "Memory retrieval embeddings",
+      "use_case": "embedding",
+      "atlas_role": "embedding",
+      "min_ram_gb": 4.0,
+      "good_ram_gb": 8.0,
+      "min_vram_gb": 2.0,
+      "good_vram_gb": 4.0,
+      "supports_images": false
+    }
+  ]
+}

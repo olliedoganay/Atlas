@@ -1,7 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Database, Info, Lock, Monitor, Plus, SlidersHorizontal, Unlock, Users } from "lucide-react";
+import {
+  Database,
+  Info,
+  Lock,
+  Monitor,
+  Plus,
+  SlidersHorizontal,
+  Unlock,
+  Users,
+} from "lucide-react";
 
 import { ResetDialog } from "../components/ResetDialog";
 import {
@@ -47,8 +56,7 @@ export function SettingsPage() {
   const [pendingDeleteUserId, setPendingDeleteUserId] = useState<string | null>(null);
   const [unlockTargetUserId, setUnlockTargetUserId] = useState<string | null>(null);
   const [unlockPassword, setUnlockPassword] = useState("");
-  const [appVersion, setAppVersion] = useState("1.0.5");
-  const [aboutHowToOpen, setAboutHowToOpen] = useState(false);
+  const [appVersion, setAppVersion] = useState("1.0.7");
   const { data: status } = useQuery({
     queryKey: ["status"],
     queryFn: getStatus,
@@ -102,7 +110,7 @@ export function SettingsPage() {
       ),
     [memories],
   );
-  const defaultModel = models?.default_model ?? status?.default_chat_model ?? status?.chat_model ?? "";
+  const preselectedModel = models?.configured_chat_model ?? status?.configured_chat_model ?? status?.chat_model ?? "";
   const security = status?.security;
 
   useEffect(() => {
@@ -110,12 +118,12 @@ export function SettingsPage() {
       setCurrentUserId("");
       setCurrentThreadId("main");
       setCurrentThreadTitle("main");
-      setDraftThreadModel(defaultModel);
+      setDraftThreadModel(preselectedModel);
       setDraftThreadTemperature(null);
     }
   }, [
     currentUserId,
-    defaultModel,
+    preselectedModel,
     setCurrentThreadId,
     setCurrentThreadTitle,
     setCurrentUserId,
@@ -156,7 +164,7 @@ export function SettingsPage() {
     setCurrentUserId(userId);
     setCurrentThreadId("main");
     setCurrentThreadTitle("main");
-    setDraftThreadModel(defaultModel);
+    setDraftThreadModel(preselectedModel);
     setDraftThreadTemperature(null);
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["users"] }),
@@ -197,7 +205,7 @@ export function SettingsPage() {
         setCurrentUserId("");
         setCurrentThreadId("main");
         setCurrentThreadTitle("main");
-        setDraftThreadModel(defaultModel);
+        setDraftThreadModel(preselectedModel);
         setDraftThreadTemperature(null);
       }
       await Promise.all([
@@ -245,7 +253,7 @@ export function SettingsPage() {
         setCurrentUserId("");
         setCurrentThreadId("main");
         setCurrentThreadTitle("main");
-        setDraftThreadModel(defaultModel);
+        setDraftThreadModel(preselectedModel);
         setDraftThreadTemperature(null);
       }
 
@@ -271,68 +279,14 @@ export function SettingsPage() {
   const activeSectionLabel = sections.find((item) => item.id === section)?.label ?? "General";
   const activeSectionDescription =
     section === "general"
-      ? "Appearance and conversation behavior."
+      ? "Interface preferences and conversation behavior."
       : section === "users"
-        ? "Profile selection, optional password protection, and account lifecycle."
+        ? "Local profiles, access, and account lifecycle."
       : section === "models"
-        ? "Runtime defaults, temperature behavior, and local model inventory."
-        : section === "data"
-          ? "Backend lifecycle controls and durable local state."
-          : "Version, local storage, and basic usage.";
-  const aboutHowToSteps = [
-    {
-      title: "1. Profiles and access",
-      body: "Open Settings > Users to create, rename, or delete a profile. Passwordless profiles open instantly; password-protected profiles require an unlock on each session. Use Lock to close an active profile without closing Atlas. Each profile keeps its own chats, memories, and saved runs.",
-    },
-    {
-      title: "2. Models and temperature",
-      body: "Pick a chat model and an optional embedding model in Settings > Models (for example gpt-oss:20b and nomic-embed-text). Before the first message in a thread, set the Model and Temp pickers at the top of the workspace; after the first turn both are locked to keep the conversation consistent. Temperature accepts Model default or an exact numeric value.",
-    },
-    {
-      title: "3. Chats and navigation",
-      body: "The sidebar lists every chat for the active profile. Click + to start a new one, the duplicate icon to fork a thread, and the delete icon to remove it. Press Ctrl+K (or click Search chats) to search inside the current thread or across every local chat. Click the pencil next to a chat title to rename it.",
-    },
-    {
-      title: "4. Sending, streaming, and stopping",
-      body: "Type in the composer at the bottom and press Enter (Shift+Enter for a newline) or click Send. Responses stream token-by-token. Click Stop to end the current run at any point. When a model exposes its reasoning trace, the Deciding card expands into the available thinking stream.",
-    },
-    {
-      title: "5. Context length and compaction",
-      body: "Long threads are compacted automatically when auto compact is on (Settings > General). Click Compact now at any time to summarize older turns in the active thread, freeing context space without losing the summary. The compaction summary becomes part of the thread and is included in future replies.",
-    },
-    {
-      title: "6. Memories (cross-chat recall)",
-      body: "Atlas can remember durable facts across chats when cross-chat memory is enabled. Use Remember in Settings > Data to store a memory manually, Forget to remove one, and the recall toggle to control whether the current chat pulls from memory. Memories are stored locally in an encrypted vector store.",
-    },
-    {
-      title: "7. Run code from a response",
-      body: "Every code block has Copy and Run. Run opens a separate Atlas Run window that executes the snippet inside a disposable Docker container and streams stdout/stderr live. Closing the window kills the container. Supported languages include Python, JavaScript, TypeScript, Go, Rust, C, C++, Java, Ruby, PHP, Bash, C#, Kotlin, Swift, Perl, Lua, R, Elixir, and Dart. HTML code runs in a sandboxed client-side preview with no container needed.",
-    },
-    {
-      title: "8. Automatic dependency installs",
-      body: "The runner inspects each snippet, extracts imports, and installs missing packages before running (pip, npm, cargo, go mod, gem, cpanm, install.packages, dart pub, and more). Progress appears as [atlas-runner] installing: ... in the output pane. Docker Desktop (or any Docker daemon on PATH) must be running; the run window shows a clear prompt when it isn't.",
-    },
-    {
-      title: "9. Graphical Python programs",
-      body: "When Atlas detects a GUI-capable import (pygame, tkinter, turtle, PyQt5/6, PySide2/6, wx, kivy, matplotlib), the run is routed through a prebuilt GUI image that bundles Xvfb, fluxbox, x11vnc, websockify, and noVNC. The run window renders the live GUI in an embedded viewer alongside the output pane. The image builds once in the background on first use (a few minutes); subsequent runs are fast.",
-    },
-    {
-      title: "10. Advanced view",
-      body: "Open Advanced from the left nav for a deeper view of the last run: checkpoints, graph node activity, and saved run artifacts under .data/runs. Use it when you want to inspect what the agent actually did, not just its final message.",
-    },
-    {
-      title: "11. Local data and reset",
-      body: "All state lives under .data/ on this machine: SQLite checkpoints, memory history, the Qdrant vector store, and saved runs. Settings > Data offers Wipe all local data (every chat, run, and memory for every profile) and per-user deletion. Both are irreversible.",
-    },
-    {
-      title: "12. Keyboard shortcuts",
-      body: "Ctrl+K opens chat search. Enter sends a message; Shift+Enter inserts a newline. Esc closes open dialogs and the search popover. The Workspace/Advanced/Settings tabs in the left nav are always one click away.",
-    },
-    {
-      title: "13. Troubleshooting",
-      body: "If the backend badge shows offline, fully close and reopen Atlas. Python changes require a real restart. If no models appear, confirm Ollama is running and that the models in Settings > Models have been pulled locally. If Docker-based runs fail to start, open Docker Desktop and click Retry in the run window.",
-    },
-  ];
+        ? "Ollama connection and installed model inventory."
+          : section === "data"
+            ? "Storage protection, reset controls, and manual memory."
+            : "Product identity and release details.";
 
   return (
     <div className="settings-page">
@@ -438,7 +392,7 @@ export function SettingsPage() {
               <div className="settings-row">
                 <div className="settings-row-copy">
                   <strong>Cross-chat memory</strong>
-                  <p>When enabled, Atlas can recall durable facts from other chats for the current user.</p>
+                  <p>Allow saved memories to inform replies for the current profile.</p>
                 </div>
                 <div className="segmented-control">
                   <button
@@ -696,10 +650,10 @@ export function SettingsPage() {
               </div>
               <div className="settings-row">
                 <div className="settings-row-copy">
-                  <strong>Default chat model</strong>
-                  <p>New chats start with this model unless you choose a different one before the first message.</p>
+                  <strong>Chat model selection</strong>
+                  <p>New threads use the model selected in Workspace. Atlas does not preselect a bundled model.</p>
                 </div>
-                <span>{models?.default_model ?? status?.default_chat_model ?? status?.chat_model ?? "..."}</span>
+                <span>{preselectedModel || "Per thread"}</span>
               </div>
               <div className="settings-row">
                 <div className="settings-row-copy">
@@ -710,8 +664,8 @@ export function SettingsPage() {
               </div>
               <div className="settings-row">
                 <div className="settings-row-copy">
-                  <strong>Default temperature</strong>
-                  <p>New chats start with this sampling preset unless you choose another one before the first message.</p>
+                  <strong>Temperature behavior</strong>
+                  <p>New threads use model-default sampling unless you choose another value before the first message.</p>
                 </div>
                 <span>{formatTemperature(models?.default_temperature ?? status?.default_chat_temperature)}</span>
               </div>
@@ -754,15 +708,6 @@ export function SettingsPage() {
                     : "Unprotected"}
                 </span>
               </div>
-              <div className="settings-row">
-                <div className="settings-row-copy">
-                  <strong>Upgrade note</strong>
-                  <p>
-                    Older plaintext checkpoint, memory-history, and local vector-store files are reset the first time Atlas enables encrypted local storage.
-                  </p>
-                </div>
-                <span>One-time reset</span>
-              </div>
               <div className="settings-row danger">
                 <div className="settings-row-copy">
                   <strong>Wipe all local data</strong>
@@ -775,7 +720,7 @@ export function SettingsPage() {
               <div className="settings-row settings-row-block">
                 <div className="settings-row-copy">
                   <strong>Remember</strong>
-                  <p>Store a manual note in persistent memory for the current user.</p>
+                  <p>Create and remove manual memories for the current profile.</p>
                 </div>
                 <div className="settings-column">
                   <div className="settings-inline-form">
@@ -822,56 +767,36 @@ export function SettingsPage() {
           ) : null}
 
           {section === "about" ? (
-            <div className="settings-rows">
-              <div className="settings-row">
-                <div className="settings-row-copy">
-                  <strong>Product</strong>
-                  <p>Atlas is a desktop app for working with local Ollama models.</p>
+            <div className="settings-about">
+              <section className="settings-about-hero" aria-labelledby="about-product-title">
+                <div className="settings-about-hero-copy">
+                  <p className="eyebrow">Atlas Desktop</p>
+                  <h3 id="about-product-title">{status?.product_name || "Atlas"}</h3>
+                  <p>
+                    A local-first Windows workstation for private chats, model discovery, memory, and controlled code execution.
+                  </p>
                 </div>
-                <span>Local-first desktop app</span>
-              </div>
-              <div className="settings-row">
-                <div className="settings-row-copy">
-                  <strong>Privacy</strong>
-                  <p>Chats, memory, and run state stay on this device by default.</p>
+                <div className="settings-about-release">
+                  <span>Current version</span>
+                  <strong>{`v${appVersion}`}</strong>
                 </div>
-                <span>Stored locally</span>
-              </div>
-              <div className="settings-row">
-                <div className="settings-row-copy">
-                  <strong>Version</strong>
-                  <p>Installed desktop shell version.</p>
-                </div>
-                <span>{`Atlas Desktop v${appVersion}`}</span>
-              </div>
-              <div className="settings-row settings-row-block settings-row-detail">
-                <button
-                  aria-expanded={aboutHowToOpen}
-                  className="settings-howto-toggle"
-                  onClick={() => setAboutHowToOpen((value) => !value)}
-                  type="button"
-                >
+              </section>
+
+              <div className="settings-rows settings-about-rows">
+                <div className="settings-row">
                   <div className="settings-row-copy">
-                    <strong>How to use</strong>
-                    <p>Open this for the main actions available in Atlas.</p>
+                    <strong>Product</strong>
+                    <p>Desktop application for local model workflows.</p>
                   </div>
-                  <span className="settings-howto-toggle-meta">
-                    <span>{aboutHowToOpen ? "Hide" : "Show"}</span>
-                    {aboutHowToOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                  </span>
-                </button>
-                {aboutHowToOpen ? (
-                  <ol className="settings-howto-list">
-                    {aboutHowToSteps.map((step) => (
-                      <li className="settings-howto-step" key={step.title}>
-                        <div className="settings-howto-step-copy">
-                          <strong>{step.title}</strong>
-                          <p>{step.body}</p>
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
-                ) : null}
+                  <span>Local-first desktop app</span>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-copy">
+                    <strong>Privacy model</strong>
+                    <p>Chats, saved runs, and memory are managed on this device.</p>
+                  </div>
+                  <span>Stored locally</span>
+                </div>
               </div>
             </div>
           ) : null}

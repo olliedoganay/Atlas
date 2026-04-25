@@ -10,7 +10,7 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             config = load_config(project_root=root, env={})
-            self.assertEqual(config.chat_model, "gpt-oss:20b")
+            self.assertEqual(config.chat_model, "")
             self.assertIsNone(config.chat_temperature)
             self.assertEqual(config.embed_model, "nomic-embed-text:latest")
             self.assertEqual(config.embed_dim, 768)
