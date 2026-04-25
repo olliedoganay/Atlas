@@ -1,20 +1,22 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { Check, ExternalLink } from "lucide-react";
+import { Check, ExternalLink, Terminal } from "lucide-react";
 
-import { createUser } from "../lib/api";
+import { createUser, openExternalUrl } from "../lib/api";
 
 type StepState = "active" | "pending" | "done";
 
 export function FirstRunWizard({
   ollamaOnline,
   hasLocalModels,
+  embedModel,
   onProfileCreated,
   onDismiss,
 }: {
   ollamaOnline: boolean;
   hasLocalModels: boolean;
+  embedModel?: string;
   onProfileCreated: (userId: string) => Promise<void> | void;
   onDismiss: () => void;
 }) {
@@ -40,6 +42,8 @@ export function FirstRunWizard({
   const step3: StepState = !profileCreated || !ollamaOnline ? "pending" : hasLocalModels ? "done" : "active";
 
   const allDone = profileCreated && ollamaOnline && hasLocalModels;
+  const resolvedEmbedModel = embedModel?.trim() || "nomic-embed-text:latest";
+  const starterChatModel = "gpt-oss:20b";
 
   return (
     <div className="wizard-overlay" role="dialog" aria-modal="true" aria-labelledby="wizard-title">
@@ -93,7 +97,7 @@ export function FirstRunWizard({
           </div>
           <div className="wizard-step-body">
             <span>
-              Atlas Chat needs Ollama running on this machine.{" "}
+              Atlas Chat uses Ollama as the local app that downloads and runs AI models on this machine.{" "}
               <strong style={{ color: ollamaOnline ? "var(--success)" : "var(--danger)" }}>
                 {ollamaOnline ? "Connected" : "Not running"}
               </strong>
@@ -103,6 +107,10 @@ export function FirstRunWizard({
                 <a
                   className="ghost-button compact-button"
                   href="https://ollama.com/download"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    void openExternalUrl("https://ollama.com/download");
+                  }}
                   rel="noreferrer"
                   target="_blank"
                 >
@@ -120,7 +128,7 @@ export function FirstRunWizard({
             <h3>Install a model</h3>
           </div>
           <div className="wizard-step-body">
-            <span>Pick a model that fits your machine. Discovery shows recommendations.</span>
+            <span>Download at least one chat model. Discovery can recommend one that fits this computer.</span>
             <div className="wizard-form">
               <button
                 className="primary-button compact-button"
@@ -136,6 +144,49 @@ export function FirstRunWizard({
             </div>
           </div>
         </div>
+
+        <section className="wizard-help-panel" aria-labelledby="wizard-help-title">
+          <div className="wizard-help-heading">
+            <Terminal size={16} />
+            <div>
+              <h3 id="wizard-help-title">New to local AI?</h3>
+              <p>Install Ollama first, then pull the models Atlas Chat can use.</p>
+            </div>
+          </div>
+          <div className="wizard-help-steps">
+            <div>
+              <strong>1. Install Ollama</strong>
+              <p>Download the Windows app, install it, and leave Ollama running in the background.</p>
+              <a
+                className="source-link wizard-help-link"
+                href="https://ollama.com/download"
+                onClick={(event) => {
+                  event.preventDefault();
+                  void openExternalUrl("https://ollama.com/download");
+                }}
+                rel="noreferrer"
+                target="_blank"
+              >
+                Open Ollama download
+                <ExternalLink size={13} />
+              </a>
+            </div>
+            <div>
+              <strong>2. Pull a chat model</strong>
+              <p>Open PowerShell and run this example command. You can choose a different model later.</p>
+              <code>ollama pull {starterChatModel}</code>
+            </div>
+            <div>
+              <strong>3. Pull the memory model</strong>
+              <p>This embedding model lets Atlas Chat support local memory and retrieval features.</p>
+              <code>ollama pull {resolvedEmbedModel}</code>
+            </div>
+            <div>
+              <strong>4. Return to Atlas</strong>
+              <p>When downloads finish, open Discovery or refresh the model list. Installed models appear automatically.</p>
+            </div>
+          </div>
+        </section>
 
         <div className="wizard-footer">
           <button className="ghost-button compact-button" onClick={onDismiss} type="button">

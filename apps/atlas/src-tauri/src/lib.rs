@@ -1,6 +1,5 @@
 use std::{
-    fs,
-    env,
+    env, fs,
     net::TcpListener,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -52,6 +51,16 @@ fn backend_runtime(state: State<'_, BackendState>) -> Result<BackendRuntime, Str
         .ok_or_else(|| "Atlas backend runtime is not available.".to_string())
 }
 
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    match url.as_str() {
+        "https://ollama.com/download" | "https://github.com/olliedoganay/Atlas" => {
+            open_allowed_external_url(&url)
+        }
+        _ => Err("External URL is not allowed.".to_string()),
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
         .manage(BackendState::default())
@@ -76,7 +85,11 @@ pub fn run() {
             reveal_main_window_after_delay(app.handle().clone());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![restart_backend, backend_runtime])
+        .invoke_handler(tauri::generate_handler![
+            restart_backend,
+            backend_runtime,
+            open_external_url
+        ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| match event {
@@ -86,6 +99,39 @@ pub fn run() {
             }
             _ => {}
         });
+}
+
+fn open_allowed_external_url(url: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        Command::new("rundll32.exe")
+            .args(["url.dll,FileProtocolHandler", url])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|error| format!("Could not open external URL: {error}"))?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(url)
+            .spawn()
+            .map_err(|error| format!("Could not open external URL: {error}"))?;
+        return Ok(());
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Command::new("xdg-open")
+            .arg(url)
+            .spawn()
+            .map_err(|error| format!("Could not open external URL: {error}"))?;
+        return Ok(());
+    }
+
+    #[allow(unreachable_code)]
+    Err("Opening external URLs is not supported on this platform.".to_string())
 }
 
 fn reveal_main_window_after_delay(app: AppHandle) {
@@ -162,7 +208,8 @@ fn start_backend(app: AppHandle, state: &State<'_, BackendState>) -> Result<(), 
                 data_dir,
             } => {
                 fs::create_dir_all(&data_dir).map_err(|error| error.to_string())?;
-                fs::create_dir_all(data_dir.join("langgraph")).map_err(|error| error.to_string())?;
+                fs::create_dir_all(data_dir.join("langgraph"))
+                    .map_err(|error| error.to_string())?;
                 let (stdout, stderr) = if packaged_backend_logs_enabled() {
                     let log_dir = data_dir.join("logs");
                     fs::create_dir_all(&log_dir).map_err(|error| error.to_string())?;
@@ -335,7 +382,10 @@ fn repo_root() -> Result<PathBuf, String> {
 
 enum LaunchMode {
     Development,
-    Packaged { resource_dir: PathBuf, data_dir: PathBuf },
+    Packaged {
+        resource_dir: PathBuf,
+        data_dir: PathBuf,
+    },
 }
 
 fn reserve_port() -> Result<u16, String> {

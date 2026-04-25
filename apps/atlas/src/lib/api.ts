@@ -713,6 +713,17 @@ export async function restartManagedBackend(options?: { attempts?: number; delay
   return waitForBackendReady(options);
 }
 
+export async function openExternalUrl(url: string) {
+  try {
+    await invoke("open_external_url", { url });
+  } catch (error) {
+    const opened = window.open(url, "_blank", "noopener,noreferrer");
+    if (!opened) {
+      throw error instanceof Error ? error : new Error("Could not open external URL.");
+    }
+  }
+}
+
 export async function waitForBackendReady(options?: { attempts?: number; delayMs?: number }) {
   const attempts = Math.max(1, options?.attempts ?? 30);
   const delayMs = Math.max(50, options?.delayMs ?? 250);

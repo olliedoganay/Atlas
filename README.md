@@ -2,7 +2,7 @@
 
 Atlas Chat is a local-first desktop app for working with local Ollama models. It provides a multi-thread chat workspace, profile-scoped memory, hardware-aware model discovery, run inspection, and a built-in code runner while keeping Atlas-managed state on the local machine.
 
-Current version: `1.0.8`
+Current version: `1.0.9`
 
 ## Highlights
 

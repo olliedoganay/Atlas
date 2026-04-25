@@ -1,6 +1,6 @@
 import * as ScrollArea from "@radix-ui/react-scroll-area";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Copy, CornerUpLeft, Edit3, FileText, GitBranch, ImagePlus, Lightbulb, Lock, Plus, RotateCcw, Search, Send, Square, X } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Copy, CornerUpLeft, Edit3, ExternalLink, FileText, GitBranch, ImagePlus, Lightbulb, Lock, Plus, RotateCcw, Search, Send, Square, Terminal, X } from "lucide-react";
 import { ChangeEvent, FormEvent, KeyboardEvent, UIEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -16,6 +16,7 @@ import {
   getThreadRuns,
   getThreads,
   getUsers,
+  openExternalUrl,
   renameThread,
   startCompact,
   startChat,
@@ -271,6 +272,8 @@ export function WorkspacePage() {
   }, [availableModels, draftThreadModel, lockedThreadModel, threadHasHistory]);
   const selectedModel = lockedThreadModel || preferredDraftModel;
   const selectedTemperature = lockedThreadTemperature !== undefined ? lockedThreadTemperature : draftThreadTemperature;
+  const starterChatModel = "gpt-oss:20b";
+  const resolvedEmbedModel = status?.embed_model?.trim() || "nomic-embed-text:latest";
   const selectedModelDetails = useMemo(
     () => models?.model_details?.find((item) => item.name === selectedModel),
     [models?.model_details, selectedModel],
@@ -1071,7 +1074,7 @@ export function WorkspacePage() {
             <div className="conversation-stack">
               {transcript.length === 0 ? (
                 <div className="workspace-idle">
-                  <div className="workspace-idle-card">
+                  <div className={`workspace-idle-card${startupState.key === "no-profile" ? " workspace-onboarding-card" : ""}`}>
                     <div className="workspace-idle-mark">
                       <img alt="Atlas Chat" className="workspace-idle-logo workspace-idle-logo-large" src="/AtlasLogo.png" />
                     </div>
@@ -1093,6 +1096,10 @@ export function WorkspacePage() {
                         <a
                           className="primary-button"
                           href="https://ollama.com/download"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            void openExternalUrl("https://ollama.com/download");
+                          }}
                           rel="noreferrer"
                           target="_blank"
                         >
@@ -1126,6 +1133,46 @@ export function WorkspacePage() {
                           Unlock in Settings
                         </button>
                       </div>
+                    ) : null}
+                    {startupState.key === "no-profile" ? (
+                      <section className="wizard-help-panel workspace-setup-help" aria-labelledby="workspace-setup-title">
+                        <div className="wizard-help-heading">
+                          <Terminal size={16} />
+                          <div>
+                            <h3 id="workspace-setup-title">New to local AI?</h3>
+                            <p>Atlas Chat needs Ollama plus local models before the first real chat.</p>
+                          </div>
+                        </div>
+                        <div className="wizard-help-steps">
+                          <div>
+                            <strong>1. Install Ollama</strong>
+                            <p>Download the Windows app, install it, and leave Ollama running.</p>
+                            <a
+                              className="source-link wizard-help-link"
+                              href="https://ollama.com/download"
+                              onClick={(event) => {
+                                event.preventDefault();
+                                void openExternalUrl("https://ollama.com/download");
+                              }}
+                              rel="noreferrer"
+                              target="_blank"
+                            >
+                              Open Ollama download
+                              <ExternalLink size={13} />
+                            </a>
+                          </div>
+                          <div>
+                            <strong>2. Pull a chat model</strong>
+                            <p>Open PowerShell and download this example chat model.</p>
+                            <code>ollama pull {starterChatModel}</code>
+                          </div>
+                          <div>
+                            <strong>3. Pull the memory model</strong>
+                            <p>This embedding model supports local memory and retrieval.</p>
+                            <code>ollama pull {resolvedEmbedModel}</code>
+                          </div>
+                        </div>
+                      </section>
                     ) : null}
                   </div>
                 </div>
