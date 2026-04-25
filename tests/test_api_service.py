@@ -233,7 +233,7 @@ class ThreadTemperatureResolutionTests(unittest.TestCase):
                 requested_temperature=None,
             )
         )
-        with self.assertRaisesRegex(RuntimeError, "locked to model default temperature"):
+        with self.assertRaisesRegex(RuntimeError, "locked to the selected model's temperature setting"):
             AtlasBackendService._resolve_thread_temperature(
                 self.service,
                 user_id="research_user",

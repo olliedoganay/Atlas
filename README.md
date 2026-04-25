@@ -1,8 +1,8 @@
-# Atlas
+# Atlas Chat
 
-Atlas is a local-first desktop app for working with local Ollama models. It provides a multi-thread chat workspace, profile-scoped memory, hardware-aware model discovery, run inspection, and a built-in code runner while keeping Atlas-managed state on the local machine.
+Atlas Chat is a local-first desktop app for working with local Ollama models. It provides a multi-thread chat workspace, profile-scoped memory, hardware-aware model discovery, run inspection, and a built-in code runner while keeping Atlas-managed state on the local machine.
 
-Current version: `1.0.7`
+Current version: `1.0.8`
 
 ## Highlights
 
@@ -24,10 +24,10 @@ Atlas requires a local Ollama runtime. Docker is optional for chat, but required
 For normal Windows usage, install the packaged desktop release instead of running from source.
 
 1. Open `https://github.com/olliedoganay/Atlas/releases/latest`.
-2. Download the current Windows installer or packaged `.exe`.
-3. Install and launch `Atlas`.
+2. Download the current Windows MSI installer.
+3. Install and launch `Atlas Chat`.
 
-Atlas does not currently publish macOS or Linux installers. Use the source workflow on those platforms.
+Atlas Chat does not currently publish macOS or Linux installers. Use the source workflow on those platforms.
 
 ## Requirements
 
@@ -106,9 +106,9 @@ Windows:
 
 ```powershell
 .venv\Scripts\atlas-backend.exe
-.venv\Scripts\atlas.exe --user-id your_user
-.venv\Scripts\atlas.exe --user-id your_user "Summarize this project in three bullets."
-.venv\Scripts\python.exe -m atlas_local.cli ask "Summarize this project in three bullets." --user-id your_user --thread-id scratch
+.venv\Scripts\atlas.exe --user-id your_user --model your-model:tag
+.venv\Scripts\atlas.exe --user-id your_user --model your-model:tag "Summarize this project in three bullets."
+.venv\Scripts\python.exe -m atlas_local.cli ask "Summarize this project in three bullets." --user-id your_user --thread-id scratch --model your-model:tag
 .venv\Scripts\python.exe -m atlas_local.api
 ```
 
@@ -117,15 +117,15 @@ macOS and Linux:
 ```bash
 source .venv/bin/activate
 atlas-backend
-atlas --user-id your_user
-atlas --user-id your_user "Summarize this project in three bullets."
-python -m atlas_local.cli ask "Summarize this project in three bullets." --user-id your_user --thread-id scratch
+atlas --user-id your_user --model your-model:tag
+atlas --user-id your_user --model your-model:tag "Summarize this project in three bullets."
+python -m atlas_local.cli ask "Summarize this project in three bullets." --user-id your_user --thread-id scratch --model your-model:tag
 python -m atlas_local.api
 ```
 
 - `atlas-backend` or `python -m atlas_local.api` runs only the local API/backend.
-- `atlas --user-id your_user` starts the terminal chat CLI on thread `main`.
-- `atlas --user-id your_user "..."` runs a single turn through the top-level launcher.
+- `atlas --user-id your_user --model <ollama-model>` starts the terminal chat CLI on thread `main`.
+- `atlas --user-id your_user --model <ollama-model> "..."` runs a single turn through the top-level launcher.
 - `python -m atlas_local.cli ...` exposes the raw `ask`, `chat`, and `memories` subcommands.
 
 ## Configuration
@@ -135,8 +135,7 @@ Copy `.env.example` to `.env` and adjust it if needed.
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `OLLAMA_URL` | Local Ollama base URL | `http://127.0.0.1:11434` |
-| `CHAT_MODEL` | Optional preselected chat model for new draft threads; leave blank to choose per thread | blank |
-| `CHAT_TEMPERATURE` | Optional default temperature; blank uses the selected model default | blank |
+| `CHAT_TEMPERATURE` | Optional initial sampling temperature; blank uses the selected model behavior | blank |
 | `EMBED_MODEL` | Embedding model used for memory retrieval | `nomic-embed-text:latest` |
 | `QDRANT_PATH` | Local vector-store directory | `.data/qdrant` |
 | `MEM0_COLLECTION` | Collection name for persistent memory | `atlas_local_memory` |
@@ -211,7 +210,7 @@ Optional flags:
 
 Plain `pytest` from the repo root is also safe because test discovery is scoped to `tests/`.
 
-Build a Windows release bundle:
+Build the Windows MSI release bundle:
 
 ```powershell
 .\scripts\build_atlas_release.ps1
@@ -222,6 +221,8 @@ Artifacts are written under:
 ```text
 apps\atlas\src-tauri\target\release\bundle\
 ```
+
+Atlas builds MSI as the canonical Windows installer. Microsoft Store submissions can accept MSI/EXE apps, but Microsoft recommends MSIX for the most integrated Store experience; producing MSIX from this Tauri build requires a separate MSIX packaging step outside the Tauri bundler.
 
 ## Repository Layout
 

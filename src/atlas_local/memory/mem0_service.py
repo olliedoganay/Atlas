@@ -26,7 +26,7 @@ class Mem0Service:
         _reconcile_legacy_qdrant_collections(config)
 
     def search(self, query: str, *, user_id: str, limit: int) -> list[StoredMemory]:
-        response = self._require_memory().search(query, user_id=user_id, limit=limit, rerank=True)
+        response = self._require_memory().search(query, user_id=user_id, limit=limit, rerank=False)
         return [StoredMemory.from_dict(item) for item in response.get("results", [])]
 
     def add(
@@ -98,7 +98,10 @@ class Mem0Service:
                     "llm": {
                         "provider": "ollama",
                         "config": {
-                            "model": self.config.chat_model,
+                            # Mem0 still constructs an LLM client even though Atlas uses
+                            # local extraction and disables reranking. Keep chat model
+                            # selection outside memory setup.
+                            "model": self.config.embed_model,
                             "temperature": 0.0,
                             "max_tokens": 600,
                             "ollama_base_url": self.config.ollama_url,

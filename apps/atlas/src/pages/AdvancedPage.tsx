@@ -1,10 +1,14 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
+import { Activity } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
+import { EmptyState } from "../components/ui/EmptyState";
 import { getModels, getRun, getStatus, getThreads } from "../lib/api";
 import { displayThreadTitle } from "../lib/threadTitles";
 import { useAtlasStore } from "../store/useAtlasStore";
 
 export function AdvancedPage() {
+  const navigate = useNavigate();
   const currentUserId = useAtlasStore((state) => state.currentUserId);
   const currentThreadId = useAtlasStore((state) => state.currentThreadId);
 
@@ -46,7 +50,7 @@ export function AdvancedPage() {
     <section className="advanced-page">
       <div className="workspace-header">
         <div className="workspace-header-copy">
-          <h1>Advanced</h1>
+          <h1>Diagnostics</h1>
           <p className="workspace-header-summary">Runtime health and recent run metrics.</p>
         </div>
       </div>
@@ -169,10 +173,20 @@ export function AdvancedPage() {
             ))}
           </div>
         ) : (
-          <div className="stack-card advanced-empty-state">
-            <strong>No diagnostics yet</strong>
-            <p>Run a chat first. Atlas will show timing, compaction gain, and output estimates here.</p>
-          </div>
+          <EmptyState
+            icon={<Activity size={18} />}
+            title="No diagnostics yet"
+            description="Run a chat first. Atlas Chat will show timing, compaction gain, and output estimates here."
+            actions={
+              <button
+                className="primary-button compact-button"
+                onClick={() => navigate("/workspace")}
+                type="button"
+              >
+                Open Workspace
+              </button>
+            }
+          />
         )}
       </div>
     </section>
@@ -184,7 +198,7 @@ function formatTemperature(value: number | null | undefined) {
     return "Not set";
   }
   if (value === null || Number.isNaN(value)) {
-    return "Model default";
+    return "Model setting";
   }
   return value.toFixed(1);
 }

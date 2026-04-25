@@ -68,7 +68,7 @@ export function MarkdownCodeBlock({ code, language }: MarkdownCodeBlockProps) {
   return (
     <div className="code-block-shell">
       <div className="code-block-header">
-        <span>{language}</span>
+        <span>{formatLanguage(language)}</span>
         <div className="code-block-actions">
           {runnable ? <RunButton launching={launching} onRun={run} /> : null}
           <CopyButton copied={copied} onCopy={copy} />
@@ -84,12 +84,25 @@ export function MarkdownCodeBlock({ code, language }: MarkdownCodeBlockProps) {
       >
         {code}
       </SyntaxHighlighter>
-      <div className="code-block-footer">
-        {runnable ? <RunButton launching={launching} onRun={run} /> : null}
-        <CopyButton copied={copied} onCopy={copy} />
-      </div>
     </div>
   );
+}
+
+function formatLanguage(language: string) {
+  if (!language) return "Code";
+  const lower = language.toLowerCase();
+  if (lower === "js") return "JavaScript";
+  if (lower === "ts") return "TypeScript";
+  if (lower === "tsx") return "TSX";
+  if (lower === "jsx") return "JSX";
+  if (lower === "py") return "Python";
+  if (lower === "sh" || lower === "bash" || lower === "shell") return "Shell";
+  if (lower === "json") return "JSON";
+  if (lower === "yaml" || lower === "yml") return "YAML";
+  if (lower === "md" || lower === "markdown") return "Markdown";
+  if (lower === "sql") return "SQL";
+  if (lower === "diff") return "Diff";
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
 }
 
 function CopyButton({ copied, onCopy }: { copied: boolean; onCopy: () => Promise<void> }) {

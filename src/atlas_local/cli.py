@@ -16,10 +16,12 @@ def build_parser() -> argparse.ArgumentParser:
     ask_parser.add_argument("prompt", help="Prompt to send to the agent.")
     ask_parser.add_argument("--user-id", required=True)
     ask_parser.add_argument("--thread-id", default="default-thread")
+    ask_parser.add_argument("--model", required=True, help="Local Ollama chat model to use.")
 
     chat_parser = subparsers.add_parser("chat", help="Start an interactive chat session.")
     chat_parser.add_argument("--user-id", required=True)
     chat_parser.add_argument("--thread-id", default="default-thread")
+    chat_parser.add_argument("--model", required=True, help="Local Ollama chat model to use.")
 
     memories_parser = subparsers.add_parser("memories", help="List stored memories for a user.")
     memories_parser.add_argument("--user-id", required=True)
@@ -42,10 +44,11 @@ def main(argv: list[str] | None = None) -> int:
                     prompt=args.prompt,
                     user_id=args.user_id,
                     thread_id=args.thread_id,
+                    chat_model=args.model,
                 )
 
             if args.command == "chat":
-                return _run_chat(app=app, user_id=args.user_id, thread_id=args.thread_id)
+                return _run_chat(app=app, user_id=args.user_id, thread_id=args.thread_id, chat_model=args.model)
 
             if args.command == "memories":
                 for item in app.list_memories(user_id=args.user_id, limit=args.limit):
@@ -64,14 +67,15 @@ def _run_single_turn(
     prompt: str,
     user_id: str,
     thread_id: str,
+    chat_model: str,
 ) -> int:
-    result = app.ask(prompt, user_id=user_id, thread_id=thread_id)
+    result = app.ask(prompt, user_id=user_id, thread_id=thread_id, chat_model=chat_model)
     print(result.get("answer", ""))
     return 0
 
 
-def _run_chat(*, app, user_id: str, thread_id: str) -> int:
-    print(f"Atlas chat started for user={user_id} thread={thread_id}. Type 'exit' to stop.")
+def _run_chat(*, app, user_id: str, thread_id: str, chat_model: str) -> int:
+    print(f"Atlas chat started for user={user_id} thread={thread_id} model={chat_model}. Type 'exit' to stop.")
     while True:
         try:
             user_input = input("You: ").strip()
@@ -84,7 +88,7 @@ def _run_chat(*, app, user_id: str, thread_id: str) -> int:
         if user_input.lower() in {"exit", "quit", "bye"}:
             return 0
 
-        result = app.ask(user_input, user_id=user_id, thread_id=thread_id)
+        result = app.ask(user_input, user_id=user_id, thread_id=thread_id, chat_model=chat_model)
         print(f"Atlas: {result.get('answer', '')}")
 
 

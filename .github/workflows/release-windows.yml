@@ -61,14 +61,14 @@ jobs:
           }
           "atlas_version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
-      - name: Build Atlas release bundle
+      - name: Build Atlas MSI release bundle
         run: .\scripts\build_atlas_release.ps1
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
           name: atlas-windows-v${{ steps.version.outputs.atlas_version }}
-          path: apps/atlas/src-tauri/target/release/bundle/**
+          path: apps/atlas/src-tauri/target/release/bundle/**/*.msi
 
       - name: Publish GitHub Release assets
         if: startsWith(github.ref, 'refs/tags/')
@@ -77,5 +77,4 @@ jobs:
           name: Atlas v${{ steps.version.outputs.atlas_version }}
           files: |
             apps/atlas/src-tauri/target/release/bundle/**/*.msi
-            apps/atlas/src-tauri/target/release/bundle/**/*.exe
           generate_release_notes: true

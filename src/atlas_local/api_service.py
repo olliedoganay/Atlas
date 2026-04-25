@@ -106,7 +106,7 @@ class AtlasBackendService:
         self.app.close()
 
     def health(self) -> dict[str, Any]:
-        return {"status": "ok", "product": "Atlas"}
+        return {"status": "ok", "product": "Atlas Chat"}
 
     def status(self) -> dict[str, Any]:
         self._ensure_runtime_state()
@@ -115,10 +115,8 @@ class AtlasBackendService:
         protected_locally = application_secret_protection_available()
         return {
             "status": "ok",
-            "product_name": "Atlas",
-            "backend": "Atlas local runtime",
-            "configured_chat_model": self.config.chat_model,
-            "chat_model": self.config.chat_model,
+            "product_name": "Atlas Chat",
+            "backend": "Atlas Chat local runtime",
             "default_chat_temperature": self.config.chat_temperature,
             "chat_temperature": self.config.chat_temperature,
             "embed_model": self.config.embed_model,
@@ -235,7 +233,6 @@ class AtlasBackendService:
     def list_models(self) -> dict[str, Any]:
         catalog = self._get_model_catalog()
         return {
-            "configured_chat_model": self.config.chat_model,
             "default_temperature": self.config.chat_temperature,
             "temperature_presets": [
                 {"label": f"{value:.1f}", "value": value}
@@ -402,7 +399,7 @@ class AtlasBackendService:
             user_id=user_id,
             thread_id=duplicate_thread_id,
             title=duplicate_title,
-            chat_model=str(source_thread.get("chat_model", "") or self.config.chat_model),
+            chat_model=str(source_thread.get("chat_model", "") or ""),
             temperature=self._record_temperature(source_thread, fallback_on_missing=self.config.chat_temperature),
             last_mode=str(source_thread.get("last_mode", "chat") or "chat"),
             last_prompt=str(source_thread.get("last_prompt", "") or ""),
@@ -454,7 +451,7 @@ class AtlasBackendService:
             user_id=user_id,
             thread_id=branch_thread_id,
             title=branch_title,
-            chat_model=str(source_thread.get("chat_model", "") or self.config.chat_model),
+            chat_model=str(source_thread.get("chat_model", "") or ""),
             temperature=self._record_temperature(source_thread, fallback_on_missing=self.config.chat_temperature),
             last_mode="chat",
             last_prompt=_latest_user_text({"messages": branch_messages}) if branch_messages else "",
@@ -490,8 +487,8 @@ class AtlasBackendService:
                 thread_record = None
             if thread_record:
                 chat_model = str(thread_record.get("chat_model", "") or "")
-        if not chat_model:
-            chat_model = self.config.chat_model
+                if not chat_model:
+                    chat_model = self._thread_last_run_model(thread_record)
 
         effective_context_window = 0
         if chat_model:
@@ -1553,7 +1550,7 @@ class AtlasBackendService:
         if thread:
             locked_model = str(thread.get("chat_model", "") or "").strip()
             if not locked_model and thread.get("last_run_id"):
-                locked_model = self.config.chat_model
+                locked_model = self._thread_last_run_model(thread)
 
         if locked_model:
             if requested and requested != locked_model:
@@ -1561,10 +1558,22 @@ class AtlasBackendService:
                     f"Thread '{thread_id}' is locked to chat model '{locked_model}'. Start a new chat to use '{requested}'."
                 )
             return locked_model
-        resolved = requested or self.config.chat_model
+        resolved = requested
         if not resolved:
             raise RuntimeError("Select a local Ollama model before starting this chat.")
         return resolved
+
+    def _thread_last_run_model(self, thread: dict[str, Any] | None) -> str:
+        if not thread:
+            return ""
+        last_run_id = str(thread.get("last_run_id", "") or "").strip()
+        if not last_run_id:
+            return ""
+        try:
+            artifact = self.run_store.get_run(last_run_id)
+        except Exception:
+            return ""
+        return str(artifact.get("chat_model", "") or "").strip()
 
     def _resolve_thread_temperature(
         self,
@@ -1580,7 +1589,7 @@ class AtlasBackendService:
             if locked_temperature is None:
                 if requested_temperature is not None:
                     raise RuntimeError(
-                        f"Thread '{thread_id}' is locked to model default temperature. Start a new chat to use '{float(requested_temperature):.1f}'."
+                        f"Thread '{thread_id}' is locked to the selected model's temperature setting. Start a new chat to use '{float(requested_temperature):.1f}'."
                     )
                 return None
             if requested_temperature is not None and abs(float(requested_temperature) - locked_temperature) > 1e-9:

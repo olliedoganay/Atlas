@@ -13,7 +13,7 @@ from .config import AppConfig
 
 
 def format_runtime_error(config: AppConfig, exc: Exception, *, chat_model: str | None = None) -> RuntimeError:
-    resolved_chat_model = (chat_model or config.chat_model).strip()
+    resolved_chat_model = (chat_model or "").strip()
     model_detail = (
         f"Requested chat_model={resolved_chat_model!r}, "
         if resolved_chat_model
@@ -43,7 +43,7 @@ class LLMProvider:
         temperature: float | None = None,
         reasoning: bool | str | None = None,
     ) -> ChatOllama:
-        resolved_model = (model or self.config.chat_model).strip()
+        resolved_model = (model or "").strip()
         if not resolved_model:
             raise RuntimeError("Select a local Ollama model before starting this chat.")
         resolved_temperature = None if temperature is None else float(temperature)
@@ -63,7 +63,7 @@ class LLMProvider:
         return self._chat_models[cache_key]
 
     def json_chat(self, model: str | None = None) -> ChatOllama:
-        resolved_model = (model or self.config.chat_model).strip()
+        resolved_model = (model or "").strip()
         if not resolved_model:
             raise RuntimeError("Select a local Ollama model before starting this chat.")
         if resolved_model not in self._json_chat_models:
@@ -77,9 +77,11 @@ class LLMProvider:
         return self._json_chat_models[resolved_model]
 
     def count_message_tokens(self, model: str | None, messages: list[Any]) -> int:
-        resolved_model = (model or self.config.chat_model).strip()
+        resolved_model = (model or "").strip()
         if not messages:
             return 0
+        if not resolved_model:
+            return _approximate_message_tokens(messages)
         try:
             counter = getattr(self.chat(resolved_model), "get_num_tokens_from_messages", None)
             if callable(counter):
@@ -91,7 +93,9 @@ class LLMProvider:
         return _approximate_message_tokens(messages)
 
     def effective_context_window(self, model: str | None = None, *, ttl_seconds: float = 15.0) -> int:
-        resolved_model = (model or self.config.chat_model).strip()
+        resolved_model = (model or "").strip()
+        if not resolved_model:
+            return 0
         cached = self._context_windows.get(resolved_model)
         now = monotonic()
         if cached and now - cached[0] < ttl_seconds:
@@ -188,7 +192,9 @@ def resolve_effective_context_window(
     timeout_seconds: float = 2.5,
     fallback: int = 8192,
 ) -> int:
-    resolved_model = model.strip() or config.chat_model
+    resolved_model = model.strip()
+    if not resolved_model:
+        return 0
     ps_payload = _ollama_json_request(config, "api/ps", timeout_seconds=timeout_seconds)
     context_from_ps = _context_from_ps_payload(ps_payload, resolved_model)
     if context_from_ps:

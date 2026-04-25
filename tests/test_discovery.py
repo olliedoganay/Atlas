@@ -50,9 +50,6 @@ class DiscoveryReportTests(unittest.TestCase):
             payload = build_discovery_report(config, catalog)
 
         self.assertEqual(payload["atlas"]["status"], "memory-degraded")
-        self.assertEqual(payload["atlas"]["effective_chat_model"], "")
-        self.assertEqual(payload["atlas"]["effective_chat_model_source"], "none")
-        self.assertFalse(payload["atlas"]["configured_chat_model_installed"])
         self.assertFalse(payload["atlas"]["configured_embed_model_installed"])
         self.assertTrue(
             any("Choose any installed chat model" in note for note in payload["atlas"]["notes"])
@@ -61,7 +58,7 @@ class DiscoveryReportTests(unittest.TestCase):
 
     @patch("atlas_local.discovery.list_installed_ollama_model_names")
     @patch("atlas_local.discovery.detect_local_hardware")
-    def test_report_marks_ready_when_configured_models_are_installed(
+    def test_report_marks_ready_when_embed_model_is_installed(
         self,
         detect_local_hardware_mock,
         list_installed_models_mock,
@@ -80,7 +77,6 @@ class DiscoveryReportTests(unittest.TestCase):
             config = load_config(
                 project_root=Path(temp_dir),
                 env={
-                    "CHAT_MODEL": "qwen3:8b",
                     "EMBED_MODEL": "nomic-embed-text:latest",
                 },
             )
@@ -94,8 +90,6 @@ class DiscoveryReportTests(unittest.TestCase):
             payload = build_discovery_report(config, catalog)
 
         self.assertEqual(payload["atlas"]["status"], "ready")
-        self.assertEqual(payload["atlas"]["effective_chat_model"], "qwen3:8b")
-        self.assertTrue(payload["atlas"]["configured_chat_model_installed"])
         self.assertTrue(payload["atlas"]["configured_embed_model_installed"])
         self.assertEqual(payload["recommended_models"][0]["name"], "qwen3:8b")
         self.assertEqual(payload["recommended_models"][0]["fit"], "good")
@@ -145,7 +139,7 @@ class DiscoveryReportTests(unittest.TestCase):
                 """,
                 encoding="utf-8",
             )
-            config = load_config(project_root=root, env={"CHAT_MODEL": "custom-chat:1b"})
+            config = load_config(project_root=root, env={})
             catalog = OllamaCatalogSnapshot(
                 models=(
                     OllamaModelInfo(name="custom-chat:1b"),

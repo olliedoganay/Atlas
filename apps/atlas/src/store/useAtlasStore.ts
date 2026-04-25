@@ -54,6 +54,8 @@ type AtlasState = {
   recentSearchQueries: string[];
   backendStartupStartedAt: number;
   isStreaming: boolean;
+  firstRunDismissed: boolean;
+  setFirstRunDismissed: (value: boolean) => void;
   setTheme: (theme: ThemeMode) => void;
   setCurrentUserId: (value: string) => void;
   setCurrentThreadId: (value: string) => void;
@@ -123,6 +125,8 @@ export const useAtlasStore = create<AtlasState>()(
       recentSearchQueries: [],
       backendStartupStartedAt: Date.now(),
       isStreaming: false,
+      firstRunDismissed: false,
+      setFirstRunDismissed: (value) => set({ firstRunDismissed: value }),
       setTheme: (theme) => set({ theme }),
       setCurrentUserId: (value) => set({ currentUserId: value }),
       setCurrentThreadId: (value) => set({ currentThreadId: value }),
@@ -240,7 +244,7 @@ export const useAtlasStore = create<AtlasState>()(
     }),
     {
       name: "atlas-ui-state",
-      version: 10,
+      version: 11,
       migrate: (persistedState, version) => {
         if (!persistedState || typeof persistedState !== "object") {
           return persistedState as AtlasState;
@@ -266,6 +270,9 @@ export const useAtlasStore = create<AtlasState>()(
         if (version < 10) {
           migrated.navWidth = 200;
         }
+        if (version < 11) {
+          migrated.firstRunDismissed = false;
+        }
         if (migrated.currentThreadTitle === "main") {
           migrated.currentThreadTitle = "Main";
         }
@@ -285,6 +292,7 @@ export const useAtlasStore = create<AtlasState>()(
         navWidth: state.navWidth,
         settingsSidebarCollapsed: state.settingsSidebarCollapsed,
         recentSearchQueries: state.recentSearchQueries,
+        firstRunDismissed: state.firstRunDismissed,
       }),
       storage: createJSONStorage(() => localStorage),
     },

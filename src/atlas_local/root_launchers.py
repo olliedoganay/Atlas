@@ -36,6 +36,7 @@ def run_chat_launcher(
     parser.add_argument("question", nargs="?", default=None)
     parser.add_argument("--user-id", required=True)
     parser.add_argument("--thread-id", default="main")
+    parser.add_argument("--model", required=True, help="Local Ollama chat model to use.")
     parser.add_argument(
         "--ask",
         action="store_true",
@@ -48,7 +49,7 @@ def run_chat_launcher(
     else:
         cli_args = ["chat", "--thread-id", args.thread_id]
 
-    cli_args.extend(["--user-id", args.user_id])
+    cli_args.extend(["--user-id", args.user_id, "--model", args.model])
     return cli_main(cli_args)
 
 
@@ -63,7 +64,8 @@ def run_smoke_launcher(
     parser.add_argument("prompt", nargs="?", default=default_prompt)
     parser.add_argument("--user-id", required=True)
     parser.add_argument("--thread-id", default="smoke-test")
+    parser.add_argument("--model", required=True, help="Local Ollama chat model to use.")
     args = parser.parse_args(argv)
 
-    cli_args = ["ask", args.prompt, "--user-id", args.user_id, "--thread-id", args.thread_id]
+    cli_args = ["ask", args.prompt, "--user-id", args.user_id, "--thread-id", args.thread_id, "--model", args.model]
     return cli_main(cli_args)
