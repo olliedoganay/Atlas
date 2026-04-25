@@ -558,6 +558,7 @@ export function AtlasShell() {
       />
       {showFirstRun ? (
         <FirstRunWizard
+          embedModel={status?.embed_model}
           hasLocalModels={Boolean(models?.has_local_models)}
           ollamaOnline={Boolean(models?.ollama_online)}
           onDismiss={() => setFirstRunDismissed(true)}

@@ -2,7 +2,8 @@ use std::fs;
 use std::path::PathBuf;
 
 fn main() {
-    let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let manifest_dir =
+        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let resources_dir = manifest_dir.join("resources");
     let backend_dir = resources_dir.join("backend");
     let prompts_dir = resources_dir.join("prompts");
