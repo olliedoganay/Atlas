@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from urllib import error, request
 from urllib.parse import urljoin
@@ -28,7 +29,11 @@ class RecommendedModel:
     supports_images: bool = False
 
 
-DISCOVERY_MODELS: tuple[RecommendedModel, ...] = (
+DISCOVERY_MANIFEST_VERSION = 1
+DEFAULT_DISCOVERY_MANIFEST = Path(__file__).with_name("discovery_models.json")
+
+
+FALLBACK_DISCOVERY_MODELS: tuple[RecommendedModel, ...] = (
     RecommendedModel(
         name="llama3.1:8b",
         title="Popular general chat",
@@ -111,10 +116,11 @@ def build_discovery_report(config: AppConfig, catalog: OllamaCatalogSnapshot) ->
     chat_lookup = {_normalize_model_name(item.name): item for item in chat_models}
 
     chat_available = catalog.ollama_online and catalog.has_local_models
-    configured_chat_installed = _is_model_installed(config.chat_model, installed_lookup)
+    configured_chat_model = config.chat_model.strip()
+    configured_chat_installed = bool(configured_chat_model) and _is_model_installed(configured_chat_model, installed_lookup)
     configured_embed_installed = _is_model_installed(config.embed_model, installed_lookup)
-    effective_chat_model = config.chat_model if configured_chat_installed else (chat_models[0].name if chat_models else "")
-    effective_chat_model_source = "configured" if configured_chat_installed else ("fallback" if effective_chat_model else "none")
+    effective_chat_model = configured_chat_model if configured_chat_installed else ""
+    effective_chat_model_source = "configured" if configured_chat_installed else "none"
 
     atlas_status = "ready"
     atlas_summary = "Atlas can start chats and memory retrieval is fully configured."
@@ -129,12 +135,14 @@ def build_discovery_report(config: AppConfig, catalog: OllamaCatalogSnapshot) ->
         atlas_status = "memory-degraded"
         atlas_summary = "Atlas can start chats, but memory retrieval is degraded until the embed model is installed."
 
-    if chat_available and not configured_chat_installed:
+    if chat_available and configured_chat_model and not configured_chat_installed:
         atlas_notes.append(
-            f"The configured default chat model '{config.chat_model}' is not installed. Atlas will fall back to '{effective_chat_model}'."
+            f"The configured chat model '{configured_chat_model}' is not installed. Choose an installed local model in Workspace."
         )
     if chat_available and configured_chat_installed:
-        atlas_notes.append(f"Atlas is configured to start new chats with '{config.chat_model}'.")
+        atlas_notes.append(f"Atlas is configured to preselect '{configured_chat_model}'.")
+    if chat_available and not configured_chat_model:
+        atlas_notes.append("Choose any installed chat model in Workspace before starting a new thread.")
     if chat_available and configured_embed_installed:
         atlas_notes.append(f"Persistent memory is using '{config.embed_model}'.")
 
@@ -146,11 +154,11 @@ def build_discovery_report(config: AppConfig, catalog: OllamaCatalogSnapshot) ->
                 "name": raw_name,
                 "atlas_role": _atlas_role_for_installed_model(
                     raw_name,
-                    configured_chat_model=config.chat_model,
+                    configured_chat_model=configured_chat_model,
                     configured_embed_model=config.embed_model,
                     chat_info=chat_info,
                 ),
-                "configured_chat_model": _matches_model_name(raw_name, config.chat_model),
+                "configured_chat_model": _matches_model_name(raw_name, configured_chat_model),
                 "configured_embed_model": _matches_model_name(raw_name, config.embed_model),
                 "supports_images": bool(chat_info.supports_images) if chat_info else False,
                 "supports_reasoning": bool(chat_info.supports_reasoning) if chat_info else False,
@@ -158,10 +166,11 @@ def build_discovery_report(config: AppConfig, catalog: OllamaCatalogSnapshot) ->
         )
 
     recommendations = _build_recommendations(
-        configured_chat_model=config.chat_model,
+        configured_chat_model=configured_chat_model,
         configured_embed_model=config.embed_model,
         installed_lookup=installed_lookup,
         chat_lookup=chat_lookup,
+        discovery_models=load_discovery_models(config),
         system=system,
     )
 
@@ -174,7 +183,7 @@ def build_discovery_report(config: AppConfig, catalog: OllamaCatalogSnapshot) ->
             "ollama_url": config.ollama_url,
             "ollama_online": catalog.ollama_online,
             "has_local_chat_models": catalog.has_local_models,
-            "configured_chat_model": config.chat_model,
+            "configured_chat_model": configured_chat_model,
             "configured_chat_model_installed": configured_chat_installed,
             "effective_chat_model": effective_chat_model,
             "effective_chat_model_source": effective_chat_model_source,
@@ -183,6 +192,10 @@ def build_discovery_report(config: AppConfig, catalog: OllamaCatalogSnapshot) ->
         },
         "installed_models": installed_models,
         "recommended_models": recommendations,
+        "recommendation_manifest": {
+            "version": DISCOVERY_MANIFEST_VERSION,
+            "source": str(_resolve_discovery_manifest_path(config) or "built-in"),
+        },
     }
 
 
@@ -264,10 +277,19 @@ def _build_recommendations(
     configured_embed_model: str,
     installed_lookup: dict[str, str],
     chat_lookup: dict[str, Any],
+    discovery_models: tuple[RecommendedModel, ...],
     system: dict[str, Any],
 ) -> list[dict[str, Any]]:
     recommendations: list[dict[str, Any]] = []
-    for catalog_rank, candidate in enumerate(DISCOVERY_MODELS):
+    candidates = list(discovery_models)
+    seen_candidates = {_normalize_model_name(item.name) for item in candidates}
+    for model_info in chat_lookup.values():
+        normalized_name = _normalize_model_name(str(model_info.name))
+        if normalized_name in seen_candidates:
+            continue
+        candidates.append(_recommended_model_from_ollama_metadata(model_info))
+        seen_candidates.add(normalized_name)
+    for catalog_rank, candidate in enumerate(candidates):
         installed = _is_model_installed(candidate.name, installed_lookup)
         fit, runtime, reason = _estimate_model_fit(candidate, system)
         chat_info = chat_lookup.get(_normalize_model_name(candidate.name))
@@ -278,7 +300,7 @@ def _build_recommendations(
                 "use_case": candidate.use_case,
                 "atlas_role": candidate.atlas_role,
                 "installed": installed,
-                "configured_default": (
+                "configured_model": (
                     _matches_model_name(candidate.name, configured_chat_model)
                     or _matches_model_name(candidate.name, configured_embed_model)
                 ),
@@ -289,6 +311,7 @@ def _build_recommendations(
                 "runtime": runtime,
                 "reason": reason,
                 "pull_command": f"ollama pull {candidate.name}",
+                "source": "ollama" if _normalize_model_name(candidate.name) in chat_lookup and catalog_rank >= len(discovery_models) else "manifest",
                 "_catalog_rank": catalog_rank,
             }
         )
@@ -298,8 +321,84 @@ def _build_recommendations(
     return recommendations
 
 
+def load_discovery_models(config: AppConfig) -> tuple[RecommendedModel, ...]:
+    manifest_path = _resolve_discovery_manifest_path(config)
+    if manifest_path is None:
+        return FALLBACK_DISCOVERY_MODELS
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return FALLBACK_DISCOVERY_MODELS
+    if int(payload.get("version", 0) or 0) != DISCOVERY_MANIFEST_VERSION:
+        return FALLBACK_DISCOVERY_MODELS
+    raw_models = payload.get("models", [])
+    if not isinstance(raw_models, list):
+        return FALLBACK_DISCOVERY_MODELS
+    models: list[RecommendedModel] = []
+    for item in raw_models:
+        parsed = _parse_manifest_model(item)
+        if parsed:
+            models.append(parsed)
+    return tuple(models) or FALLBACK_DISCOVERY_MODELS
+
+
+def _resolve_discovery_manifest_path(config: AppConfig) -> Path | None:
+    override = os.environ.get("ATLAS_DISCOVERY_MANIFEST", "").strip()
+    if override:
+        path = Path(override)
+        return path if path.exists() else None
+    project_manifest = config.project_root / "discovery_models.json"
+    if project_manifest.exists():
+        return project_manifest
+    return DEFAULT_DISCOVERY_MANIFEST if DEFAULT_DISCOVERY_MANIFEST.exists() else None
+
+
+def _parse_manifest_model(item: Any) -> RecommendedModel | None:
+    if not isinstance(item, dict):
+        return None
+    name = str(item.get("name", "") or "").strip()
+    title = str(item.get("title", "") or "").strip()
+    if not name or not title:
+        return None
+    min_ram = _safe_float(item.get("min_ram_gb"))
+    good_ram = _safe_float(item.get("good_ram_gb"))
+    if min_ram is None or good_ram is None:
+        return None
+    return RecommendedModel(
+        name=name,
+        title=title,
+        use_case=str(item.get("use_case", "chat") or "chat").strip() or "chat",
+        atlas_role=str(item.get("atlas_role", "chat") or "chat").strip() or "chat",
+        min_ram_gb=min_ram,
+        good_ram_gb=good_ram,
+        min_vram_gb=_safe_float(item.get("min_vram_gb")),
+        good_vram_gb=_safe_float(item.get("good_vram_gb")),
+        supports_images=bool(item.get("supports_images", False)),
+    )
+
+
+def _recommended_model_from_ollama_metadata(model_info: Any) -> RecommendedModel:
+    name = str(model_info.name)
+    normalized = name.casefold()
+    supports_images = bool(getattr(model_info, "supports_images", False))
+    supports_reasoning = bool(getattr(model_info, "supports_reasoning", False))
+    use_case = "vision" if supports_images else "reasoning" if supports_reasoning or "r1" in normalized else "chat"
+    title = "Installed vision model" if use_case == "vision" else "Installed reasoning model" if use_case == "reasoning" else "Installed chat model"
+    return RecommendedModel(
+        name=name,
+        title=title,
+        use_case=use_case,
+        atlas_role="chat",
+        min_ram_gb=8.0,
+        good_ram_gb=16.0,
+        min_vram_gb=6.0 if supports_images else 4.0,
+        good_vram_gb=8.0,
+        supports_images=supports_images,
+    )
+
+
 def _recommendation_sort_key(item: dict[str, Any]) -> tuple[int, int, int, str]:
-    configured_priority = 0 if item.get("configured_default") else 1
+    configured_priority = 0 if item.get("configured_model") else 1
     fit_priority = {
         "good": 0,
         "tight": 1,

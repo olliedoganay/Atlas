@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
-DEFAULT_CHAT_MODEL = "gpt-oss:20b"
+CONFIGURED_CHAT_MODEL_FALLBACK = ""
 DEFAULT_CHAT_TEMPERATURE: float | None = None
 DEFAULT_EMBED_MODEL = "nomic-embed-text:latest"
 DEFAULT_MEM0_COLLECTION = "atlas_local_memory"
@@ -70,10 +70,11 @@ def load_config(
 ) -> AppConfig:
     fallback_root = project_root or _repo_root()
     root = fallback_root
-    load_dotenv(root / ".env")
-    source = dict(os.environ)
-    if env:
-        source.update(env)
+    if env is None:
+        load_dotenv(root / ".env")
+        source = dict(os.environ)
+    else:
+        source = dict(env)
 
     root = _path_value(source, "ATLAS_PROJECT_ROOT", fallback_root, base=fallback_root)
     prompt_dir = _path_value(source, "ATLAS_PROMPT_DIR", root / "prompts", base=root)
@@ -104,7 +105,7 @@ def load_config(
         langgraph_checkpoint_db=checkpoint_db,
         mem0_history_db=mem0_history_db,
         ollama_url=_value(source, "OLLAMA_URL", DEFAULT_OLLAMA_URL),
-        chat_model=_value(source, "CHAT_MODEL", DEFAULT_CHAT_MODEL),
+        chat_model=_value(source, "CHAT_MODEL", CONFIGURED_CHAT_MODEL_FALLBACK),
         chat_temperature=_optional_float_value(source, "CHAT_TEMPERATURE", DEFAULT_CHAT_TEMPERATURE),
         embed_model=_value(source, "EMBED_MODEL", DEFAULT_EMBED_MODEL),
         mem0_collection=_value(source, "MEM0_COLLECTION", DEFAULT_MEM0_COLLECTION),

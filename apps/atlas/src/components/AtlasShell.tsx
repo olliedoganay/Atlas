@@ -123,7 +123,7 @@ export function AtlasShell() {
         if (remaining.length > 0) {
           setCurrentThreadId(remaining[0].thread_id);
           setCurrentThreadTitle(editableThreadTitle(remaining[0].title, remaining[0].thread_id));
-          setDraftThreadModel(remaining[0].chat_model || defaultModel);
+          setDraftThreadModel(remaining[0].chat_model || preselectedModel);
           setDraftThreadTemperature(resolveThreadTemperature(remaining[0], defaultTemperature));
         } else {
           createThread();
@@ -165,7 +165,7 @@ export function AtlasShell() {
     onSuccess: async (thread) => {
       setCurrentThreadId(thread.thread_id);
       setCurrentThreadTitle(editableThreadTitle(thread.title, thread.thread_id));
-      setDraftThreadModel(thread.chat_model || defaultModel);
+      setDraftThreadModel(thread.chat_model || preselectedModel);
       setDraftThreadTemperature(resolveThreadTemperature(thread, defaultTemperature));
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["threads", currentUserId] }),
@@ -174,8 +174,8 @@ export function AtlasShell() {
     },
   });
 
-  const defaultModel =
-    models?.default_model || status?.default_chat_model || status?.chat_model || draftThreadModel || "";
+  const preselectedModel =
+    models?.configured_chat_model || status?.configured_chat_model || status?.chat_model || "";
   const defaultTemperature =
     models?.default_temperature ?? status?.default_chat_temperature ?? status?.chat_temperature ?? null;
   const startupState = resolveStartupState({
@@ -185,7 +185,7 @@ export function AtlasShell() {
     modelCatalogLoaded: Boolean(models),
     ollamaOnline: Boolean(models?.ollama_online),
     hasLocalModels: Boolean(models?.has_local_models),
-    selectedModel: defaultModel,
+    selectedModel: draftThreadModel || preselectedModel,
   });
   const threadItems = useMemo(() => {
     const seen = new Set<string>();
@@ -208,7 +208,7 @@ export function AtlasShell() {
         user_id: currentUserId,
         thread_id: currentThreadId,
         title: editableThreadTitle(currentThreadTitle, currentThreadId),
-        chat_model: draftThreadModel || defaultModel,
+        chat_model: draftThreadModel || preselectedModel,
         temperature: draftThreadTemperature,
         last_mode: "chat",
         updated_at: new Date().toISOString(),
@@ -217,7 +217,7 @@ export function AtlasShell() {
       },
       ...threadItems,
     ];
-  }, [currentThreadId, currentThreadTitle, currentUserId, defaultModel, defaultTemperature, draftThreadModel, draftThreadTemperature, threadItems]);
+  }, [currentThreadId, currentThreadTitle, currentUserId, defaultTemperature, draftThreadModel, draftThreadTemperature, preselectedModel, threadItems]);
 
   useEffect(() => {
     if (usersFetched && currentUserId && (!currentUserProfile || currentUserProfile.locked)) {
@@ -261,14 +261,14 @@ export function AtlasShell() {
   const selectThread = (thread: ThreadSummary) => {
     setCurrentThreadId(thread.thread_id);
     setCurrentThreadTitle(editableThreadTitle(thread.title, thread.thread_id));
-    setDraftThreadModel(thread.chat_model || defaultModel);
+    setDraftThreadModel(thread.chat_model || preselectedModel);
     setDraftThreadTemperature(resolveThreadTemperature(thread, defaultTemperature));
   };
 
   const createThread = () => {
     setCurrentThreadId(buildDraftThreadId());
     setCurrentThreadTitle("");
-    setDraftThreadModel(defaultModel);
+    setDraftThreadModel(preselectedModel);
     setDraftThreadTemperature(null);
   };
 
@@ -537,7 +537,7 @@ export function AtlasShell() {
             user_id: currentUserId,
             thread_id: result.thread_id,
             title: editableThreadTitle(result.thread_title, result.thread_id),
-            chat_model: result.chat_model || defaultModel,
+            chat_model: result.chat_model || preselectedModel,
             temperature: null,
             last_mode: "chat",
             updated_at: result.updated_at,

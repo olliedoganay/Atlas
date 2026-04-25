@@ -9,12 +9,13 @@ import shutil
 import threading
 import time
 import uuid
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
 from .config import AppConfig
 from .run_contract import RunEvent, RunTraceItem, make_run_event, make_trace_item, now_timestamp
-from .security import protect_bytes, unprotect_bytes
+from .security import open_application_sqlite, protect_bytes, unprotect_bytes
 
 ACTIVE_RUN_STATUSES = {"queued", "running", "cancelling"}
 PASSWORDLESS_PROTECTION = "passwordless"
@@ -25,6 +26,7 @@ _SCRYPT_P = 1
 _PASSWORD_KEY_LENGTH = 32
 _INDEX_FORMAT = "atlas-dpapi-index-v1"
 _RUN_FORMAT = "atlas-dpapi-run-v1"
+_SEARCH_INDEX_LIMIT = 500
 
 
 class RunStore:
@@ -33,6 +35,7 @@ class RunStore:
         self.runs_dir = config.data_dir / "runs"
         self.runs_dir.mkdir(parents=True, exist_ok=True)
         self._index_path = self.runs_dir / "index.json"
+        self._search_index_path = self.runs_dir / "search.sqlite"
         self._lock = threading.Lock()
         self._user_keys: dict[str, bytes] = {}
         if not self._index_path.exists():
@@ -113,6 +116,7 @@ class RunStore:
                     existing=existing_user,
                 )
             self._write_index(index)
+            self._index_run_for_search(artifact)
         return artifact
 
     def append_event(self, run_id: str, event_type: str, payload: dict[str, Any]) -> RunEvent:
@@ -146,6 +150,7 @@ class RunStore:
                 index["runs"][run_id]["completed_at"] = artifact["completed_at"]
                 index["runs"][run_id]["thread_title"] = artifact.get("thread_title", artifact.get("thread_id", ""))
             self._write_index(index)
+            self._index_run_for_search(artifact)
         return artifact
 
     def mark_run_running(self, run_id: str) -> dict[str, Any]:
@@ -184,6 +189,7 @@ class RunStore:
                 index["runs"][run_id]["completed_at"] = artifact["completed_at"]
                 index["runs"][run_id]["thread_title"] = artifact.get("thread_title", artifact.get("thread_id", ""))
             self._write_index(index)
+            self._index_run_for_search(artifact)
         return artifact
 
     def fail_incomplete_runs(self, *, error: str) -> list[str]:
@@ -402,6 +408,7 @@ class RunStore:
                         artifact = self.get_run(run_id)
                         artifact["thread_title"] = resolved_title
                         self._write_run_file(run_id, artifact)
+                        self._index_run_for_search(artifact)
             self._write_index(index)
         return dict(thread)
 
@@ -462,6 +469,7 @@ class RunStore:
                 if path.exists():
                     path.unlink()
             self._write_index(index)
+            self._delete_search_entries(user_id=user_id, thread_id=thread_id)
 
     def delete_user(self, user_id: str) -> None:
         with self._lock:
@@ -482,6 +490,7 @@ class RunStore:
                     path.unlink()
             self._user_keys.pop(user_id, None)
             self._write_index(index)
+            self._delete_search_entries(user_id=user_id)
 
     def reset_all(self) -> None:
         with self._lock:
@@ -494,6 +503,349 @@ class RunStore:
                     item.unlink(missing_ok=True)
             self._user_keys.clear()
             self._write_index({"threads": {}, "runs": {}, "users": {}})
+            self._delete_search_index()
+
+    def refresh_search_index(self, *, user_id: str) -> None:
+        index = self._read_index()
+        with closing(self._open_search_index()) as conn:
+            indexed_run_ids = {
+                str(row[0])
+                for row in conn.execute(
+                    "SELECT DISTINCT run_id FROM run_search_entries WHERE user_id = ? AND run_id <> ''",
+                    (user_id,),
+                ).fetchall()
+            }
+        for run_id, item in index.get("runs", {}).items():
+            if item.get("user_id") != user_id or item.get("mode") != "chat":
+                continue
+            expected_rows = 2 if item.get("status") == "completed" else 1
+            if run_id in indexed_run_ids and self._search_entry_count(user_id=user_id, run_id=run_id) >= expected_rows:
+                continue
+            try:
+                artifact = self.get_run(run_id)
+            except RuntimeError:
+                continue
+            self._index_run_for_search(artifact)
+
+    def search_messages(self, *, user_id: str, query: str, limit: int = _SEARCH_INDEX_LIMIT) -> list[dict[str, Any]]:
+        normalized_query = query.casefold().strip()
+        if len(normalized_query) < 2:
+            return []
+        self.refresh_search_index(user_id=user_id)
+        with closing(self._open_search_index()) as conn:
+            rows = self._search_messages_fts(conn, user_id=user_id, query=query, limit=limit)
+            if not rows:
+                rows = self._search_messages_like(conn, user_id=user_id, query=query, limit=limit)
+        results: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for row in rows:
+            content = str(row.get("content", "") or "")
+            if normalized_query not in content.casefold():
+                continue
+            entry_key = str(row.get("entry_key", "") or "")
+            if entry_key in seen:
+                continue
+            seen.add(entry_key)
+            results.append(row)
+        return results
+
+    def replace_thread_search_messages(
+        self,
+        *,
+        user_id: str,
+        thread_id: str,
+        title: str,
+        chat_model: str,
+        updated_at: str,
+        messages: list[dict[str, Any]],
+    ) -> None:
+        with closing(self._open_search_index()) as conn:
+            self._delete_search_entries_with_connection(conn, user_id=user_id, thread_id=thread_id)
+            for index, message in enumerate(messages):
+                role = str(message.get("role", "") or "")
+                content = str(message.get("content", "") or "").strip()
+                if role not in {"user", "assistant"} or not content:
+                    continue
+                entry = {
+                    "entry_key": f"thread:{user_id}:{thread_id}:{index}",
+                    "user_id": user_id,
+                    "thread_id": thread_id,
+                    "run_id": "",
+                    "role": role,
+                    "history_index": index,
+                    "thread_title": title,
+                    "chat_model": chat_model,
+                    "updated_at": updated_at,
+                    "content": content,
+                }
+                self._insert_search_entry(conn, entry)
+            conn.commit()
+
+    def _index_run_for_search(self, artifact: dict[str, Any]) -> None:
+        if artifact.get("mode") != "chat":
+            return
+        user_id = str(artifact.get("user_id", "") or "").strip()
+        thread_id = str(artifact.get("thread_id", "") or "").strip()
+        run_id = str(artifact.get("run_id", "") or "").strip()
+        if not user_id or not thread_id or not run_id:
+            return
+        history_after_message_count = max(0, int(artifact.get("history_after_message_count", 0) or 0))
+        prompt = str(artifact.get("prompt", "") or "").strip()
+        answer = str(artifact.get("answer", "") or "").strip()
+        base = {
+            "user_id": user_id,
+            "thread_id": thread_id,
+            "run_id": run_id,
+            "thread_title": str(artifact.get("thread_title", "") or thread_id),
+            "chat_model": str(artifact.get("chat_model", "") or ""),
+            "updated_at": str(artifact.get("completed_at") or artifact.get("started_at") or ""),
+        }
+        with closing(self._open_search_index()) as conn:
+            self._delete_search_entries_with_connection(conn, run_id=run_id)
+            if prompt:
+                self._insert_search_entry(
+                    conn,
+                    {
+                        **base,
+                        "entry_key": f"{run_id}:user",
+                        "role": "user",
+                        "history_index": max(0, history_after_message_count - 1),
+                        "content": prompt,
+                    },
+                )
+            if answer:
+                self._insert_search_entry(
+                    conn,
+                    {
+                        **base,
+                        "entry_key": f"{run_id}:assistant",
+                        "role": "assistant",
+                        "history_index": history_after_message_count,
+                        "content": answer,
+                    },
+                )
+            conn.commit()
+
+    def _open_search_index(self) -> Any:
+        self._search_index_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = open_application_sqlite(self._search_index_path, data_dir=self.config.data_dir)
+        self._ensure_search_index_schema(conn)
+        return conn
+
+    def _ensure_search_index_schema(self, conn: Any) -> None:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS run_search_entries (
+                entry_key TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                thread_id TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                history_index INTEGER,
+                thread_title TEXT NOT NULL,
+                chat_model TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                content TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_run_search_entries_user_thread
+            ON run_search_entries(user_id, thread_id, updated_at)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_run_search_entries_user_run
+            ON run_search_entries(user_id, run_id)
+            """
+        )
+        try:
+            conn.execute(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS run_search_fts USING fts5(
+                    entry_key UNINDEXED,
+                    user_id UNINDEXED,
+                    thread_id UNINDEXED,
+                    run_id UNINDEXED,
+                    role UNINDEXED,
+                    history_index UNINDEXED,
+                    thread_title,
+                    chat_model UNINDEXED,
+                    updated_at UNINDEXED,
+                    content,
+                    tokenize='unicode61'
+                )
+                """
+            )
+        except Exception:
+            pass
+        conn.commit()
+
+    def _insert_search_entry(self, conn: Any, entry: dict[str, Any]) -> None:
+        values = (
+            str(entry.get("entry_key", "") or ""),
+            str(entry.get("user_id", "") or ""),
+            str(entry.get("thread_id", "") or ""),
+            str(entry.get("run_id", "") or ""),
+            str(entry.get("role", "") or ""),
+            entry.get("history_index"),
+            str(entry.get("thread_title", "") or ""),
+            str(entry.get("chat_model", "") or ""),
+            str(entry.get("updated_at", "") or ""),
+            str(entry.get("content", "") or ""),
+        )
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO run_search_entries (
+                entry_key,
+                user_id,
+                thread_id,
+                run_id,
+                role,
+                history_index,
+                thread_title,
+                chat_model,
+                updated_at,
+                content
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            values,
+        )
+        if self._search_index_has_fts(conn):
+            conn.execute("DELETE FROM run_search_fts WHERE entry_key = ?", (values[0],))
+            conn.execute(
+                """
+                INSERT INTO run_search_fts (
+                    entry_key,
+                    user_id,
+                    thread_id,
+                    run_id,
+                    role,
+                    history_index,
+                    thread_title,
+                    chat_model,
+                    updated_at,
+                    content
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                values,
+            )
+
+    def _search_entry_count(self, *, user_id: str, run_id: str) -> int:
+        with closing(self._open_search_index()) as conn:
+            row = conn.execute(
+                "SELECT count(*) FROM run_search_entries WHERE user_id = ? AND run_id = ?",
+                (user_id, run_id),
+            ).fetchone()
+        return int(row[0] if row else 0)
+
+    def _delete_search_entries(
+        self,
+        *,
+        user_id: str | None = None,
+        thread_id: str | None = None,
+        run_id: str | None = None,
+    ) -> None:
+        if not self._search_index_path.exists():
+            return
+        with closing(self._open_search_index()) as conn:
+            self._delete_search_entries_with_connection(conn, user_id=user_id, thread_id=thread_id, run_id=run_id)
+            conn.commit()
+
+    def _delete_search_entries_with_connection(
+        self,
+        conn: Any,
+        *,
+        user_id: str | None = None,
+        thread_id: str | None = None,
+        run_id: str | None = None,
+    ) -> None:
+        clauses: list[str] = []
+        values: list[str] = []
+        if user_id is not None:
+            clauses.append("user_id = ?")
+            values.append(user_id)
+        if thread_id is not None:
+            clauses.append("thread_id = ?")
+            values.append(thread_id)
+        if run_id is not None:
+            clauses.append("run_id = ?")
+            values.append(run_id)
+        if not clauses:
+            conn.execute("DELETE FROM run_search_entries")
+            if self._search_index_has_fts(conn):
+                conn.execute("DELETE FROM run_search_fts")
+            return
+        where = " AND ".join(clauses)
+        conn.execute(f"DELETE FROM run_search_entries WHERE {where}", tuple(values))
+        if self._search_index_has_fts(conn):
+            conn.execute(f"DELETE FROM run_search_fts WHERE {where}", tuple(values))
+
+    def _delete_search_index(self) -> None:
+        self._search_index_path.unlink(missing_ok=True)
+
+    def _search_messages_fts(self, conn: Any, *, user_id: str, query: str, limit: int) -> list[dict[str, Any]]:
+        fts_query = _build_fts_query(query)
+        if not fts_query or not self._search_index_has_fts(conn):
+            return []
+        try:
+            rows = conn.execute(
+                """
+                SELECT
+                    entry_key,
+                    user_id,
+                    thread_id,
+                    run_id,
+                    role,
+                    history_index,
+                    thread_title,
+                    chat_model,
+                    updated_at,
+                    content
+                FROM run_search_fts
+                WHERE run_search_fts MATCH ? AND user_id = ?
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (fts_query, user_id, max(1, int(limit))),
+            ).fetchall()
+        except Exception:
+            return []
+        return [_search_row_to_dict(row) for row in rows]
+
+    def _search_messages_like(self, conn: Any, *, user_id: str, query: str, limit: int) -> list[dict[str, Any]]:
+        rows = conn.execute(
+            """
+            SELECT
+                entry_key,
+                user_id,
+                thread_id,
+                run_id,
+                role,
+                history_index,
+                thread_title,
+                chat_model,
+                updated_at,
+                content
+            FROM run_search_entries
+            WHERE user_id = ? AND content LIKE ? ESCAPE '\\'
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (user_id, f"%{_escape_like_query(query)}%", max(1, int(limit))),
+        ).fetchall()
+        return [_search_row_to_dict(row) for row in rows]
+
+    def _search_index_has_fts(self, conn: Any) -> bool:
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'run_search_fts'"
+            ).fetchone()
+            return bool(row)
+        except Exception:
+            return False
 
     def _read_index(self) -> dict[str, Any]:
         payload = _read_json_with_retry(self._index_path)
@@ -643,6 +995,43 @@ class RunStore:
         encrypted = base64.b64decode(str(payload.get("payload", "") or "").encode("ascii"))
         decrypted = unprotect_bytes(encrypted, entropy=key)
         return json.loads(decrypted.decode("utf-8"))
+
+
+def _search_row_to_dict(row: Any) -> dict[str, Any]:
+    return {
+        "entry_key": str(row[0] or ""),
+        "user_id": str(row[1] or ""),
+        "thread_id": str(row[2] or ""),
+        "run_id": str(row[3] or ""),
+        "role": str(row[4] or ""),
+        "history_index": None if row[5] is None else int(row[5]),
+        "thread_title": str(row[6] or ""),
+        "chat_model": str(row[7] or ""),
+        "updated_at": str(row[8] or ""),
+        "content": str(row[9] or ""),
+    }
+
+
+def _escape_like_query(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _build_fts_query(value: str) -> str:
+    tokens = []
+    current = []
+    for char in value.casefold():
+        if char.isalnum() or char == "_":
+            current.append(char)
+            continue
+        if current:
+            tokens.append("".join(current))
+            current = []
+    if current:
+        tokens.append("".join(current))
+    tokens = [token for token in tokens if len(token) >= 2]
+    if not tokens:
+        return ""
+    return " AND ".join(f"{token}*" for token in tokens[:8])
 
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:

@@ -4,6 +4,7 @@ type BackendRuntime = {
   host: string;
   port: number;
   token: string;
+  baseUrl?: string;
 };
 
 let runtimePromise: Promise<BackendRuntime> | null = null;
@@ -60,7 +61,7 @@ export type BackendStatus = {
   status: string;
   product_name: string;
   backend: string;
-  default_chat_model: string;
+  configured_chat_model: string;
   chat_model: string;
   default_chat_temperature: number | null;
   chat_temperature: number | null;
@@ -87,7 +88,7 @@ export type TemperaturePreset = {
 };
 
 export type ModelCatalog = {
-  default_model: string;
+  configured_chat_model: string;
   default_temperature: number | null;
   ollama_online: boolean;
   has_local_models: boolean;
@@ -154,7 +155,7 @@ export type DiscoveryReport = {
     use_case: "chat" | "coding" | "vision" | "reasoning" | "embedding";
     atlas_role: "chat" | "embedding";
     installed: boolean;
-    configured_default: boolean;
+    configured_model: boolean;
     supports_images: boolean;
     fit: "good" | "tight" | "cpu-only" | "unavailable" | "too-large";
     runtime: "GPU" | "Hybrid" | "CPU" | "Unknown";
@@ -473,6 +474,8 @@ export type RunnerStartResponse = {
   run_id: string;
   language: string;
   container: string;
+  network?: string;
+  timeout_seconds?: number;
   vnc_url?: string;
 };
 
@@ -750,6 +753,11 @@ async function getBackendRuntime(): Promise<BackendRuntime> {
 }
 
 async function resolveBackendRuntime(): Promise<BackendRuntime> {
+  const configuredRuntime = configuredBrowserBackendRuntime();
+  if (configuredRuntime) {
+    lastRuntime = configuredRuntime;
+    return configuredRuntime;
+  }
   try {
     const runtime = await invoke<BackendRuntime>("backend_runtime");
     lastRuntime = runtime;
@@ -763,7 +771,29 @@ async function resolveBackendRuntime(): Promise<BackendRuntime> {
 }
 
 function buildApiUrl(runtime: BackendRuntime): string {
+  if (runtime.baseUrl) {
+    return runtime.baseUrl;
+  }
   return `http://${runtime.host}:${runtime.port}`;
+}
+
+function configuredBrowserBackendRuntime(): BackendRuntime | null {
+  const rawUrl = String(import.meta.env.VITE_ATLAS_BACKEND_URL ?? "").trim();
+  if (!rawUrl) {
+    return null;
+  }
+  try {
+    const url = new URL(rawUrl);
+    const port = url.port ? Number(url.port) : url.protocol === "https:" ? 443 : 80;
+    return {
+      host: url.hostname,
+      port,
+      token: String(import.meta.env.VITE_ATLAS_BACKEND_TOKEN ?? "").trim(),
+      baseUrl: url.origin,
+    };
+  } catch {
+    throw new Error("VITE_ATLAS_BACKEND_URL must be a valid absolute URL.");
+  }
 }
 
 async function requestWithRuntime<T>(runtime: BackendRuntime, path: string, init?: RequestInit): Promise<T> {

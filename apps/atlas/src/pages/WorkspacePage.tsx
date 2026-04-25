@@ -185,8 +185,8 @@ export function WorkspacePage() {
     });
   }, [threads]);
 
-  const defaultModel =
-    models?.default_model || status?.default_chat_model || status?.chat_model || draftThreadModel || "";
+  const preselectedModel =
+    models?.configured_chat_model || status?.configured_chat_model || status?.chat_model || "";
   const defaultTemperature =
     models?.default_temperature ?? status?.default_chat_temperature ?? status?.chat_temperature ?? null;
   const modelCatalogLoaded = Boolean(models);
@@ -207,14 +207,14 @@ export function WorkspacePage() {
       user_id: currentUserId,
       thread_id: currentThreadId,
       title: editableThreadTitle(currentThreadTitle, currentThreadId),
-      chat_model: draftThreadModel || defaultModel,
+      chat_model: draftThreadModel || preselectedModel,
       temperature: draftThreadTemperature,
       last_mode: "chat",
       updated_at: new Date().toISOString(),
       last_prompt: "",
       last_run_id: "",
     };
-  }, [currentThreadId, currentThreadTitle, currentUserId, defaultModel, draftThreadModel, draftThreadTemperature, threadItems]);
+  }, [currentThreadId, currentThreadTitle, currentUserId, draftThreadModel, draftThreadTemperature, preselectedModel, threadItems]);
   const currentThreadEditableTitle =
     editableThreadTitle(currentThread?.title, currentThreadId) ||
     editableThreadTitle(currentThreadTitle, currentThreadId);
@@ -242,10 +242,9 @@ export function WorkspacePage() {
 
   const threadHasHistory = Boolean(history.length || currentThread?.last_run_id || runDetails?.run_id);
   const lockedThreadModel = threadHasHistory
-    ? runDetails?.chat_model ||
+      ? runDetails?.chat_model ||
       currentThread?.chat_model ||
-      status?.default_chat_model ||
-      models?.default_model ||
+      preselectedModel ||
       ""
     : "";
   const lockedThreadTemperature = useMemo<number | null | undefined>(() => {
@@ -269,12 +268,12 @@ export function WorkspacePage() {
     if (draftThreadModel && availableModels.includes(draftThreadModel)) {
       return draftThreadModel;
     }
-    if (defaultModel && availableModels.includes(defaultModel)) {
-      return defaultModel;
+    if (preselectedModel && availableModels.includes(preselectedModel)) {
+      return preselectedModel;
     }
-    return availableModels[0] || "";
-  }, [availableModels, defaultModel, draftThreadModel, lockedThreadModel, threadHasHistory]);
-  const selectedModel = lockedThreadModel || preferredDraftModel || draftThreadModel || defaultModel;
+    return "";
+  }, [availableModels, draftThreadModel, lockedThreadModel, preselectedModel, threadHasHistory]);
+  const selectedModel = lockedThreadModel || preferredDraftModel;
   const selectedTemperature = lockedThreadTemperature !== undefined ? lockedThreadTemperature : draftThreadTemperature;
   const selectedModelDetails = useMemo(
     () => models?.model_details?.find((item) => item.name === selectedModel),
@@ -543,7 +542,7 @@ export function WorkspacePage() {
     onSuccess: async (thread) => {
       setCurrentThreadId(thread.thread_id);
       setCurrentThreadTitle(editableThreadTitle(thread.title, thread.thread_id));
-      setDraftThreadModel(thread.chat_model || defaultModel);
+      setDraftThreadModel(thread.chat_model || preselectedModel);
       setDraftThreadTemperature(readStoredTemperature(thread) ?? null);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["threads", currentUserId] }),
@@ -576,7 +575,7 @@ export function WorkspacePage() {
       autoScrollToLatestRef.current = true;
       setCurrentThreadId(thread.thread_id);
       setCurrentThreadTitle(editableThreadTitle(thread.title, thread.thread_id));
-      setDraftThreadModel(thread.chat_model || defaultModel);
+      setDraftThreadModel(thread.chat_model || preselectedModel);
       setDraftThreadTemperature(readStoredTemperature(thread) ?? null);
       beginRun(run.run_id, "chat", retryPrompt, currentUserId, thread.thread_id, retryAttachments);
       await Promise.all([
@@ -965,11 +964,16 @@ export function WorkspacePage() {
                     value={selectedModel}
                   >
                     {availableModels.length > 0 ? (
-                      availableModels.map((model) => (
-                        <option key={model} value={model}>
-                          {formatModelLabel(model)}
+                      <>
+                        <option disabled value="">
+                          Choose model
                         </option>
-                      ))
+                        {availableModels.map((model) => (
+                          <option key={model} value={model}>
+                            {formatModelLabel(model)}
+                          </option>
+                        ))}
+                      </>
                     ) : (
                       <option value="">No model available</option>
                     )}

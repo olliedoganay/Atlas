@@ -106,6 +106,30 @@ class RunStoreTests(unittest.TestCase):
             for artifact in artifacts:
                 self.assertEqual(store.get_run(str(artifact["run_id"]))["status"], "queued")
 
+    def test_search_messages_indexes_prompt_and_answer_without_snapshot_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = load_config(project_root=Path(temp_dir), env={})
+            store = RunStore(config)
+
+            artifact = store.create_run(
+                mode="chat",
+                user_id="research_user",
+                thread_id="main",
+                chat_model="gpt-oss:20b",
+                temperature=0.2,
+                prompt="draft notes about Atlantis",
+                history_after_message_count=3,
+            )
+            store.complete_run(artifact["run_id"], answer="Atlantis appears in the archived travel notes.")
+
+            user_hits = store.search_messages(user_id="research_user", query="draft notes")
+            assistant_hits = store.search_messages(user_id="research_user", query="archived travel")
+
+            self.assertEqual(user_hits[0]["role"], "user")
+            self.assertEqual(user_hits[0]["history_index"], 2)
+            self.assertEqual(assistant_hits[0]["role"], "assistant")
+            self.assertEqual(assistant_hits[0]["history_index"], 3)
+
     def test_fail_incomplete_runs_marks_queued_and_running_runs_failed(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config = load_config(project_root=Path(temp_dir), env={})

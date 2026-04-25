@@ -10,6 +10,7 @@ from atlas_local.discovery import (
     _normalize_windows_gpu_entries,
     _resolve_windows_system_label,
     build_discovery_report,
+    load_discovery_models,
 )
 from atlas_local.llm import OllamaCatalogSnapshot, OllamaModelInfo
 
@@ -17,7 +18,7 @@ from atlas_local.llm import OllamaCatalogSnapshot, OllamaModelInfo
 class DiscoveryReportTests(unittest.TestCase):
     @patch("atlas_local.discovery.list_installed_ollama_model_names")
     @patch("atlas_local.discovery.detect_local_hardware")
-    def test_report_marks_memory_degraded_and_falls_back_to_installed_chat_model(
+    def test_report_marks_memory_degraded_and_requires_chat_model_selection(
         self,
         detect_local_hardware_mock,
         list_installed_models_mock,
@@ -36,7 +37,6 @@ class DiscoveryReportTests(unittest.TestCase):
             config = load_config(
                 project_root=Path(temp_dir),
                 env={
-                    "CHAT_MODEL": "gpt-oss:20b",
                     "EMBED_MODEL": "nomic-embed-text:latest",
                 },
             )
@@ -50,11 +50,13 @@ class DiscoveryReportTests(unittest.TestCase):
             payload = build_discovery_report(config, catalog)
 
         self.assertEqual(payload["atlas"]["status"], "memory-degraded")
-        self.assertEqual(payload["atlas"]["effective_chat_model"], "gemma3:4b")
-        self.assertEqual(payload["atlas"]["effective_chat_model_source"], "fallback")
+        self.assertEqual(payload["atlas"]["effective_chat_model"], "")
+        self.assertEqual(payload["atlas"]["effective_chat_model_source"], "none")
         self.assertFalse(payload["atlas"]["configured_chat_model_installed"])
         self.assertFalse(payload["atlas"]["configured_embed_model_installed"])
-        self.assertIn("fall back", payload["atlas"]["notes"][0])
+        self.assertTrue(
+            any("Choose any installed chat model" in note for note in payload["atlas"]["notes"])
+        )
         self.assertEqual(payload["installed_models"][0]["atlas_role"], "vision")
 
     @patch("atlas_local.discovery.list_installed_ollama_model_names")
@@ -72,18 +74,18 @@ class DiscoveryReportTests(unittest.TestCase):
             "gpus": [{"name": "RTX 4090", "memory_gb": 24.0}],
             "detection": {"confidence": "full", "notes": []},
         }
-        list_installed_models_mock.return_value = ["gpt-oss:20b", "nomic-embed-text:latest"]
+        list_installed_models_mock.return_value = ["qwen3:8b", "nomic-embed-text:latest"]
 
         with tempfile.TemporaryDirectory() as temp_dir:
             config = load_config(
                 project_root=Path(temp_dir),
                 env={
-                    "CHAT_MODEL": "gpt-oss:20b",
+                    "CHAT_MODEL": "qwen3:8b",
                     "EMBED_MODEL": "nomic-embed-text:latest",
                 },
             )
             catalog = OllamaCatalogSnapshot(
-                models=(OllamaModelInfo(name="gpt-oss:20b", supports_reasoning=True),),
+                models=(OllamaModelInfo(name="qwen3:8b", supports_reasoning=True),),
                 ollama_online=True,
                 has_local_models=True,
                 source="ollama",
@@ -92,16 +94,77 @@ class DiscoveryReportTests(unittest.TestCase):
             payload = build_discovery_report(config, catalog)
 
         self.assertEqual(payload["atlas"]["status"], "ready")
-        self.assertEqual(payload["atlas"]["effective_chat_model"], "gpt-oss:20b")
+        self.assertEqual(payload["atlas"]["effective_chat_model"], "qwen3:8b")
         self.assertTrue(payload["atlas"]["configured_chat_model_installed"])
         self.assertTrue(payload["atlas"]["configured_embed_model_installed"])
-        self.assertEqual(payload["recommended_models"][0]["name"], "gpt-oss:20b")
+        self.assertEqual(payload["recommended_models"][0]["name"], "qwen3:8b")
         self.assertEqual(payload["recommended_models"][0]["fit"], "good")
         recommended_names = [item["name"] for item in payload["recommended_models"]]
         self.assertIn("llama3.1:8b", recommended_names)
         self.assertIn("qwen3:8b", recommended_names)
         self.assertIn("deepseek-r1:8b", recommended_names)
         self.assertNotIn("qwen2.5:7b", recommended_names)
+
+    @patch("atlas_local.discovery.list_installed_ollama_model_names")
+    @patch("atlas_local.discovery.detect_local_hardware")
+    def test_report_uses_manifest_and_live_ollama_metadata(
+        self,
+        detect_local_hardware_mock,
+        list_installed_models_mock,
+    ) -> None:
+        detect_local_hardware_mock.return_value = {
+            "os": "Windows 11",
+            "platform": "win32",
+            "cpu": {"model": "AMD Ryzen", "logical_cores": 16},
+            "memory": {"total_gb": 32.0},
+            "gpus": [{"name": "RTX 4070", "memory_gb": 12.0}],
+            "detection": {"confidence": "full", "notes": []},
+        }
+        list_installed_models_mock.return_value = ["custom-chat:1b", "live-local:latest"]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            manifest = root / "manifest.json"
+            manifest.write_text(
+                """
+                {
+                  "version": 1,
+                  "models": [
+                    {
+                      "name": "custom-chat:1b",
+                      "title": "Custom local chat",
+                      "use_case": "chat",
+                      "atlas_role": "chat",
+                      "min_ram_gb": 4,
+                      "good_ram_gb": 8,
+                      "min_vram_gb": 2,
+                      "good_vram_gb": 4
+                    }
+                  ]
+                }
+                """,
+                encoding="utf-8",
+            )
+            config = load_config(project_root=root, env={"CHAT_MODEL": "custom-chat:1b"})
+            catalog = OllamaCatalogSnapshot(
+                models=(
+                    OllamaModelInfo(name="custom-chat:1b"),
+                    OllamaModelInfo(name="live-local:latest", supports_reasoning=True),
+                ),
+                ollama_online=True,
+                has_local_models=True,
+                source="ollama",
+            )
+            with patch.dict("os.environ", {"ATLAS_DISCOVERY_MANIFEST": str(manifest)}):
+                payload = build_discovery_report(config, catalog)
+                loaded = load_discovery_models(config)
+
+        self.assertEqual(loaded[0].name, "custom-chat:1b")
+        names = [item["name"] for item in payload["recommended_models"]]
+        self.assertIn("custom-chat:1b", names)
+        self.assertIn("live-local:latest", names)
+        live_item = next(item for item in payload["recommended_models"] if item["name"] == "live-local:latest")
+        self.assertEqual(live_item["source"], "ollama")
 
     @patch("atlas_local.discovery.platform.version", return_value="10.0.26200")
     @patch("atlas_local.discovery.platform.release", return_value="10")

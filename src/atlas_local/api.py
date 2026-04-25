@@ -134,7 +134,7 @@ def create_api_app(service: AtlasBackendService | None = None) -> FastAPI:
             if service is None and managed_service is not None:
                 managed_service.close()
 
-    app = FastAPI(title="Atlas API", version="1.0.6", lifespan=lifespan)
+    app = FastAPI(title="Atlas API", version="1.0.7", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(allowed_origins),
