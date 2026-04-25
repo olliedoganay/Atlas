@@ -64,11 +64,21 @@ jobs:
       - name: Build Atlas MSI release bundle
         run: .\scripts\build_atlas_release.ps1
 
+      - name: Build Atlas MSIX Store package
+        if: ${{ vars.ATLAS_MSIX_IDENTITY_NAME != '' && vars.ATLAS_MSIX_PUBLISHER != '' }}
+        env:
+          ATLAS_MSIX_IDENTITY_NAME: ${{ vars.ATLAS_MSIX_IDENTITY_NAME }}
+          ATLAS_MSIX_PUBLISHER: ${{ vars.ATLAS_MSIX_PUBLISHER }}
+          ATLAS_MSIX_PUBLISHER_DISPLAY_NAME: ${{ vars.ATLAS_MSIX_PUBLISHER_DISPLAY_NAME }}
+        run: .\scripts\build_atlas_msix.ps1 -SkipTauriBuild
+
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
           name: atlas-windows-v${{ steps.version.outputs.atlas_version }}
-          path: apps/atlas/src-tauri/target/release/bundle/**/*.msi
+          path: |
+            apps/atlas/src-tauri/target/release/bundle/**/*.msi
+            output/msix/packages/*.msix
 
       - name: Publish GitHub Release assets
         if: startsWith(github.ref, 'refs/tags/')
@@ -77,4 +87,6 @@ jobs:
           name: Atlas v${{ steps.version.outputs.atlas_version }}
           files: |
             apps/atlas/src-tauri/target/release/bundle/**/*.msi
+            output/msix/packages/*.msix
+          fail_on_unmatched_files: false
           generate_release_notes: true
