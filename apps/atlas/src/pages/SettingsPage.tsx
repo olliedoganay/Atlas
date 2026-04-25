@@ -362,7 +362,7 @@ export function SettingsPage() {
               <div className="settings-row">
                 <div className="settings-row-copy">
                   <strong>Theme</strong>
-                  <p>Choose the desktop appearance. CRT modes apply a retro terminal look with phosphor bloom.</p>
+                  <p>Choose the desktop palette. Every theme uses the same minimal layout and control treatment.</p>
                 </div>
                 <div className="segmented-control">
                   <button
@@ -414,7 +414,7 @@ export function SettingsPage() {
                 <div className="settings-row">
                   <div className="settings-row-copy">
                     <strong>Scanlines</strong>
-                    <p>Overlay horizontal scanlines and a subtle vignette for the full CRT effect.</p>
+                    <p>Add a light terminal texture while keeping the minimal interface intact.</p>
                   </div>
                   <div className="segmented-control">
                     <button

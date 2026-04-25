@@ -53,28 +53,28 @@ class RunStore:
         history_after_message_count: int = 0,
     ) -> dict[str, Any]:
         run_id = str(uuid.uuid4())
-        index = self._read_index()
-        existing_thread = index.get("threads", {}).get(self._thread_key(user_id, thread_id), {})
-        resolved_title = (thread_title or "").strip() or existing_thread.get("title") or thread_id
-        artifact = {
-            "run_id": run_id,
-            "mode": mode,
-            "user_id": user_id,
-            "thread_id": thread_id,
-            "thread_title": resolved_title,
-            "chat_model": chat_model,
-            "temperature": temperature,
-            "prompt": prompt,
-            "status": status,
-            "history_after_message_count": max(0, int(history_after_message_count or 0)),
-            "started_at": now_timestamp(),
-            "completed_at": None,
-            "answer": "",
-            "events": [],
-            "trace_items": [],
-            "error": None,
-        }
         with self._lock:
+            index = self._read_index()
+            existing_thread = index.get("threads", {}).get(self._thread_key(user_id, thread_id), {})
+            resolved_title = (thread_title or "").strip() or existing_thread.get("title") or thread_id
+            artifact = {
+                "run_id": run_id,
+                "mode": mode,
+                "user_id": user_id,
+                "thread_id": thread_id,
+                "thread_title": resolved_title,
+                "chat_model": chat_model,
+                "temperature": temperature,
+                "prompt": prompt,
+                "status": status,
+                "history_after_message_count": max(0, int(history_after_message_count or 0)),
+                "started_at": now_timestamp(),
+                "completed_at": None,
+                "answer": "",
+                "events": [],
+                "trace_items": [],
+                "error": None,
+            }
             if user_id not in index.get("users", {}):
                 index["users"][user_id] = self._build_user_record(
                     user_id,

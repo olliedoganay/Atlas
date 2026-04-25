@@ -26,6 +26,7 @@ import {
 } from "../lib/api";
 import { useBackendPhase } from "../lib/backendPhase";
 import { resolveStartupState } from "../lib/startupState";
+import { displayThreadTitle, editableThreadTitle, requestThreadTitle } from "../lib/threadTitles";
 import { useAtlasStore } from "../store/useAtlasStore";
 
 type ConversationMessage = {
@@ -205,7 +206,7 @@ export function WorkspacePage() {
     return {
       user_id: currentUserId,
       thread_id: currentThreadId,
-      title: currentThreadTitle || currentThreadId,
+      title: editableThreadTitle(currentThreadTitle, currentThreadId),
       chat_model: draftThreadModel || defaultModel,
       temperature: draftThreadTemperature,
       last_mode: "chat",
@@ -214,6 +215,10 @@ export function WorkspacePage() {
       last_run_id: "",
     };
   }, [currentThreadId, currentThreadTitle, currentUserId, defaultModel, draftThreadModel, draftThreadTemperature, threadItems]);
+  const currentThreadEditableTitle =
+    editableThreadTitle(currentThread?.title, currentThreadId) ||
+    editableThreadTitle(currentThreadTitle, currentThreadId);
+  const currentThreadDisplayTitle = displayThreadTitle(currentThreadEditableTitle, currentThreadId);
 
   const currentThreadHasActiveRun =
     Boolean(currentRunId) &&
@@ -413,9 +418,9 @@ export function WorkspacePage() {
   const currentChatWaitingLabel = chatWaitingLabel(currentStage);
 
   useEffect(() => {
-    setDraftTitle(currentThread?.title || currentThreadTitle || currentThreadId || "");
+    setDraftTitle(currentThreadEditableTitle);
     setIsEditingTitle(false);
-  }, [currentThread?.title, currentThreadId, currentThreadTitle]);
+  }, [currentThreadEditableTitle]);
 
   useEffect(() => {
     setExpandedCompactionKeys({});
@@ -474,7 +479,7 @@ export function WorkspacePage() {
         modelForRun,
         temperatureForRun,
         effectiveReasoningMode,
-        (currentThreadTitle || currentThreadId).trim(),
+        requestThreadTitle(currentThreadEditableTitle, currentThreadId),
         crossChatMemoryEnabled,
         autoCompactLongChats,
         attachments,
@@ -537,7 +542,7 @@ export function WorkspacePage() {
     },
     onSuccess: async (thread) => {
       setCurrentThreadId(thread.thread_id);
-      setCurrentThreadTitle(thread.title || thread.thread_id);
+      setCurrentThreadTitle(editableThreadTitle(thread.title, thread.thread_id));
       setDraftThreadModel(thread.chat_model || defaultModel);
       setDraftThreadTemperature(readStoredTemperature(thread) ?? null);
       await Promise.all([
@@ -560,7 +565,7 @@ export function WorkspacePage() {
         thread.chat_model || selectedModel,
         readStoredTemperature(thread) ?? selectedTemperature ?? null,
         effectiveReasoningMode,
-        thread.title || thread.thread_id,
+        requestThreadTitle(thread.title, thread.thread_id),
         crossChatMemoryEnabled,
         autoCompactLongChats,
         payload.attachments,
@@ -570,7 +575,7 @@ export function WorkspacePage() {
     onSuccess: async ({ thread, run, prompt: retryPrompt, attachments: retryAttachments }) => {
       autoScrollToLatestRef.current = true;
       setCurrentThreadId(thread.thread_id);
-      setCurrentThreadTitle(thread.title || thread.thread_id);
+      setCurrentThreadTitle(editableThreadTitle(thread.title, thread.thread_id));
       setDraftThreadModel(thread.chat_model || defaultModel);
       setDraftThreadTemperature(readStoredTemperature(thread) ?? null);
       beginRun(run.run_id, "chat", retryPrompt, currentUserId, thread.thread_id, retryAttachments);
@@ -611,7 +616,7 @@ export function WorkspacePage() {
   }, [draftThreadModel, preferredDraftModel, setDraftThreadModel, threadHasHistory]);
 
   useEffect(() => {
-    const resolvedTitle = currentThread?.title || currentThreadId || "";
+    const resolvedTitle = editableThreadTitle(currentThread?.title, currentThreadId);
     if (resolvedTitle && resolvedTitle !== currentThreadTitle) {
       setCurrentThreadTitle(resolvedTitle);
     }
@@ -841,21 +846,21 @@ export function WorkspacePage() {
   const commitTitle = useMutation({
     mutationFn: async (title: string) => renameThread(currentThreadId, currentUserId, title),
     onSuccess: async (thread) => {
-      setCurrentThreadTitle(thread.title || thread.thread_id);
+      setCurrentThreadTitle(editableThreadTitle(thread.title, thread.thread_id));
       setIsEditingTitle(false);
       await queryClient.invalidateQueries({ queryKey: ["threads", currentUserId] });
     },
   });
 
   const saveTitle = async () => {
-    const normalized = draftTitle.trim() || currentThreadId;
+    const normalized = draftTitle.trim();
     if (!threadHasHistory) {
       setCurrentThreadTitle(normalized);
       setDraftTitle(normalized);
       setIsEditingTitle(false);
       return;
     }
-    await commitTitle.mutateAsync(normalized);
+    await commitTitle.mutateAsync(normalized || currentThreadDisplayTitle);
   };
 
   const appendAttachmentsFromFiles = async (files: File[]) => {
@@ -909,7 +914,7 @@ export function WorkspacePage() {
                       void saveTitle();
                     }
                     if (event.key === "Escape") {
-                      setDraftTitle(currentThread?.title || currentThreadTitle || currentThreadId || "");
+                      setDraftTitle(currentThreadEditableTitle);
                       setIsEditingTitle(false);
                     }
                   }}
@@ -922,7 +927,7 @@ export function WorkspacePage() {
                 <button
                   className="ghost-button icon-button"
                   onClick={() => {
-                    setDraftTitle(currentThread?.title || currentThreadTitle || currentThreadId || "");
+                    setDraftTitle(currentThreadEditableTitle);
                     setIsEditingTitle(false);
                   }}
                   type="button"
@@ -932,7 +937,7 @@ export function WorkspacePage() {
               </>
             ) : (
               <>
-                <h1>{currentThread?.title || currentThreadTitle || currentThreadId || "New chat"}</h1>
+                <h1>{currentThreadDisplayTitle}</h1>
                 <button className="ghost-button icon-button title-edit-button" onClick={() => setIsEditingTitle(true)} type="button">
                   <Edit3 size={16} />
                 </button>
@@ -1436,7 +1441,7 @@ export function WorkspacePage() {
             <div className="workspace-thinking-panel-header">
               <div className="workspace-thinking-panel-copy">
                 <p className="workspace-section-label">Deciding</p>
-                <h2>{currentThread?.title || currentThreadTitle || currentThreadId || "Run details"}</h2>
+                <h2>{displayThreadTitle(currentThreadEditableTitle, currentThreadId, "Run details")}</h2>
                 <p className="workspace-thinking-panel-summary">
                   {currentThreadHasActiveChatRun
                     ? "New deciding traces append here and stay in order for this thread."
