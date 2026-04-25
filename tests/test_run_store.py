@@ -1,4 +1,6 @@
+import concurrent.futures
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -65,6 +67,44 @@ class RunStoreTests(unittest.TestCase):
             self.assertIsNone(artifact["temperature"])
             self.assertIsNone(store.get_run(artifact["run_id"])["temperature"])
             self.assertIsNone(store.get_thread(user_id="research_user", thread_id="main")["temperature"])
+
+    def test_concurrent_create_run_preserves_every_index_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = load_config(project_root=Path(temp_dir), env={})
+            store = RunStore(config)
+            original_read_index = store._read_index
+
+            def slow_read_index():
+                index = original_read_index()
+                time.sleep(0.01)
+                return index
+
+            store._read_index = slow_read_index  # type: ignore[method-assign]
+
+            def create(index: int) -> dict[str, object]:
+                return store.create_run(
+                    mode="chat",
+                    user_id="research_user",
+                    thread_id=f"thread-{index}",
+                    chat_model="gpt-oss:20b",
+                    temperature=0.2,
+                    prompt=f"prompt {index}",
+                    status="queued",
+                )
+
+            try:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+                    artifacts = list(executor.map(create, range(8)))
+            finally:
+                store._read_index = original_read_index  # type: ignore[method-assign]
+
+            self.assertEqual(len(store.list_threads(user_id="research_user")), 8)
+            self.assertCountEqual(
+                [item["run_id"] for item in store.list_runs_for_thread(user_id="research_user", thread_id="thread-0")],
+                [artifacts[0]["run_id"]],
+            )
+            for artifact in artifacts:
+                self.assertEqual(store.get_run(str(artifact["run_id"]))["status"], "queued")
 
     def test_fail_incomplete_runs_marks_queued_and_running_runs_failed(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

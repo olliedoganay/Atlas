@@ -1,6 +1,7 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
 
 import { getModels, getRun, getStatus, getThreads } from "../lib/api";
+import { displayThreadTitle } from "../lib/threadTitles";
 import { useAtlasStore } from "../store/useAtlasStore";
 
 export function AdvancedPage() {
@@ -86,7 +87,7 @@ export function AdvancedPage() {
           <div className="advanced-card-head">
             <div>
               <p className="workspace-section-label">Current thread</p>
-              <h3>{currentThread?.title || currentThreadId || "No active thread"}</h3>
+              <h3>{displayThreadTitle(currentThread, currentThreadId, "No active thread")}</h3>
             </div>
           </div>
           <dl className="advanced-stat-list">
@@ -125,7 +126,7 @@ export function AdvancedPage() {
               <article className="stack-card advanced-run-card" key={run.run_id}>
                 <div className="advanced-run-head">
                   <div>
-                    <strong>{run.thread_title || run.thread_id}</strong>
+                    <strong>{displayThreadTitle(run.thread_title, run.thread_id)}</strong>
                     <p>{run.chat_model || "Local model"} - {run.mode}</p>
                   </div>
                   <span
@@ -199,8 +200,6 @@ function formatDate(value?: string) {
   return new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
   }).format(date);
 }
 

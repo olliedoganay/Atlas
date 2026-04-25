@@ -66,6 +66,57 @@ class FakeService:
             ],
         }
 
+    def discovery(self):
+        return {
+            "system": {
+                "os": "Windows 11",
+                "platform": "win32",
+                "cpu": {"model": "Test CPU", "logical_cores": 16},
+                "memory": {"total_gb": 32.0},
+                "gpus": [{"name": "Test GPU", "memory_gb": 12.0}],
+                "detection": {"confidence": "full", "notes": []},
+            },
+            "atlas": {
+                "status": "memory-degraded",
+                "summary": "Atlas can start chats, but memory retrieval is degraded until the embed model is installed.",
+                "notes": ["The configured default chat model 'test-model' is installed."],
+                "ollama_url": "http://127.0.0.1:11434",
+                "ollama_online": True,
+                "has_local_chat_models": True,
+                "configured_chat_model": "test-model",
+                "configured_chat_model_installed": True,
+                "effective_chat_model": "test-model",
+                "effective_chat_model_source": "configured",
+                "configured_embed_model": "embed-model",
+                "configured_embed_model_installed": False,
+            },
+            "installed_models": [
+                {
+                    "name": "test-model",
+                    "atlas_role": "chat",
+                    "configured_chat_model": True,
+                    "configured_embed_model": False,
+                    "supports_images": False,
+                    "supports_reasoning": False,
+                }
+            ],
+            "recommended_models": [
+                {
+                    "name": "test-model",
+                    "title": "Default chat model",
+                    "use_case": "chat",
+                    "atlas_role": "chat",
+                    "installed": True,
+                    "configured_default": True,
+                    "supports_images": False,
+                    "fit": "good",
+                    "runtime": "GPU",
+                    "reason": "Fits comfortably.",
+                    "pull_command": "ollama pull test-model",
+                }
+            ],
+        }
+
     def list_users(self):
         return [
             {
@@ -245,11 +296,13 @@ class ApiTests(unittest.TestCase):
         health = self.client.get("/health")
         status = self.client.get("/status")
         models = self.client.get("/models")
+        discovery = self.client.get("/discovery")
         users = self.client.get("/users")
         memories = self.client.get("/memories", params={"user_id": "research_user"})
         self.assertEqual(health.status_code, 200)
         self.assertEqual(status.status_code, 200)
         self.assertEqual(models.status_code, 200)
+        self.assertEqual(discovery.status_code, 200)
         self.assertEqual(users.status_code, 200)
         self.assertEqual(memories.status_code, 200)
         self.assertEqual(health.json()["product"], "Atlas")
@@ -258,6 +311,8 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(models.json()["ollama_online"])
         self.assertTrue(models.json()["has_local_models"])
         self.assertTrue(models.json()["model_details"][1]["supports_images"])
+        self.assertEqual(discovery.json()["atlas"]["status"], "memory-degraded")
+        self.assertEqual(discovery.json()["recommended_models"][0]["pull_command"], "ollama pull test-model")
         self.assertEqual(users.json()[0]["user_id"], "research_user")
         self.assertEqual(memories.json()[0]["memory_id"], "mem-1")
 

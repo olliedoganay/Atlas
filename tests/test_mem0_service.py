@@ -89,6 +89,40 @@ class Mem0ServiceCollectionMigrationTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "memory service is unavailable"):
                     service.list(user_id="research_user", limit=10)
 
+    def test_delete_all_initializes_memory_before_deleting_user_memories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = load_config(project_root=Path(tmp), env={})
+            service = Mem0Service(config)
+            deleted_users: list[str] = []
+
+            class FakeMemory:
+                def delete_all(self, *, user_id: str) -> None:
+                    deleted_users.append(user_id)
+
+            with patch("atlas_local.memory.mem0_service.Memory.from_config", return_value=FakeMemory()) as factory:
+                service.delete_all(user_id="research_user")
+
+            factory.assert_called_once()
+            self.assertEqual(deleted_users, ["research_user"])
+
+    def test_reset_removes_memory_storage_without_initializing_memory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = load_config(project_root=Path(tmp), env={})
+            service = Mem0Service(config)
+            collection_file = config.qdrant_path / "collection" / config.mem0_collection / "storage.sqlite"
+            collection_file.parent.mkdir(parents=True, exist_ok=True)
+            collection_file.write_text("vector data", encoding="utf-8")
+            config.mem0_history_db.write_text("history data", encoding="utf-8")
+
+            with patch("atlas_local.memory.mem0_service.Memory.from_config") as factory:
+                service.reset()
+
+            factory.assert_not_called()
+            self.assertTrue(config.qdrant_path.exists())
+            self.assertEqual(list(config.qdrant_path.iterdir()), [])
+            self.assertFalse(config.mem0_history_db.exists())
+            self.assertTrue(config.mem0_history_db.parent.exists())
+
     def test_constructor_patches_qdrant_local_storage_to_encrypted_sqlite(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = load_config(project_root=Path(tmp), env={})

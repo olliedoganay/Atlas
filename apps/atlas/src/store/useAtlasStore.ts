@@ -37,6 +37,7 @@ type AtlasState = {
   autoCompactLongChats: boolean;
   crtScanlines: boolean;
   navCollapsed: boolean;
+  navWidth: number;
   settingsSidebarCollapsed: boolean;
   currentRunId: string | null;
   currentRunMode: RunMode | null;
@@ -64,6 +65,7 @@ type AtlasState = {
   setAutoCompactLongChats: (value: boolean) => void;
   setCrtScanlines: (value: boolean) => void;
   toggleNavCollapsed: () => void;
+  setNavWidth: (value: number) => void;
   toggleSettingsSidebarCollapsed: () => void;
   beginRun: (
     runId: string,
@@ -96,7 +98,7 @@ export const useAtlasStore = create<AtlasState>()(
       theme: defaultTheme,
       currentUserId: "",
       currentThreadId: "main",
-      currentThreadTitle: "main",
+      currentThreadTitle: "Main",
       draftThreadModel: "",
       draftThreadTemperature: null,
       reasoningMode: "on",
@@ -104,6 +106,7 @@ export const useAtlasStore = create<AtlasState>()(
       autoCompactLongChats: true,
       crtScanlines: true,
       navCollapsed: false,
+      navWidth: 200,
       settingsSidebarCollapsed: false,
       currentRunId: null,
       currentRunMode: null,
@@ -131,6 +134,7 @@ export const useAtlasStore = create<AtlasState>()(
       setAutoCompactLongChats: (value) => set({ autoCompactLongChats: value }),
       setCrtScanlines: (value) => set({ crtScanlines: value }),
       toggleNavCollapsed: () => set((state) => ({ navCollapsed: !state.navCollapsed })),
+      setNavWidth: (value) => set({ navWidth: value }),
       toggleSettingsSidebarCollapsed: () =>
         set((state) => ({ settingsSidebarCollapsed: !state.settingsSidebarCollapsed })),
       beginRun: (runId, mode, prompt, userId, threadId, attachments = []) =>
@@ -236,7 +240,7 @@ export const useAtlasStore = create<AtlasState>()(
     }),
     {
       name: "atlas-ui-state",
-      version: 9,
+      version: 10,
       migrate: (persistedState, version) => {
         if (!persistedState || typeof persistedState !== "object") {
           return persistedState as AtlasState;
@@ -259,6 +263,12 @@ export const useAtlasStore = create<AtlasState>()(
         if (version < 7) {
           migrated.reasoningMode = "on";
         }
+        if (version < 10) {
+          migrated.navWidth = 200;
+        }
+        if (migrated.currentThreadTitle === "main") {
+          migrated.currentThreadTitle = "Main";
+        }
         return migrated as AtlasState;
       },
       partialize: (state) => ({
@@ -272,6 +282,7 @@ export const useAtlasStore = create<AtlasState>()(
         crossChatMemoryEnabled: state.crossChatMemoryEnabled,
         autoCompactLongChats: state.autoCompactLongChats,
         navCollapsed: state.navCollapsed,
+        navWidth: state.navWidth,
         settingsSidebarCollapsed: state.settingsSidebarCollapsed,
         recentSearchQueries: state.recentSearchQueries,
       }),

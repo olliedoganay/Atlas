@@ -55,29 +55,30 @@ class Mem0Service:
         return [StoredMemory.from_dict(item) for item in response.get("results", [])]
 
     def delete_all(self, *, user_id: str) -> None:
-        memory = self._memory
-        if memory is None:
-            return
-        memory.delete_all(user_id=user_id)
+        self._require_memory().delete_all(user_id=user_id)
 
     def reset(self) -> None:
-        memory = self._memory
-        if memory is None:
-            return
-        memory.reset()
+        self.close()
+        _remove_memory_path(self.config.qdrant_path)
+        _remove_memory_path(self.config.mem0_history_db)
+        self.config.qdrant_path.mkdir(parents=True, exist_ok=True)
+        self.config.mem0_history_db.parent.mkdir(parents=True, exist_ok=True)
 
     def close(self) -> None:
         memory = self._memory
         if memory is None:
             return
         try:
-            memory.close()
+            try:
+                memory.close()
+            finally:
+                vector_store = getattr(memory, "vector_store", None)
+                client = getattr(vector_store, "client", None)
+                close = getattr(client, "close", None)
+                if callable(close):
+                    close()
         finally:
-            vector_store = getattr(memory, "vector_store", None)
-            client = getattr(vector_store, "client", None)
-            close = getattr(client, "close", None)
-            if callable(close):
-                close()
+            self._memory = None
 
     def _require_memory(self) -> Memory:
         if self._memory is not None:
@@ -126,6 +127,13 @@ class Mem0Service:
                 "Atlas memory service is unavailable. Make sure Ollama is running and the configured models are available."
             ) from exc
         return self._memory
+
+
+def _remove_memory_path(path: Path) -> None:
+    if path.is_dir():
+        shutil.rmtree(path)
+    else:
+        path.unlink(missing_ok=True)
 
 
 def _reconcile_legacy_qdrant_collections(config: AppConfig) -> None:

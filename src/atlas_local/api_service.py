@@ -18,6 +18,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pypdf import PdfReader
 
 from .config import AppConfig, load_config
+from .discovery import build_discovery_report
 from .graph.builder import AgentApplication, build_chat_application
 from .graph.builder import post_synthesis_node_sequence, pre_synthesis_node_sequence
 from .graph.context import GraphContext
@@ -246,6 +247,9 @@ class AtlasBackendService:
             "models": [item.name for item in catalog.models],
             "model_details": [item.to_dict() for item in catalog.models],
         }
+
+    def discovery(self) -> dict[str, Any]:
+        return build_discovery_report(self.config, self._get_model_catalog())
 
     def list_users(self) -> list[dict[str, Any]]:
         self._ensure_runtime_state()
@@ -766,10 +770,7 @@ class AtlasBackendService:
             raise RuntimeError("User confirmation did not match the requested user id.")
         self._ensure_user_unlocked(user_id)
         thread_ids = {item["thread_id"] for item in self.run_store.list_threads(user_id=user_id)}
-        try:
-            self.app.memory_service.delete_all(user_id=user_id)
-        except Exception:
-            pass
+        self.app.memory_service.delete_all(user_id=user_id)
         for thread_id in thread_ids:
             self.reset_thread(thread_id=thread_id, user_id=user_id)
         self.run_store.delete_user(user_id)
@@ -836,10 +837,7 @@ class AtlasBackendService:
             conn.execute("DELETE FROM writes")
             conn.execute("DELETE FROM checkpoints")
             conn.commit()
-        try:
-            self.app.memory_service.reset()
-        except Exception:
-            pass
+        self.app.memory_service.reset()
         runs_dir = self.config.data_dir / "runs"
         if runs_dir.exists():
             shutil.rmtree(runs_dir, ignore_errors=True)

@@ -104,6 +104,65 @@ export type ModelCatalog = {
   }>;
 };
 
+export type DiscoveryReport = {
+  system: {
+    os: string;
+    platform: string;
+    cpu: {
+      model: string | null;
+      logical_cores: number | null;
+    };
+    memory: {
+      total_gb: number | null;
+    };
+    gpus: Array<{
+      name: string;
+      memory_gb: number | null;
+      kind?: "dedicated" | "integrated" | "unknown";
+      memory_source?: "nvidia-smi" | "adapterram" | "shared" | "unknown";
+    }>;
+    detection: {
+      confidence: "minimal" | "partial" | "good" | "full";
+      notes: string[];
+    };
+  };
+  atlas: {
+    status: "ready" | "memory-degraded" | "chat-blocked" | "runtime-unavailable";
+    summary: string;
+    notes: string[];
+    ollama_url: string;
+    ollama_online: boolean;
+    has_local_chat_models: boolean;
+    configured_chat_model: string;
+    configured_chat_model_installed: boolean;
+    effective_chat_model: string;
+    effective_chat_model_source: "configured" | "fallback" | "none";
+    configured_embed_model: string;
+    configured_embed_model_installed: boolean;
+  };
+  installed_models: Array<{
+    name: string;
+    atlas_role: "chat" | "embedding" | "vision" | "other";
+    configured_chat_model: boolean;
+    configured_embed_model: boolean;
+    supports_images: boolean;
+    supports_reasoning: boolean;
+  }>;
+  recommended_models: Array<{
+    name: string;
+    title: string;
+    use_case: "chat" | "coding" | "vision" | "reasoning" | "embedding";
+    atlas_role: "chat" | "embedding";
+    installed: boolean;
+    configured_default: boolean;
+    supports_images: boolean;
+    fit: "good" | "tight" | "cpu-only" | "unavailable" | "too-large";
+    runtime: "GPU" | "Hybrid" | "CPU" | "Unknown";
+    reason: string;
+    pull_command: string;
+  }>;
+};
+
 export type RunStatusEvent = {
   type: string;
   timestamp: string;
@@ -210,6 +269,10 @@ export function getStatus() {
 
 export function getModels() {
   return request<ModelCatalog>("/models");
+}
+
+export function getDiscovery() {
+  return request<DiscoveryReport>("/discovery");
 }
 
 export function getHealth() {

@@ -4,6 +4,7 @@ import {
   Activity,
   ChevronLeft,
   ChevronRight,
+  Compass,
   Copy,
   Plus,
   RotateCcw,
@@ -12,7 +13,7 @@ import {
   Workflow,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 import { duplicateThread, getModels, getStatus, getThreads, getUsers, resetThread, restartManagedBackend, type ThreadSummary } from "../lib/api";
@@ -22,12 +23,17 @@ import { RunStreamCoordinator } from "./RunStreamCoordinator";
 import { useAtlasStore } from "../store/useAtlasStore";
 import { useBackendPhase } from "../lib/backendPhase";
 import { resolveStartupState } from "../lib/startupState";
+import { displayThreadTitle, editableThreadTitle, threadInitial } from "../lib/threadTitles";
 
 const navigation = [
   { to: "/workspace", label: "Workspace", icon: Workflow },
+  { to: "/discovery", label: "Discovery", icon: Compass },
   { to: "/advanced", label: "Advanced", icon: Activity },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
+const NAV_WIDTH_MIN = 200;
+const NAV_WIDTH_MAX = 420;
+const NAV_WIDTH_STEP = 16;
 
 export function AtlasShell() {
   const location = useLocation();
@@ -38,6 +44,7 @@ export function AtlasShell() {
   const draftThreadModel = useAtlasStore((state) => state.draftThreadModel);
   const draftThreadTemperature = useAtlasStore((state) => state.draftThreadTemperature);
   const navCollapsed = useAtlasStore((state) => state.navCollapsed);
+  const navWidth = useAtlasStore((state) => state.navWidth);
   const setCurrentUserId = useAtlasStore((state) => state.setCurrentUserId);
   const setCurrentThreadId = useAtlasStore((state) => state.setCurrentThreadId);
   const setCurrentThreadTitle = useAtlasStore((state) => state.setCurrentThreadTitle);
@@ -47,9 +54,11 @@ export function AtlasShell() {
   const backendStartupStartedAt = useAtlasStore((state) => state.backendStartupStartedAt);
   const markBackendBooting = useAtlasStore((state) => state.markBackendBooting);
   const toggleNavCollapsed = useAtlasStore((state) => state.toggleNavCollapsed);
+  const setNavWidth = useAtlasStore((state) => state.setNavWidth);
   const isWorkspaceRoute = location.pathname === "/workspace";
   const [threadToDelete, setThreadToDelete] = useState<ThreadSummary | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isNavResizing, setIsNavResizing] = useState(false);
 
   const {
     data: status,
@@ -113,7 +122,7 @@ export function AtlasShell() {
         const remaining = nextThreads.filter((item) => !isSameThread(item, thread, resolvedUserId));
         if (remaining.length > 0) {
           setCurrentThreadId(remaining[0].thread_id);
-          setCurrentThreadTitle(remaining[0].title || remaining[0].thread_id);
+          setCurrentThreadTitle(editableThreadTitle(remaining[0].title, remaining[0].thread_id));
           setDraftThreadModel(remaining[0].chat_model || defaultModel);
           setDraftThreadTemperature(resolveThreadTemperature(remaining[0], defaultTemperature));
         } else {
@@ -155,7 +164,7 @@ export function AtlasShell() {
     mutationFn: async (thread: ThreadSummary) => duplicateThread(thread.thread_id, thread.user_id || currentUserId),
     onSuccess: async (thread) => {
       setCurrentThreadId(thread.thread_id);
-      setCurrentThreadTitle(thread.title || thread.thread_id);
+      setCurrentThreadTitle(editableThreadTitle(thread.title, thread.thread_id));
       setDraftThreadModel(thread.chat_model || defaultModel);
       setDraftThreadTemperature(resolveThreadTemperature(thread, defaultTemperature));
       await Promise.all([
@@ -198,7 +207,7 @@ export function AtlasShell() {
       {
         user_id: currentUserId,
         thread_id: currentThreadId,
-        title: currentThreadTitle || currentThreadId,
+        title: editableThreadTitle(currentThreadTitle, currentThreadId),
         chat_model: draftThreadModel || defaultModel,
         temperature: draftThreadTemperature,
         last_mode: "chat",
@@ -213,7 +222,7 @@ export function AtlasShell() {
   useEffect(() => {
     if (usersFetched && currentUserId && (!currentUserProfile || currentUserProfile.locked)) {
       setCurrentUserId("");
-      setCurrentThreadTitle("main");
+      setCurrentThreadTitle("Main");
       setCurrentThreadId("main");
     }
   }, [currentUserId, currentUserProfile, setCurrentThreadId, setCurrentThreadTitle, setCurrentUserId, usersFetched]);
@@ -221,7 +230,7 @@ export function AtlasShell() {
   useEffect(() => {
     if (isWorkspaceRoute && !currentThreadId && threadItems.length) {
       setCurrentThreadId(threadItems[0].thread_id);
-      setCurrentThreadTitle(threadItems[0].title || threadItems[0].thread_id);
+      setCurrentThreadTitle(editableThreadTitle(threadItems[0].title, threadItems[0].thread_id));
     }
   }, [currentThreadId, isWorkspaceRoute, setCurrentThreadId, setCurrentThreadTitle, threadItems]);
 
@@ -251,7 +260,7 @@ export function AtlasShell() {
 
   const selectThread = (thread: ThreadSummary) => {
     setCurrentThreadId(thread.thread_id);
-    setCurrentThreadTitle(thread.title || thread.thread_id);
+    setCurrentThreadTitle(editableThreadTitle(thread.title, thread.thread_id));
     setDraftThreadModel(thread.chat_model || defaultModel);
     setDraftThreadTemperature(resolveThreadTemperature(thread, defaultTemperature));
   };
@@ -263,10 +272,64 @@ export function AtlasShell() {
     setDraftThreadTemperature(null);
   };
 
+  const resizeNav = (value: number) => {
+    setNavWidth(clamp(value, NAV_WIDTH_MIN, NAV_WIDTH_MAX));
+  };
+
+  const startNavResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (navCollapsed) {
+      return;
+    }
+    event.preventDefault();
+    event.currentTarget.focus();
+    const startX = event.clientX;
+    const startWidth = navWidth;
+    setIsNavResizing(true);
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      resizeNav(startWidth + moveEvent.clientX - startX);
+    };
+    const stopResize = () => {
+      setIsNavResizing(false);
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", stopResize);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopResize);
+    window.addEventListener("pointercancel", stopResize);
+  };
+
+  const handleNavResizeKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (navCollapsed) {
+      return;
+    }
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      resizeNav(navWidth - NAV_WIDTH_STEP);
+    }
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      resizeNav(navWidth + NAV_WIDTH_STEP);
+    }
+    if (event.key === "Home") {
+      event.preventDefault();
+      resizeNav(NAV_WIDTH_MIN);
+    }
+    if (event.key === "End") {
+      event.preventDefault();
+      resizeNav(NAV_WIDTH_MAX);
+    }
+  };
+
   const userLabel = currentUserId || "No user selected";
+  const shellStyle = navCollapsed
+    ? undefined
+    : ({ "--atlas-nav-width": `${clamp(navWidth, NAV_WIDTH_MIN, NAV_WIDTH_MAX)}px` } as CSSProperties);
 
   return (
-    <div className={`app-shell ${navCollapsed ? "nav-collapsed" : ""}`}>
+    <div className={`app-shell ${navCollapsed ? "nav-collapsed" : ""}${isNavResizing ? " nav-resizing" : ""}`} style={shellStyle}>
       <RunStreamCoordinator />
       <aside className={`global-nav ${navCollapsed ? "collapsed" : ""}`}>
         <div className="brand-lockup">
@@ -317,10 +380,10 @@ export function AtlasShell() {
                       className={`collapsed-thread-button ${thread.thread_id === currentThreadId ? "active" : ""}`}
                       key={thread.thread_id}
                       onClick={() => selectThread(thread)}
-                      title={thread.thread_id}
+                      title={displayThreadTitle(thread)}
                       type="button"
                     >
-                      {thread.thread_id.slice(0, 1).toUpperCase()}
+                      {threadInitial(thread)}
                     </button>
                   ))}
                 </div>
@@ -356,7 +419,7 @@ export function AtlasShell() {
                             key={thread.thread_id}
                           >
                             <button
-                              aria-label={`Duplicate ${thread.title || thread.thread_id}`}
+                              aria-label={`Duplicate ${displayThreadTitle(thread)}`}
                               className="ghost-button icon-button thread-card-duplicate"
                               onClick={() => duplicateThreadMutation.mutate(thread)}
                               type="button"
@@ -364,7 +427,7 @@ export function AtlasShell() {
                               <Copy size={14} />
                             </button>
                             <button
-                              aria-label={`Delete ${thread.title || thread.thread_id}`}
+                              aria-label={`Delete ${displayThreadTitle(thread)}`}
                               className="ghost-button icon-button thread-card-delete"
                               onClick={() => setThreadToDelete(thread)}
                               type="button"
@@ -377,7 +440,7 @@ export function AtlasShell() {
                               type="button"
                             >
                               <div className="thread-card-top">
-                                <strong>{thread.title || thread.thread_id}</strong>
+                                <strong>{displayThreadTitle(thread)}</strong>
                               </div>
                               <p>{thread.last_prompt || "Empty draft chat"}</p>
                               <div className="thread-card-foot">
@@ -427,6 +490,21 @@ export function AtlasShell() {
             </button>
           ) : null}
         </div>
+        {!navCollapsed ? (
+          <div
+            aria-label="Resize sidebar"
+            aria-orientation="vertical"
+            aria-valuemax={NAV_WIDTH_MAX}
+            aria-valuemin={NAV_WIDTH_MIN}
+            aria-valuenow={clamp(navWidth, NAV_WIDTH_MIN, NAV_WIDTH_MAX)}
+            className="nav-resize-handle"
+            onKeyDown={handleNavResizeKeyDown}
+            onPointerDown={startNavResize}
+            role="separator"
+            tabIndex={0}
+            title="Drag to resize sidebar"
+          />
+        ) : null}
       </aside>
 
       <main className="main-shell">
@@ -437,7 +515,7 @@ export function AtlasShell() {
 
       <ResetDialog
         confirmLabel="Delete chat"
-        description={`Delete "${threadToDelete?.title || threadToDelete?.thread_id || ""}", its thread history, traces, and thread-linked learned state?`}
+        description={`Delete "${threadToDelete ? displayThreadTitle(threadToDelete) : ""}", its thread history, traces, and thread-linked learned state?`}
         onConfirm={async () => {
           if (!threadToDelete) {
             return;
@@ -458,7 +536,7 @@ export function AtlasShell() {
           const targetThread: ThreadSummary = existingThread ?? {
             user_id: currentUserId,
             thread_id: result.thread_id,
-            title: result.thread_title || result.thread_id,
+            title: editableThreadTitle(result.thread_title, result.thread_id),
             chat_model: result.chat_model || defaultModel,
             temperature: null,
             last_mode: "chat",
@@ -489,14 +567,22 @@ function formatDate(value?: string) {
   }
   const date = new Date(value);
   if (Number.isNaN(date.valueOf())) {
-    return value;
+    return "";
   }
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
+  const today = new Date();
+  const dateOnly = new Date(date.getFullYear(), date.getMonth(), date.getDate()).valueOf();
+  const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate()).valueOf();
+  const dayDelta = Math.round((todayOnly - dateOnly) / 86400000);
+  if (dayDelta === 0) {
+    return "Today";
+  }
+  if (dayDelta === 1) {
+    return "Yesterday";
+  }
+  if (dayDelta > 1 && dayDelta < 7) {
+    return new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(date);
+  }
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(date);
 }
 
 function formatModelLabel(value: string) {
@@ -518,6 +604,13 @@ function isSameThread(thread: ThreadSummary, target: ThreadSummary, fallbackUser
   const threadUserId = thread.user_id || fallbackUserId;
   const targetUserId = target.user_id || fallbackUserId;
   return threadUserId === targetUserId && thread.thread_id === target.thread_id;
+}
+
+function clamp(value: number, min: number, max: number) {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+  return Math.min(max, Math.max(min, Math.round(value)));
 }
 
 function buildDraftThreadId() {

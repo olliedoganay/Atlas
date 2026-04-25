@@ -312,6 +312,38 @@ class ResetUserTests(unittest.TestCase):
             [("main", "research_user"), ("notes", "research_user")],
         )
 
+    def test_reset_user_reports_memory_delete_failure(self) -> None:
+        service = AtlasBackendService.__new__(AtlasBackendService)
+        deleted_users: list[str] = []
+        reset_thread_calls: list[str] = []
+
+        def delete_all(*, user_id: str) -> None:
+            raise RuntimeError("memory delete failed")
+
+        def delete_user(user_id: str) -> None:
+            deleted_users.append(user_id)
+
+        def reset_thread(*, thread_id: str, user_id: str | None = None) -> dict[str, object]:
+            reset_thread_calls.append(thread_id)
+            return {"status": "ok"}
+
+        service.app = SimpleNamespace(memory_service=SimpleNamespace(delete_all=delete_all))
+        service.run_store = SimpleNamespace(
+            list_threads=lambda **_: [{"thread_id": "main"}],
+            delete_user=delete_user,
+        )
+        service.reset_thread = reset_thread
+
+        with self.assertRaisesRegex(RuntimeError, "memory delete failed"):
+            AtlasBackendService.reset_user(
+                service,
+                user_id="research_user",
+                confirmation_user_id="research_user",
+            )
+
+        self.assertEqual(deleted_users, [])
+        self.assertEqual(reset_thread_calls, [])
+
 
 class ContextCompactionTests(unittest.TestCase):
     def test_compaction_uses_full_uncompacted_history_budget(self) -> None:

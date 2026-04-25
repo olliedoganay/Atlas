@@ -3,6 +3,7 @@ import { Search, X } from "lucide-react";
 import { type ReactNode, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import { searchChats, type ChatSearchResult } from "../lib/api";
+import { displayThreadTitle } from "../lib/threadTitles";
 import { useAtlasStore } from "../store/useAtlasStore";
 
 type ChatSearchDialogProps = {
@@ -66,7 +67,7 @@ export function ChatSearchDialog({
         .filter((value): value is number => typeof value === "number"),
     [currentResults],
   );
-  const currentThreadLabel = currentThreadTitle || currentThreadId || "Current chat";
+  const currentThreadLabel = displayThreadTitle(currentThreadTitle, currentThreadId, "Current chat");
   const flatResults = useMemo<SearchResultRef[]>(
     () => [
       ...currentResults.map((result) => ({ result, scope: "current" as const })),
@@ -93,7 +94,7 @@ export function ChatSearchDialog({
       }
       groups.set(result.thread_id, {
         threadId: result.thread_id,
-        threadTitle: result.thread_title,
+        threadTitle: displayThreadTitle(result.thread_title, result.thread_id),
         chatModel: result.chat_model,
         updatedAt: result.updated_at,
         results: [result],
@@ -322,7 +323,7 @@ function SearchSection({
             >
               <div className="search-result-top">
                 <div className="search-result-title-block">
-                  <strong>{highlightSearchText(result.thread_title, query)}</strong>
+                  <strong>{highlightSearchText(displayThreadTitle(result.thread_title, result.thread_id), query)}</strong>
                   <span className="search-result-badge">
                     {result.match_type === "thread"
                       ? "Chat"
@@ -473,7 +474,5 @@ function formatSearchDate(value?: string) {
   return new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
   }).format(date);
 }
