@@ -24,7 +24,7 @@ function ThemeBridge() {
     } else {
       delete document.documentElement.dataset.scanlines;
     }
-    document.title = "Atlas";
+    document.title = "Atlas Chat";
   }, [theme, crtScanlines]);
 
   return null;

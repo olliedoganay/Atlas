@@ -14,10 +14,12 @@ import {
   X,
 } from "lucide-react";
 import { type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, useEffect, useMemo, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { duplicateThread, getModels, getStatus, getThreads, getUsers, resetThread, restartManagedBackend, type ThreadSummary } from "../lib/api";
 import { ChatSearchDialog } from "./ChatSearchDialog";
+import { FirstRunWizard } from "./FirstRunWizard";
+import { ProfileMenu } from "./ProfileMenu";
 import { ResetDialog } from "./ResetDialog";
 import { RunStreamCoordinator } from "./RunStreamCoordinator";
 import { useAtlasStore } from "../store/useAtlasStore";
@@ -28,7 +30,7 @@ import { displayThreadTitle, editableThreadTitle, threadInitial } from "../lib/t
 const navigation = [
   { to: "/workspace", label: "Workspace", icon: Workflow },
   { to: "/discovery", label: "Discovery", icon: Compass },
-  { to: "/advanced", label: "Advanced", icon: Activity },
+  { to: "/advanced", label: "Diagnostics", icon: Activity },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 const NAV_WIDTH_MIN = 200;
@@ -37,6 +39,7 @@ const NAV_WIDTH_STEP = 16;
 
 export function AtlasShell() {
   const location = useLocation();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const currentUserId = useAtlasStore((state) => state.currentUserId);
   const currentThreadId = useAtlasStore((state) => state.currentThreadId);
@@ -55,6 +58,8 @@ export function AtlasShell() {
   const markBackendBooting = useAtlasStore((state) => state.markBackendBooting);
   const toggleNavCollapsed = useAtlasStore((state) => state.toggleNavCollapsed);
   const setNavWidth = useAtlasStore((state) => state.setNavWidth);
+  const firstRunDismissed = useAtlasStore((state) => state.firstRunDismissed);
+  const setFirstRunDismissed = useAtlasStore((state) => state.setFirstRunDismissed);
   const isWorkspaceRoute = location.pathname === "/workspace";
   const [threadToDelete, setThreadToDelete] = useState<ThreadSummary | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -123,7 +128,7 @@ export function AtlasShell() {
         if (remaining.length > 0) {
           setCurrentThreadId(remaining[0].thread_id);
           setCurrentThreadTitle(editableThreadTitle(remaining[0].title, remaining[0].thread_id));
-          setDraftThreadModel(remaining[0].chat_model || preselectedModel);
+          setDraftThreadModel(remaining[0].chat_model || "");
           setDraftThreadTemperature(resolveThreadTemperature(remaining[0], defaultTemperature));
         } else {
           createThread();
@@ -165,7 +170,7 @@ export function AtlasShell() {
     onSuccess: async (thread) => {
       setCurrentThreadId(thread.thread_id);
       setCurrentThreadTitle(editableThreadTitle(thread.title, thread.thread_id));
-      setDraftThreadModel(thread.chat_model || preselectedModel);
+      setDraftThreadModel(thread.chat_model || "");
       setDraftThreadTemperature(resolveThreadTemperature(thread, defaultTemperature));
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["threads", currentUserId] }),
@@ -174,8 +179,6 @@ export function AtlasShell() {
     },
   });
 
-  const preselectedModel =
-    models?.configured_chat_model || status?.configured_chat_model || status?.chat_model || "";
   const defaultTemperature =
     models?.default_temperature ?? status?.default_chat_temperature ?? status?.chat_temperature ?? null;
   const startupState = resolveStartupState({
@@ -185,7 +188,7 @@ export function AtlasShell() {
     modelCatalogLoaded: Boolean(models),
     ollamaOnline: Boolean(models?.ollama_online),
     hasLocalModels: Boolean(models?.has_local_models),
-    selectedModel: draftThreadModel || preselectedModel,
+    selectedModel: draftThreadModel,
   });
   const threadItems = useMemo(() => {
     const seen = new Set<string>();
@@ -208,7 +211,7 @@ export function AtlasShell() {
         user_id: currentUserId,
         thread_id: currentThreadId,
         title: editableThreadTitle(currentThreadTitle, currentThreadId),
-        chat_model: draftThreadModel || preselectedModel,
+        chat_model: draftThreadModel,
         temperature: draftThreadTemperature,
         last_mode: "chat",
         updated_at: new Date().toISOString(),
@@ -217,7 +220,7 @@ export function AtlasShell() {
       },
       ...threadItems,
     ];
-  }, [currentThreadId, currentThreadTitle, currentUserId, defaultTemperature, draftThreadModel, draftThreadTemperature, preselectedModel, threadItems]);
+  }, [currentThreadId, currentThreadTitle, currentUserId, draftThreadModel, draftThreadTemperature, threadItems]);
 
   useEffect(() => {
     if (usersFetched && currentUserId && (!currentUserProfile || currentUserProfile.locked)) {
@@ -261,14 +264,14 @@ export function AtlasShell() {
   const selectThread = (thread: ThreadSummary) => {
     setCurrentThreadId(thread.thread_id);
     setCurrentThreadTitle(editableThreadTitle(thread.title, thread.thread_id));
-    setDraftThreadModel(thread.chat_model || preselectedModel);
+    setDraftThreadModel(thread.chat_model || "");
     setDraftThreadTemperature(resolveThreadTemperature(thread, defaultTemperature));
   };
 
   const createThread = () => {
     setCurrentThreadId(buildDraftThreadId());
     setCurrentThreadTitle("");
-    setDraftThreadModel(preselectedModel);
+    setDraftThreadModel("");
     setDraftThreadTemperature(null);
   };
 
@@ -323,10 +326,34 @@ export function AtlasShell() {
     }
   };
 
-  const userLabel = currentUserId || "No user selected";
   const shellStyle = navCollapsed
     ? undefined
     : ({ "--atlas-nav-width": `${clamp(navWidth, NAV_WIDTH_MIN, NAV_WIDTH_MAX)}px` } as CSSProperties);
+
+  const handleProfilePick = async (userId: string) => {
+    setCurrentUserId(userId);
+    setCurrentThreadId("main");
+    setCurrentThreadTitle("Main");
+    setDraftThreadModel("");
+    setDraftThreadTemperature(null);
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["users"] }),
+      queryClient.invalidateQueries({ queryKey: ["threads"] }),
+      queryClient.invalidateQueries({ queryKey: ["thread-history"] }),
+      queryClient.invalidateQueries({ queryKey: ["memories"] }),
+    ]);
+  };
+
+  const handleProfileUnlock = (_userId: string) => {
+    setIsSearchOpen(false);
+    navigate("/settings");
+  };
+
+  const showFirstRun =
+    !firstRunDismissed &&
+    usersFetched &&
+    users.length === 0 &&
+    backendPhase !== "starting";
 
   return (
     <div className={`app-shell ${navCollapsed ? "nav-collapsed" : ""}${isNavResizing ? " nav-resizing" : ""}`} style={shellStyle}>
@@ -334,10 +361,10 @@ export function AtlasShell() {
       <aside className={`global-nav ${navCollapsed ? "collapsed" : ""}`}>
         <div className="brand-lockup">
           <div className="brand-lockup-main">
-            {navCollapsed ? <img alt="Atlas" className="brand-logo" src="/AtlasLogo.png" /> : null}
+            {navCollapsed ? <img alt="Atlas Chat" className="brand-logo" src="/AtlasLogo.png" /> : null}
             <div className="brand-copy">
-              <strong>Atlas</strong>
-              <span>Local Workstation</span>
+              <strong>Atlas Chat</strong>
+              <span>Local AI workspace</span>
             </div>
           </div>
           <button className="ghost-button icon-button nav-toggle" onClick={toggleNavCollapsed} type="button">
@@ -472,13 +499,16 @@ export function AtlasShell() {
         </div>
 
         <div className="nav-footer">
-          <div className="nav-user">
-            <div className="nav-user-avatar">{userLabel.slice(0, 1).toUpperCase()}</div>
-            <div className="nav-user-copy">
-              <strong>{userLabel}</strong>
-              <span>Active profile</span>
-            </div>
-          </div>
+          {!navCollapsed ? (
+            <ProfileMenu
+              currentUserId={currentUserId}
+              onPick={(userId) => {
+                void handleProfilePick(userId);
+              }}
+              onUnlock={handleProfileUnlock}
+              users={users}
+            />
+          ) : null}
           <div className={`status-pill ${startupState.tone}`}>
             <span className="status-dot" />
             <span>{startupState.shellLabel}</span>
@@ -526,6 +556,16 @@ export function AtlasShell() {
         open={Boolean(threadToDelete)}
         title="Delete chat"
       />
+      {showFirstRun ? (
+        <FirstRunWizard
+          hasLocalModels={Boolean(models?.has_local_models)}
+          ollamaOnline={Boolean(models?.ollama_online)}
+          onDismiss={() => setFirstRunDismissed(true)}
+          onProfileCreated={async (userId) => {
+            await handleProfilePick(userId);
+          }}
+        />
+      ) : null}
       <ChatSearchDialog
         currentThreadId={currentThreadId}
         currentThreadTitle={currentThreadTitle}
@@ -537,7 +577,7 @@ export function AtlasShell() {
             user_id: currentUserId,
             thread_id: result.thread_id,
             title: editableThreadTitle(result.thread_title, result.thread_id),
-            chat_model: result.chat_model || preselectedModel,
+            chat_model: result.chat_model || "",
             temperature: null,
             last_mode: "chat",
             updated_at: result.updated_at,

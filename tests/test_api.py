@@ -30,15 +30,13 @@ class FakeService:
         return None
 
     def health(self):
-        return {"status": "ok", "product": "Atlas"}
+        return {"status": "ok", "product": "Atlas Chat"}
 
     def status(self):
         return {
             "status": "ok",
-            "product_name": "Atlas",
-            "backend": "Atlas local runtime",
-            "configured_chat_model": "test-model",
-            "chat_model": "test-model",
+            "product_name": "Atlas Chat",
+            "backend": "Atlas Chat local runtime",
             "default_chat_temperature": None,
             "chat_temperature": None,
             "embed_model": "embed-model",
@@ -49,7 +47,6 @@ class FakeService:
 
     def list_models(self):
         return {
-            "configured_chat_model": "test-model",
             "default_temperature": None,
             "ollama_online": True,
             "has_local_models": True,
@@ -79,14 +76,10 @@ class FakeService:
             "atlas": {
                 "status": "memory-degraded",
                 "summary": "Atlas can start chats, but memory retrieval is degraded until the embed model is installed.",
-                "notes": ["Atlas is configured to preselect 'test-model'."],
+                "notes": ["Choose any installed chat model in Workspace before starting a new thread."],
                 "ollama_url": "http://127.0.0.1:11434",
                 "ollama_online": True,
                 "has_local_chat_models": True,
-                "configured_chat_model": "test-model",
-                "configured_chat_model_installed": True,
-                "effective_chat_model": "test-model",
-                "effective_chat_model_source": "configured",
                 "configured_embed_model": "embed-model",
                 "configured_embed_model_installed": False,
             },
@@ -94,7 +87,6 @@ class FakeService:
                 {
                     "name": "test-model",
                     "atlas_role": "chat",
-                    "configured_chat_model": True,
                     "configured_embed_model": False,
                     "supports_images": False,
                     "supports_reasoning": False,
@@ -107,7 +99,6 @@ class FakeService:
                     "use_case": "chat",
                     "atlas_role": "chat",
                     "installed": True,
-                    "configured_model": True,
                     "supports_images": False,
                     "fit": "good",
                     "runtime": "GPU",
@@ -305,7 +296,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(discovery.status_code, 200)
         self.assertEqual(users.status_code, 200)
         self.assertEqual(memories.status_code, 200)
-        self.assertEqual(health.json()["product"], "Atlas")
+        self.assertEqual(health.json()["product"], "Atlas Chat")
         self.assertEqual(models.json()["models"], ["test-model", "model-b"])
         self.assertIsNone(models.json()["default_temperature"])
         self.assertTrue(models.json()["ollama_online"])

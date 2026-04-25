@@ -61,8 +61,6 @@ export type BackendStatus = {
   status: string;
   product_name: string;
   backend: string;
-  configured_chat_model: string;
-  chat_model: string;
   default_chat_temperature: number | null;
   chat_temperature: number | null;
   embed_model: string;
@@ -88,7 +86,6 @@ export type TemperaturePreset = {
 };
 
 export type ModelCatalog = {
-  configured_chat_model: string;
   default_temperature: number | null;
   ollama_online: boolean;
   has_local_models: boolean;
@@ -134,17 +131,12 @@ export type DiscoveryReport = {
     ollama_url: string;
     ollama_online: boolean;
     has_local_chat_models: boolean;
-    configured_chat_model: string;
-    configured_chat_model_installed: boolean;
-    effective_chat_model: string;
-    effective_chat_model_source: "configured" | "fallback" | "none";
     configured_embed_model: string;
     configured_embed_model_installed: boolean;
   };
   installed_models: Array<{
     name: string;
     atlas_role: "chat" | "embedding" | "vision" | "other";
-    configured_chat_model: boolean;
     configured_embed_model: boolean;
     supports_images: boolean;
     supports_reasoning: boolean;
@@ -155,7 +147,6 @@ export type DiscoveryReport = {
     use_case: "chat" | "coding" | "vision" | "reasoning" | "embedding";
     atlas_role: "chat" | "embedding";
     installed: boolean;
-    configured_model: boolean;
     supports_images: boolean;
     fit: "good" | "tight" | "cpu-only" | "unavailable" | "too-large";
     runtime: "GPU" | "Hybrid" | "CPU" | "Unknown";

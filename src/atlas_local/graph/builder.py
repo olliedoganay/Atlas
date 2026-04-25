@@ -52,7 +52,7 @@ class AgentApplication:
                 user_id=user_id,
                 thread_id=thread_id,
                 session_id=session_id,
-                chat_model=(chat_model or self.config.chat_model).strip(),
+                chat_model=(chat_model or "").strip(),
                 chat_temperature=chat_temperature,
                 reasoning_mode=reasoning_mode,
                 cross_chat_memory=cross_chat_memory,

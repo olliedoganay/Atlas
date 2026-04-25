@@ -30,7 +30,7 @@ if ($CleanBundle -and (Test-Path -LiteralPath $bundleDir)) {
   Remove-Item -LiteralPath $bundleDir -Recurse -Force
 }
 
-Write-Host "Building Atlas release bundle for Atlas v$version..." -ForegroundColor Cyan
+Write-Host "Building Atlas MSI release bundle for Atlas v$version..." -ForegroundColor Cyan
 Push-Location $atlasDir
 try {
   npm.cmd run tauri build
@@ -46,7 +46,7 @@ if (-not (Test-Path -LiteralPath $bundleDir)) {
 }
 
 $artifacts = Get-ChildItem -Path $bundleDir -Recurse -File |
-  Where-Object { $_.Extension -in ".exe", ".msi", ".zip", ".nsis" }
+  Where-Object { $_.Extension -eq ".msi" }
 
 Write-Host ""
 Write-Host "Release artifacts:" -ForegroundColor Green
@@ -56,5 +56,5 @@ foreach ($artifact in $artifacts) {
 }
 
 if (-not $artifacts) {
-  Write-Warning "No installer artifacts were found under $bundleDir."
+  Write-Warning "No MSI installer artifacts were found under $bundleDir."
 }

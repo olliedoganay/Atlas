@@ -2,6 +2,7 @@ import * as ScrollArea from "@radix-ui/react-scroll-area";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Copy, CornerUpLeft, Edit3, FileText, GitBranch, ImagePlus, Lightbulb, Lock, Plus, RotateCcw, Search, Send, Square, X } from "lucide-react";
 import { ChangeEvent, FormEvent, KeyboardEvent, UIEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { MessageContent } from "../components/MessageContent";
 import {
@@ -60,6 +61,7 @@ type ThinkingEntry = {
 
 export function WorkspacePage() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const conversationViewportRef = useRef<HTMLDivElement | null>(null);
   const autoScrollToLatestRef = useRef(true);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
@@ -185,8 +187,6 @@ export function WorkspacePage() {
     });
   }, [threads]);
 
-  const preselectedModel =
-    models?.configured_chat_model || status?.configured_chat_model || status?.chat_model || "";
   const defaultTemperature =
     models?.default_temperature ?? status?.default_chat_temperature ?? status?.chat_temperature ?? null;
   const modelCatalogLoaded = Boolean(models);
@@ -207,14 +207,14 @@ export function WorkspacePage() {
       user_id: currentUserId,
       thread_id: currentThreadId,
       title: editableThreadTitle(currentThreadTitle, currentThreadId),
-      chat_model: draftThreadModel || preselectedModel,
+      chat_model: draftThreadModel,
       temperature: draftThreadTemperature,
       last_mode: "chat",
       updated_at: new Date().toISOString(),
       last_prompt: "",
       last_run_id: "",
     };
-  }, [currentThreadId, currentThreadTitle, currentUserId, draftThreadModel, draftThreadTemperature, preselectedModel, threadItems]);
+  }, [currentThreadId, currentThreadTitle, currentUserId, draftThreadModel, draftThreadTemperature, threadItems]);
   const currentThreadEditableTitle =
     editableThreadTitle(currentThread?.title, currentThreadId) ||
     editableThreadTitle(currentThreadTitle, currentThreadId);
@@ -244,7 +244,6 @@ export function WorkspacePage() {
   const lockedThreadModel = threadHasHistory
       ? runDetails?.chat_model ||
       currentThread?.chat_model ||
-      preselectedModel ||
       ""
     : "";
   const lockedThreadTemperature = useMemo<number | null | undefined>(() => {
@@ -268,11 +267,8 @@ export function WorkspacePage() {
     if (draftThreadModel && availableModels.includes(draftThreadModel)) {
       return draftThreadModel;
     }
-    if (preselectedModel && availableModels.includes(preselectedModel)) {
-      return preselectedModel;
-    }
     return "";
-  }, [availableModels, draftThreadModel, lockedThreadModel, preselectedModel, threadHasHistory]);
+  }, [availableModels, draftThreadModel, lockedThreadModel, threadHasHistory]);
   const selectedModel = lockedThreadModel || preferredDraftModel;
   const selectedTemperature = lockedThreadTemperature !== undefined ? lockedThreadTemperature : draftThreadTemperature;
   const selectedModelDetails = useMemo(
@@ -542,7 +538,7 @@ export function WorkspacePage() {
     onSuccess: async (thread) => {
       setCurrentThreadId(thread.thread_id);
       setCurrentThreadTitle(editableThreadTitle(thread.title, thread.thread_id));
-      setDraftThreadModel(thread.chat_model || preselectedModel);
+      setDraftThreadModel(thread.chat_model || "");
       setDraftThreadTemperature(readStoredTemperature(thread) ?? null);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["threads", currentUserId] }),
@@ -575,7 +571,7 @@ export function WorkspacePage() {
       autoScrollToLatestRef.current = true;
       setCurrentThreadId(thread.thread_id);
       setCurrentThreadTitle(editableThreadTitle(thread.title, thread.thread_id));
-      setDraftThreadModel(thread.chat_model || preselectedModel);
+      setDraftThreadModel(thread.chat_model || "");
       setDraftThreadTemperature(readStoredTemperature(thread) ?? null);
       beginRun(run.run_id, "chat", retryPrompt, currentUserId, thread.thread_id, retryAttachments);
       await Promise.all([
@@ -997,7 +993,7 @@ export function WorkspacePage() {
                     onChange={(event) => setDraftThreadTemperature(parseTemperatureValue(event.currentTarget.value))}
                     value={formatTemperatureSelectValue(selectedTemperature)}
                   >
-                    <option value={MODEL_DEFAULT_TEMPERATURE_VALUE}>Model default</option>
+                    <option value={MODEL_DEFAULT_TEMPERATURE_VALUE}>Model setting</option>
                     {TEMPERATURE_OPTIONS.map((value) => (
                       <option key={value} value={value.toFixed(1)}>
                         {value.toFixed(1)}
@@ -1077,11 +1073,60 @@ export function WorkspacePage() {
                 <div className="workspace-idle">
                   <div className="workspace-idle-card">
                     <div className="workspace-idle-mark">
-                      <img alt="Atlas" className="workspace-idle-logo workspace-idle-logo-large" src="/AtlasLogo.png" />
+                      <img alt="Atlas Chat" className="workspace-idle-logo workspace-idle-logo-large" src="/AtlasLogo.png" />
                     </div>
                     <span className="workspace-idle-kicker">{idleKicker}</span>
                     <h2>{idleTitle}</h2>
                     <p>{idleDescription}</p>
+                    {startupState.key === "no-profile" ? (
+                      <div className="workspace-idle-actions">
+                        <button
+                          className="primary-button"
+                          onClick={() => navigate("/settings")}
+                          type="button"
+                        >
+                          Create or pick a profile
+                        </button>
+                      </div>
+                    ) : startupState.key === "ollama-offline" ? (
+                      <div className="workspace-idle-actions">
+                        <a
+                          className="primary-button"
+                          href="https://ollama.com/download"
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          Get Ollama
+                        </a>
+                        <button
+                          className="ghost-button"
+                          onClick={() => navigate("/discovery")}
+                          type="button"
+                        >
+                          Open Discovery
+                        </button>
+                      </div>
+                    ) : startupState.key === "no-local-models" ? (
+                      <div className="workspace-idle-actions">
+                        <button
+                          className="primary-button"
+                          onClick={() => navigate("/discovery")}
+                          type="button"
+                        >
+                          Find a model
+                        </button>
+                      </div>
+                    ) : startupState.key === "profile-locked" ? (
+                      <div className="workspace-idle-actions">
+                        <button
+                          className="primary-button"
+                          onClick={() => navigate("/settings")}
+                          type="button"
+                        >
+                          Unlock in Settings
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               ) : null}
@@ -1444,7 +1489,7 @@ export function WorkspacePage() {
           <div className="workspace-thinking-panel">
             <div className="workspace-thinking-panel-header">
               <div className="workspace-thinking-panel-copy">
-                <p className="workspace-section-label">Deciding</p>
+                <p className="workspace-section-label">Thinking</p>
                 <h2>{displayThreadTitle(currentThreadEditableTitle, currentThreadId, "Run details")}</h2>
                 <p className="workspace-thinking-panel-summary">
                   {currentThreadHasActiveChatRun
@@ -1591,7 +1636,7 @@ function formatTemperatureSelectValue(value: number | null | undefined) {
 
 function formatTemperatureLabel(value: number | null | undefined) {
   if (value === null || value === undefined) {
-    return "Model default";
+    return "Model setting";
   }
   return value.toFixed(1);
 }

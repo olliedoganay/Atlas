@@ -116,11 +116,7 @@ def build_discovery_report(config: AppConfig, catalog: OllamaCatalogSnapshot) ->
     chat_lookup = {_normalize_model_name(item.name): item for item in chat_models}
 
     chat_available = catalog.ollama_online and catalog.has_local_models
-    configured_chat_model = config.chat_model.strip()
-    configured_chat_installed = bool(configured_chat_model) and _is_model_installed(configured_chat_model, installed_lookup)
     configured_embed_installed = _is_model_installed(config.embed_model, installed_lookup)
-    effective_chat_model = configured_chat_model if configured_chat_installed else ""
-    effective_chat_model_source = "configured" if configured_chat_installed else "none"
 
     atlas_status = "ready"
     atlas_summary = "Atlas can start chats and memory retrieval is fully configured."
@@ -135,13 +131,7 @@ def build_discovery_report(config: AppConfig, catalog: OllamaCatalogSnapshot) ->
         atlas_status = "memory-degraded"
         atlas_summary = "Atlas can start chats, but memory retrieval is degraded until the embed model is installed."
 
-    if chat_available and configured_chat_model and not configured_chat_installed:
-        atlas_notes.append(
-            f"The configured chat model '{configured_chat_model}' is not installed. Choose an installed local model in Workspace."
-        )
-    if chat_available and configured_chat_installed:
-        atlas_notes.append(f"Atlas is configured to preselect '{configured_chat_model}'.")
-    if chat_available and not configured_chat_model:
+    if chat_available:
         atlas_notes.append("Choose any installed chat model in Workspace before starting a new thread.")
     if chat_available and configured_embed_installed:
         atlas_notes.append(f"Persistent memory is using '{config.embed_model}'.")
@@ -154,11 +144,9 @@ def build_discovery_report(config: AppConfig, catalog: OllamaCatalogSnapshot) ->
                 "name": raw_name,
                 "atlas_role": _atlas_role_for_installed_model(
                     raw_name,
-                    configured_chat_model=configured_chat_model,
                     configured_embed_model=config.embed_model,
                     chat_info=chat_info,
                 ),
-                "configured_chat_model": _matches_model_name(raw_name, configured_chat_model),
                 "configured_embed_model": _matches_model_name(raw_name, config.embed_model),
                 "supports_images": bool(chat_info.supports_images) if chat_info else False,
                 "supports_reasoning": bool(chat_info.supports_reasoning) if chat_info else False,
@@ -166,7 +154,6 @@ def build_discovery_report(config: AppConfig, catalog: OllamaCatalogSnapshot) ->
         )
 
     recommendations = _build_recommendations(
-        configured_chat_model=configured_chat_model,
         configured_embed_model=config.embed_model,
         installed_lookup=installed_lookup,
         chat_lookup=chat_lookup,
@@ -183,10 +170,6 @@ def build_discovery_report(config: AppConfig, catalog: OllamaCatalogSnapshot) ->
             "ollama_url": config.ollama_url,
             "ollama_online": catalog.ollama_online,
             "has_local_chat_models": catalog.has_local_models,
-            "configured_chat_model": configured_chat_model,
-            "configured_chat_model_installed": configured_chat_installed,
-            "effective_chat_model": effective_chat_model,
-            "effective_chat_model_source": effective_chat_model_source,
             "configured_embed_model": config.embed_model,
             "configured_embed_model_installed": configured_embed_installed,
         },
@@ -273,7 +256,6 @@ def list_installed_ollama_model_names(config: AppConfig, *, timeout_seconds: flo
 
 def _build_recommendations(
     *,
-    configured_chat_model: str,
     configured_embed_model: str,
     installed_lookup: dict[str, str],
     chat_lookup: dict[str, Any],
@@ -300,10 +282,6 @@ def _build_recommendations(
                 "use_case": candidate.use_case,
                 "atlas_role": candidate.atlas_role,
                 "installed": installed,
-                "configured_model": (
-                    _matches_model_name(candidate.name, configured_chat_model)
-                    or _matches_model_name(candidate.name, configured_embed_model)
-                ),
                 "supports_images": (candidate.supports_images or bool(chat_info.supports_images))
                 if chat_info
                 else candidate.supports_images,
@@ -398,7 +376,6 @@ def _recommended_model_from_ollama_metadata(model_info: Any) -> RecommendedModel
 
 
 def _recommendation_sort_key(item: dict[str, Any]) -> tuple[int, int, int, str]:
-    configured_priority = 0 if item.get("configured_model") else 1
     fit_priority = {
         "good": 0,
         "tight": 1,
@@ -408,7 +385,7 @@ def _recommendation_sort_key(item: dict[str, Any]) -> tuple[int, int, int, str]:
     }.get(str(item.get("fit")), 5)
     installed_priority = 0 if item.get("installed") else 1
     catalog_rank = int(item.get("_catalog_rank", 999))
-    return (configured_priority, fit_priority, installed_priority, catalog_rank)
+    return (fit_priority, installed_priority, catalog_rank, str(item.get("name", "")))
 
 
 def _estimate_model_fit(candidate: RecommendedModel, system: dict[str, Any]) -> tuple[str, str, str]:
@@ -441,14 +418,11 @@ def _estimate_model_fit(candidate: RecommendedModel, system: dict[str, Any]) -> 
 def _atlas_role_for_installed_model(
     model_name: str,
     *,
-    configured_chat_model: str,
     configured_embed_model: str,
     chat_info: Any | None,
 ) -> str:
     if _matches_model_name(model_name, configured_embed_model):
         return "embedding"
-    if _matches_model_name(model_name, configured_chat_model):
-        return "chat"
     if chat_info and chat_info.supports_images:
         return "vision"
     if chat_info:

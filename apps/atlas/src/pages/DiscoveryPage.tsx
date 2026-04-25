@@ -293,7 +293,6 @@ function sortRecommendations(
 
 function selectNextStep(models: DiscoveryReport["recommended_models"]) {
   return (
-    models.find((item) => !item.installed && item.configured_model) ??
     models.find(
       (item) =>
         !item.installed &&
@@ -303,7 +302,6 @@ function selectNextStep(models: DiscoveryReport["recommended_models"]) {
     ) ??
     models.find((item) => !item.installed && item.fit !== "too-large" && item.fit !== "unavailable") ??
     models.find((item) => !item.installed) ??
-    models.find((item) => item.configured_model) ??
     models[0] ??
     null
   );
