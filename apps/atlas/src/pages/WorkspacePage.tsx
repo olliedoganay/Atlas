@@ -1,6 +1,6 @@
 import * as ScrollArea from "@radix-ui/react-scroll-area";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Copy, CornerUpLeft, Edit3, ExternalLink, FileText, GitBranch, ImagePlus, Lightbulb, Lock, Plus, RotateCcw, Search, Send, Square, Terminal, X } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Copy, CornerUpLeft, Edit3, ExternalLink, FileText, Flag, GitBranch, ImagePlus, Lightbulb, Lock, Plus, RotateCcw, Search, Send, Square, Terminal, X } from "lucide-react";
 import { ChangeEvent, FormEvent, KeyboardEvent, UIEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -27,6 +27,7 @@ import {
   type ThreadMessage,
 } from "../lib/api";
 import { useBackendPhase } from "../lib/backendPhase";
+import { buildAiContentReportMailto } from "../lib/reporting";
 import { resolveStartupState } from "../lib/startupState";
 import { displayThreadTitle, editableThreadTitle, requestThreadTitle } from "../lib/threadTitles";
 import { useAtlasStore } from "../store/useAtlasStore";
@@ -114,6 +115,7 @@ export function WorkspacePage() {
   const [isReasoningMenuOpen, setIsReasoningMenuOpen] = useState(false);
   const [highlightedHistoryIndex, setHighlightedHistoryIndex] = useState<number | null>(null);
   const [copiedMessageKey, setCopiedMessageKey] = useState<string | null>(null);
+  const [reportedMessageKey, setReportedMessageKey] = useState<string | null>(null);
 
   const {
     data: status,
@@ -791,6 +793,14 @@ export function WorkspacePage() {
   }, [copiedMessageKey]);
 
   useEffect(() => {
+    if (!reportedMessageKey) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setReportedMessageKey(null), 2200);
+    return () => window.clearTimeout(timer);
+  }, [reportedMessageKey]);
+
+  useEffect(() => {
     const viewport = conversationViewportRef.current;
     if (!viewport) {
       return;
@@ -821,6 +831,25 @@ export function WorkspacePage() {
     const quoted = buildQuotedPrompt(message.content);
     setPrompt((current) => (current.trim() ? `${current.trim()}\n\n${quoted}` : quoted));
     promptInputRef.current?.focus();
+  };
+
+  const handleReportMessage = async (message: ConversationMessage, index: number) => {
+    const key = messageActionKey(message, index, "report");
+    const url = buildAiContentReportMailto({
+      threadTitle: currentThreadDisplayTitle || currentThreadId,
+      threadId: currentThreadId,
+      model: selectedModel,
+      messageRef: message.runId || String(message.historyIndex ?? index),
+      output: message.content,
+    });
+
+    try {
+      await openExternalUrl(url);
+      setReportedMessageKey(key);
+    } catch {
+      // Keep reporting non-blocking even when no mail client is configured.
+      setReportedMessageKey(key);
+    }
   };
 
   const submitPrompt = (event: FormEvent<HTMLFormElement>) => {
@@ -1293,6 +1322,16 @@ export function WorkspacePage() {
                           >
                             <RotateCcw size={14} />
                             <span>{retryAssistantTurn.isPending ? "Retrying..." : "Retry"}</span>
+                          </button>
+                        ) : null}
+                        {message.role === "assistant" ? (
+                          <button
+                            className="ghost-button compact-button message-action-button"
+                            onClick={() => void handleReportMessage(message, index)}
+                            type="button"
+                          >
+                            <Flag size={14} />
+                            <span>{reportedMessageKey === messageActionKey(message, index, "report") ? "Report opened" : "Report"}</span>
                           </button>
                         ) : null}
                       </div>
