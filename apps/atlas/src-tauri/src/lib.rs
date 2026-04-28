@@ -53,12 +53,19 @@ fn backend_runtime(state: State<'_, BackendState>) -> Result<BackendRuntime, Str
 
 #[tauri::command]
 fn open_external_url(url: String) -> Result<(), String> {
-    match url.as_str() {
-        "https://ollama.com/download" | "https://github.com/olliedoganay/Atlas" => {
-            open_allowed_external_url(&url)
-        }
-        _ => Err("External URL is not allowed.".to_string()),
+    if is_allowed_external_url(&url) {
+        open_allowed_external_url(&url)
+    } else {
+        Err("External URL is not allowed.".to_string())
     }
+}
+
+fn is_allowed_external_url(url: &str) -> bool {
+    let normalized = url.to_ascii_lowercase();
+    matches!(
+        url,
+        "https://ollama.com/download" | "https://github.com/olliedoganay/Atlas"
+    ) || normalized.starts_with("mailto:partex@msn.com")
 }
 
 pub fn run() {
