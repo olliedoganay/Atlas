@@ -543,7 +543,14 @@ class AtlasBackendService:
             elif isinstance(message, AIMessage):
                 role = "assistant"
             content, attachments = _message_to_history_parts(message)
-            history.append({"role": role, "content": content, "attachments": attachments})
+            history.append(
+                {
+                    "role": role,
+                    "content": content,
+                    "attachments": attachments,
+                    "history_index": index - 1,
+                }
+            )
             while pending_events and int(pending_events[0].get("after_message_count", 0) or 0) == index:
                 history.append(_timeline_event_to_history_item(pending_events.pop(0)))
         while pending_events:
@@ -661,7 +668,7 @@ class AtlasBackendService:
                 {
                     "role": str(item.get("role", "") or ""),
                     "content": str(item.get("content", "") or ""),
-                    "history_index": history_index,
+                    "history_index": item.get("history_index", history_index),
                     "updated_at": updated_at,
                     "chat_model": chat_model,
                 }
@@ -1275,6 +1282,7 @@ class AtlasBackendService:
             state=state,
             runtime_context=runtime.context,
             token_counter=self._message_token_counter(runtime.context.chat_model),
+            answer_prompt_template=getattr(self.app.nodes, "answer_prompt_template", ""),
         )
 
         answer_parts: list[str] = []

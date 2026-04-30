@@ -204,6 +204,7 @@ export type ThreadMessage = {
   role: "user" | "assistant" | "system";
   content: string;
   attachments?: ImageAttachment[];
+  history_index?: number | null;
   kind?: string;
   run_id?: string;
   timestamp?: string;

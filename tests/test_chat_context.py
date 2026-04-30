@@ -45,6 +45,31 @@ class ChatContextTests(unittest.TestCase):
 
         self.assertEqual(messages, [user_message])
 
+    def test_answer_prompt_template_can_be_injected(self) -> None:
+        state = {
+            "messages": [HumanMessage(content="What is my name?")],
+            "retrieved_memories": ["name: Atlas Tester"],
+        }
+        context = GraphContext(
+            user_id="u1",
+            thread_id="main",
+            session_id="u1__main",
+            chat_model="test-model",
+            chat_temperature=0.2,
+            cross_chat_memory=True,
+        )
+
+        messages = _build_answer_messages(
+            state=state,
+            runtime_context=context,
+            answer_prompt_template="User ID: {user_id}\nRetrieved memories:\n{memory_context}",
+        )
+
+        self.assertIsInstance(messages[0], SystemMessage)
+        self.assertIn("User ID: u1", str(messages[0].content))
+        self.assertIn("name: Atlas Tester", str(messages[0].content))
+        self.assertEqual(messages[-1].content, "What is my name?")
+
     def test_thread_summary_replaces_compacted_prefix_in_prompt(self) -> None:
         state = {
             "messages": [

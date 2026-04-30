@@ -223,12 +223,18 @@ export function AtlasShell() {
   }, [currentThreadId, currentThreadTitle, currentUserId, draftThreadModel, draftThreadTemperature, threadItems]);
 
   useEffect(() => {
-    if (usersFetched && currentUserId && (!currentUserProfile || currentUserProfile.locked)) {
+    if (usersFetched && currentUserId && !currentUserProfile) {
       setCurrentUserId("");
       setCurrentThreadTitle("Main");
       setCurrentThreadId("main");
     }
   }, [currentUserId, currentUserProfile, setCurrentThreadId, setCurrentThreadTitle, setCurrentUserId, usersFetched]);
+
+  useEffect(() => {
+    if (currentUserLocked) {
+      setIsSearchOpen(false);
+    }
+  }, [currentUserLocked]);
 
   useEffect(() => {
     if (isWorkspaceRoute && !currentThreadId && threadItems.length) {
@@ -239,7 +245,7 @@ export function AtlasShell() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (!isWorkspaceRoute || !currentUserId) {
+      if (!isWorkspaceRoute || !currentUserId || currentUserLocked) {
         return;
       }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
@@ -249,7 +255,7 @@ export function AtlasShell() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentUserId, isWorkspaceRoute]);
+  }, [currentUserId, currentUserLocked, isWorkspaceRoute]);
 
   const restartBackend = async () => {
     markBackendBooting();
@@ -392,14 +398,14 @@ export function AtlasShell() {
                 <div className="collapsed-thread-list">
                   <button
                     className="ghost-button icon-button"
-                    disabled={!currentUserId}
+                    disabled={!currentUserId || currentUserLocked}
                     onClick={() => setIsSearchOpen(true)}
                     title="Search chats"
                     type="button"
                   >
                     <Search size={16} />
                   </button>
-                  <button className="primary-button icon-button" disabled={!currentUserId} onClick={createThread} type="button">
+                  <button className="primary-button icon-button" disabled={!currentUserId || currentUserLocked} onClick={createThread} type="button">
                     <Plus size={16} />
                   </button>
                   {displayThreadItems.map((thread) => (
@@ -421,14 +427,14 @@ export function AtlasShell() {
                       <p className="workspace-section-label">Chats</p>
                       <p className="muted-text">{formatChatCount(displayThreadItems.length)}</p>
                     </div>
-                    <button className="primary-button icon-button" disabled={!currentUserId} onClick={createThread} type="button">
+                    <button className="primary-button icon-button" disabled={!currentUserId || currentUserLocked} onClick={createThread} type="button">
                       <Plus size={16} />
                     </button>
                   </div>
 
                   <button
                     className="search-launcher"
-                    disabled={!currentUserId}
+                    disabled={!currentUserId || currentUserLocked}
                     onClick={() => setIsSearchOpen(true)}
                     type="button"
                   >
@@ -440,19 +446,23 @@ export function AtlasShell() {
                   <ScrollArea.Root className="thread-scroll shell-thread-scroll">
                     <ScrollArea.Viewport className="thread-scroll-viewport">
                       <div className="thread-list">
-                        {displayThreadItems.map((thread) => (
-                          <div
-                            className={`thread-card ${thread.thread_id === currentThreadId ? "active" : ""}`}
-                            key={thread.thread_id}
-                          >
-                            <button
-                              aria-label={`Duplicate ${displayThreadTitle(thread)}`}
-                              className="ghost-button icon-button thread-card-duplicate"
-                              onClick={() => duplicateThreadMutation.mutate(thread)}
-                              type="button"
+                        {displayThreadItems.map((thread) => {
+                          const persistedThread = threadItems.some((item) => isSameThread(item, thread, currentUserId));
+                          return (
+                            <div
+                              className={`thread-card ${thread.thread_id === currentThreadId ? "active" : ""}`}
+                              key={thread.thread_id}
                             >
-                              <Copy size={14} />
-                            </button>
+                            {persistedThread ? (
+                              <button
+                                aria-label={`Duplicate ${displayThreadTitle(thread)}`}
+                                className="ghost-button icon-button thread-card-duplicate"
+                                onClick={() => duplicateThreadMutation.mutate(thread)}
+                                type="button"
+                              >
+                                <Copy size={14} />
+                              </button>
+                            ) : null}
                             <button
                               aria-label={`Delete ${displayThreadTitle(thread)}`}
                               className="ghost-button icon-button thread-card-delete"
@@ -476,11 +486,12 @@ export function AtlasShell() {
                               </div>
                             </button>
                           </div>
-                        ))}
+                          );
+                        })}
                         {displayThreadItems.length === 0 ? (
                           <div className="thread-empty">
                             <p>{currentUserId ? "No chats yet for this profile." : "Choose a profile in the workspace first."}</p>
-                            <button className="ghost-button compact-button" disabled={!currentUserId} onClick={createThread} type="button">
+                            <button className="ghost-button compact-button" disabled={!currentUserId || currentUserLocked} onClick={createThread} type="button">
                               <Plus size={15} />
                               {currentUserId ? "Create first chat" : "Create chat"}
                             </button>
