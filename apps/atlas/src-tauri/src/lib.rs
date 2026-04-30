@@ -61,11 +61,10 @@ fn open_external_url(url: String) -> Result<(), String> {
 }
 
 fn is_allowed_external_url(url: &str) -> bool {
-    let normalized = url.to_ascii_lowercase();
     matches!(
         url,
         "https://ollama.com/download" | "https://github.com/olliedoganay/Atlas"
-    ) || normalized.starts_with("mailto:partex@msn.com")
+    )
 }
 
 pub fn run() {
