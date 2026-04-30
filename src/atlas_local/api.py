@@ -29,7 +29,7 @@ from .run_contract import TERMINAL_EVENT_TYPES
 
 
 class PromptRequest(BaseModel):
-    prompt: str = Field(..., min_length=1)
+    prompt: str = ""
     user_id: str = Field(..., min_length=1)
     thread_id: str = Field(..., min_length=1)
     chat_model: str | None = None
@@ -134,7 +134,7 @@ def create_api_app(service: AtlasBackendService | None = None) -> FastAPI:
             if service is None and managed_service is not None:
                 managed_service.close()
 
-    app = FastAPI(title="Atlas API", version="1.0.7", lifespan=lifespan)
+    app = FastAPI(title="Atlas API", version="1.0.11", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(allowed_origins),
@@ -277,6 +277,9 @@ def create_api_app(service: AtlasBackendService | None = None) -> FastAPI:
 
     @app.post("/chat")
     def chat(request: PromptRequest) -> dict[str, Any]:
+        attachments = request.attachments or request.images
+        if not request.prompt.strip() and not attachments:
+            raise HTTPException(status_code=400, detail="Prompt or attachment is required.")
         return _handle_runtime(
             lambda: backend().start_chat(
                 prompt=request.prompt,
@@ -288,7 +291,7 @@ def create_api_app(service: AtlasBackendService | None = None) -> FastAPI:
                 thread_title=request.thread_title,
                 cross_chat_memory=request.cross_chat_memory,
                 auto_compact_long_chats=request.auto_compact_long_chats,
-                attachments=request.attachments or request.images,
+                attachments=attachments,
             )
         )
 

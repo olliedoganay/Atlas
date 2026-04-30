@@ -13,6 +13,7 @@ from ..memory.mem0_service import Mem0Service
 from ..memory.models import MemoryCandidate, MemoryRecord
 from ..memory.policy import fallback_local_memory_candidates_from_text
 from ..providers.base import ChatModelProvider
+from ..runtime import read_prompt
 from .context import GraphContext
 from .state import AgentState
 
@@ -29,6 +30,7 @@ class GraphNodes:
         self.config = config
         self.llm_provider = llm_provider
         self.memory_service = memory_service
+        self.answer_prompt_template = _read_optional_prompt(config, "answer.md")
 
     def retrieve_memories(
         self,
@@ -63,6 +65,7 @@ class GraphNodes:
             state=state,
             runtime_context=runtime.context,
             token_counter=_provider_message_token_counter(self.llm_provider, runtime.context.chat_model),
+            answer_prompt_template=self.answer_prompt_template,
         )
         try:
             response = self.llm_provider.chat(
@@ -172,18 +175,66 @@ def _build_answer_messages(
     state: AgentState,
     runtime_context: GraphContext,
     token_counter: MessageTokenCounter | None = None,
+    answer_prompt_template: str | None = None,
 ) -> list[HumanMessage | AIMessage | SystemMessage]:
-    memory_message = _memory_context_message(state=state, runtime_context=runtime_context)
+    answer_prompt_message = _answer_prompt_message(
+        state=state,
+        runtime_context=runtime_context,
+        answer_prompt_template=answer_prompt_template,
+    )
+    memory_message = (
+        None
+        if answer_prompt_template and "{memory_context}" in answer_prompt_template
+        else _memory_context_message(state=state, runtime_context=runtime_context)
+    )
     summary_message = _thread_summary_message(state)
     recent_messages = _recent_prompt_messages(
         state=state,
         runtime_context=runtime_context,
-        memory_message=memory_message,
+        memory_message=answer_prompt_message or memory_message,
         summary_message=summary_message,
         token_counter=token_counter,
     )
-    prefix = [item for item in (memory_message, summary_message) if item is not None]
+    prefix = [item for item in (answer_prompt_message, memory_message, summary_message) if item is not None]
     return prefix + recent_messages
+
+
+def _read_optional_prompt(config: AppConfig, name: str) -> str:
+    try:
+        return read_prompt(config.prompt_dir, name)
+    except OSError:
+        return ""
+
+
+def _answer_prompt_message(
+    *,
+    state: AgentState,
+    runtime_context: GraphContext,
+    answer_prompt_template: str | None,
+) -> SystemMessage | None:
+    template = (answer_prompt_template or "").strip()
+    if not template:
+        return None
+    memories = [item for item in state.get("retrieved_memories", []) if item]
+    values = {
+        "user_id": runtime_context.user_id,
+        "thread_id": runtime_context.thread_id,
+        "memory_context": _format_list(memories),
+        "world_context": "- none",
+        "reasoning_context": "- none",
+        "browser_context": "- none",
+        "citation_context": "- none",
+    }
+    try:
+        content = template.format_map(_PromptValues(values)).strip()
+    except (KeyError, ValueError):
+        content = template
+    return SystemMessage(content=content) if content else None
+
+
+class _PromptValues(dict[str, str]):
+    def __missing__(self, key: str) -> str:
+        return ""
 
 
 def _memory_context_message(*, state: AgentState, runtime_context: GraphContext) -> SystemMessage | None:

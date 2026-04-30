@@ -177,6 +177,9 @@ export function WorkspacePage() {
   });
 
   const threadItems = useMemo(() => {
+    if (currentUserLocked) {
+      return [];
+    }
     const seen = new Set<string>();
     return threads.filter((thread) => {
       const key = `${thread.user_id}::${thread.thread_id}`;
@@ -186,7 +189,8 @@ export function WorkspacePage() {
       seen.add(key);
       return true;
     });
-  }, [threads]);
+  }, [currentUserLocked, threads]);
+  const visibleHistory = currentUserLocked ? [] : history;
 
   const defaultTemperature =
     models?.default_temperature ?? status?.default_chat_temperature ?? status?.chat_temperature ?? null;
@@ -224,6 +228,10 @@ export function WorkspacePage() {
   const currentThreadHasActiveRun =
     Boolean(currentRunId) &&
     isStreaming &&
+    activeRunUserId === currentUserId &&
+    activeRunThreadId === currentThreadId;
+  const currentThreadHasLiveError =
+    Boolean(liveError) &&
     activeRunUserId === currentUserId &&
     activeRunThreadId === currentThreadId;
   const activeRunIdForThread = currentThreadHasActiveRun ? currentRunId : null;
@@ -496,7 +504,7 @@ export function WorkspacePage() {
       }
     },
     onError: (error) => {
-      failRun(error instanceof Error ? error.message : "Atlas run failed.");
+      failRun(error instanceof Error ? error.message : "Atlas run failed.", currentUserId, currentThreadId);
     },
   });
 
@@ -512,7 +520,7 @@ export function WorkspacePage() {
       beginRun(run_id, "compact", "", currentUserId, currentThreadId, []);
     },
     onError: (error) => {
-      failRun(error instanceof Error ? error.message : "Atlas could not compact this thread.");
+      failRun(error instanceof Error ? error.message : "Atlas could not compact this thread.", currentUserId, currentThreadId);
     },
   });
 
@@ -527,7 +535,7 @@ export function WorkspacePage() {
       setStage("stopping");
     },
     onError: (error) => {
-      failRun(error instanceof Error ? error.message : "Atlas could not stop this run.");
+      failRun(error instanceof Error ? error.message : "Atlas could not stop this run.", currentUserId, currentThreadId);
     },
   });
 
@@ -583,7 +591,7 @@ export function WorkspacePage() {
       ]);
     },
     onError: (error) => {
-      failRun(error instanceof Error ? error.message : "Atlas could not retry this response.");
+      failRun(error instanceof Error ? error.message : "Atlas could not retry this response.", currentUserId, currentThreadId);
     },
   });
 
@@ -621,11 +629,11 @@ export function WorkspacePage() {
   }, [currentThread?.title, currentThreadId, currentThreadTitle, setCurrentThreadTitle]);
 
   const transcript = useMemo(() => {
-    const items: ConversationMessage[] = history.map((item: ThreadMessage, historyIndex) => ({
+    const items: ConversationMessage[] = visibleHistory.map((item: ThreadMessage, historyIndex) => ({
       role: item.role,
       content: item.content,
       attachments: item.attachments,
-      historyIndex,
+      historyIndex: typeof item.history_index === "number" ? item.history_index : historyIndex,
       kind: item.kind,
       runId: item.run_id,
       timestamp: item.timestamp,
@@ -647,7 +655,7 @@ export function WorkspacePage() {
       items.push({ role: "assistant", content: liveAnswer, ephemeral: true, runId: currentRunId || undefined });
     }
     return items;
-  }, [currentRunId, currentThreadCompactionNotice, currentThreadHasActiveRun, history, liveAnswer, pendingAttachments, pendingPrompt]);
+  }, [currentRunId, currentThreadCompactionNotice, currentThreadHasActiveRun, liveAnswer, pendingAttachments, pendingPrompt, visibleHistory]);
   const contextMeter = useMemo(() => {
     const fallbackWindow = 8192;
     const autoCompactRatio = contextUsage?.auto_compact_ratio || 0.72;
@@ -667,7 +675,7 @@ export function WorkspacePage() {
     let tokensUsed = Number(contextUsage?.representation_tokens ?? -1);
     if (tokensUsed < 0) {
       let charCount = 0;
-      for (const item of history) {
+      for (const item of visibleHistory) {
         charCount += (item.content ?? "").length;
         if (item.thread_summary) {
           charCount += item.thread_summary.length;
@@ -711,7 +719,7 @@ export function WorkspacePage() {
     contextUsage,
     currentThreadCompactionNotice?.detectedContextWindow,
     currentThreadHasActiveRun,
-    history,
+    visibleHistory,
     liveAnswer,
     pendingAttachments,
     pendingPrompt,
@@ -1350,7 +1358,7 @@ export function WorkspacePage() {
                   )}
                 </article>
               ) : null}
-              {currentThreadHasActiveRun && liveError ? <div className="error-banner">{liveError}</div> : null}
+              {currentThreadHasLiveError ? <div className="error-banner">{liveError}</div> : null}
             </div>
           </ScrollArea.Viewport>
           <ScrollArea.Scrollbar className="scrollbar" orientation="vertical">

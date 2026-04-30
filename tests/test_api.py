@@ -360,6 +360,40 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json()["temperature"])
 
+    def test_chat_run_creation_allows_attachment_only_prompt(self) -> None:
+        response = self.client.post(
+            "/chat",
+            json={
+                "prompt": "",
+                "user_id": "research_user",
+                "thread_id": "main",
+                "chat_model": "model-b",
+                "attachments": [
+                    {
+                        "kind": "image",
+                        "name": "sample.png",
+                        "media_type": "image/png",
+                        "data_url": "data:image/png;base64,AAAA",
+                    }
+                ],
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["run_id"], "run-1")
+
+    def test_chat_run_creation_rejects_empty_prompt_without_attachments(self) -> None:
+        response = self.client.post(
+            "/chat",
+            json={
+                "prompt": "",
+                "user_id": "research_user",
+                "thread_id": "main",
+                "chat_model": "model-b",
+            },
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Prompt or attachment is required", response.json()["detail"])
+
     def test_cancel_run(self) -> None:
         response = self.client.post("/runs/run-1/cancel")
         self.assertEqual(response.status_code, 200)

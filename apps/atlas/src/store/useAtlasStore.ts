@@ -81,7 +81,7 @@ type AtlasState = {
   appendToken: (text: string) => void;
   setStage: (stage: string) => void;
   completeRun: () => void;
-  failRun: (message: string) => void;
+  failRun: (message: string, userId?: string, threadId?: string) => void;
   showCompactionNotice: (notice: CompactionNotice) => void;
   clearCompactionNotice: () => void;
   setSearchJumpTarget: (target: SearchJumpTarget | null) => void;
@@ -174,12 +174,11 @@ export const useAtlasStore = create<AtlasState>()(
           compactionNotice: null,
           currentStage: "completed",
         }),
-      failRun: (message) =>
-        set({
+      failRun: (message, userId, threadId) =>
+        set((state) => ({
           currentRunId: null,
-          currentRunMode: null,
-          activeRunUserId: null,
-          activeRunThreadId: null,
+          activeRunUserId: userId ?? state.activeRunUserId,
+          activeRunThreadId: threadId ?? state.activeRunThreadId,
           isStreaming: false,
           pendingPrompt: "",
           pendingAttachments: [],
@@ -188,7 +187,7 @@ export const useAtlasStore = create<AtlasState>()(
           liveError: message,
           compactionNotice: null,
           currentStage: "failed",
-        }),
+        })),
       showCompactionNotice: (notice) => set({ compactionNotice: notice }),
       clearCompactionNotice: () => set({ compactionNotice: null }),
       setSearchJumpTarget: (target) => set({ searchJumpTarget: target }),

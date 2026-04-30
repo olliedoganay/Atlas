@@ -587,6 +587,10 @@ class ContextCompactionTests(unittest.TestCase):
         self.assertEqual(marker["compaction_reason"], "auto")
         self.assertEqual(marker["history_representation_tokens_before_compaction"], 1800)
         self.assertEqual(marker["history_representation_tokens_after_compaction"], 640)
+        self.assertEqual(
+            [item.get("history_index") for item in history if item["role"] != "system"],
+            [0, 1, 2, 3],
+        )
 
     def test_thread_history_ignores_run_lifecycle_events_from_run_artifacts(self) -> None:
         service = AtlasBackendService.__new__(AtlasBackendService)
@@ -822,6 +826,53 @@ class SearchTests(unittest.TestCase):
         self.assertEqual(len(payload["current_thread_results"]), 3)
         self.assertEqual(payload["current_thread_results"][0]["match_type"], "thread")
         self.assertEqual(payload["current_thread_results"][1]["history_index"], 1)
+
+    def test_search_threads_uses_message_index_after_compaction_markers(self) -> None:
+        service = AtlasBackendService.__new__(AtlasBackendService)
+        service.run_store = SimpleNamespace(
+            list_threads=lambda **_: [
+                {
+                    "user_id": "research_user",
+                    "thread_id": "main",
+                    "title": "Compacted notes",
+                    "chat_model": "gemma4:e4b",
+                    "updated_at": "2026-04-11T10:00:00Z",
+                    "last_prompt": "latest prompt",
+                },
+            ]
+        )
+        service._get_snapshot = lambda **_: SimpleNamespace(
+            values={
+                "messages": [
+                    HumanMessage(content="first question"),
+                    AIMessage(content="first answer"),
+                    HumanMessage(content="second question"),
+                    AIMessage(content="unique compacted-search answer"),
+                ],
+                "timeline_events": [
+                    {
+                        "type": "context_compacted",
+                        "timestamp": "2026-04-11T00:00:00Z",
+                        "run_id": "run-2",
+                        "after_message_count": 2,
+                        "compacted_message_count": 2,
+                        "newly_compacted_message_count": 2,
+                        "thread_summary": "- first turn summary",
+                    }
+                ],
+            }
+        )
+
+        payload = AtlasBackendService.search_threads(
+            service,
+            user_id="research_user",
+            query="compacted-search",
+            current_thread_id="main",
+            limit=5,
+        )
+
+        self.assertEqual(payload["current_thread_results"][0]["match_type"], "message")
+        self.assertEqual(payload["current_thread_results"][0]["history_index"], 3)
 
     def test_search_threads_uses_run_search_index_without_loading_snapshots(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

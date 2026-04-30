@@ -86,10 +86,11 @@ export function SettingsPage() {
     retry: 1,
     refetchOnWindowFocus: false,
   });
+  const currentUserLocked = Boolean(users.find((user) => user.user_id === currentUserId)?.locked);
   const { data: memories = [] } = useQuery({
     queryKey: ["memories", currentUserId],
     queryFn: () => getMemories(currentUserId),
-    enabled: Boolean(currentUserId),
+    enabled: Boolean(currentUserId) && !currentUserLocked,
     staleTime: 5000,
     retry: 1,
     refetchOnWindowFocus: false,
@@ -111,12 +112,14 @@ export function SettingsPage() {
   );
   const manualMemories = useMemo(
     () =>
-      memories.filter(
-        (memory) =>
-          memory.metadata?.source === "manual" ||
-          memory.metadata?.kind === "memory_note",
-      ),
-    [memories],
+      currentUserLocked
+        ? []
+        : memories.filter(
+            (memory) =>
+              memory.metadata?.source === "manual" ||
+              memory.metadata?.kind === "memory_note",
+          ),
+    [currentUserLocked, memories],
   );
   const security = status?.security;
   const allDataEncrypted = Boolean(
@@ -127,10 +130,10 @@ export function SettingsPage() {
   );
 
   useEffect(() => {
-    if (usersFetched && currentUserId && (!currentUser || currentUser.locked)) {
+    if (usersFetched && currentUserId && !currentUser) {
       setCurrentUserId("");
       setCurrentThreadId("main");
-      setCurrentThreadTitle("main");
+      setCurrentThreadTitle("Main");
       setDraftThreadModel("");
       setDraftThreadTemperature(null);
     }
@@ -208,14 +211,7 @@ export function SettingsPage() {
   });
   const lockUserMutation = useMutation({
     mutationFn: async (userId: string) => lockUser(userId),
-    onSuccess: async (user) => {
-      if (currentUserId === user.user_id) {
-        setCurrentUserId("");
-        setCurrentThreadId("main");
-        setCurrentThreadTitle("main");
-        setDraftThreadModel("");
-        setDraftThreadTemperature(null);
-      }
+    onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["users"] }),
         queryClient.invalidateQueries({ queryKey: ["threads"] }),
@@ -755,12 +751,12 @@ export function SettingsPage() {
                       aria-label="Memory text"
                       className="text-input settings-memory-input"
                       onChange={(event) => setMemoryDraft(event.currentTarget.value)}
-                      placeholder={currentUserId ? "Remember this across chats" : "Select a profile first"}
+                      placeholder={currentUserId && !currentUserLocked ? "Remember this across chats" : "Select an unlocked profile first"}
                       value={memoryDraft}
                     />
                     <button
                       className="primary-button compact-button"
-                      disabled={!currentUserId || !memoryDraft.trim() || createMemoryMutation.isPending}
+                      disabled={!currentUserId || currentUserLocked || !memoryDraft.trim() || createMemoryMutation.isPending}
                       onClick={() => createMemoryMutation.mutate()}
                       type="button"
                     >
@@ -768,10 +764,10 @@ export function SettingsPage() {
                     </button>
                   </div>
                   <div className="settings-memory-list">
-                    {!currentUserId ? (
+                    {!currentUserId || currentUserLocked ? (
                       <EmptyState
-                        title="No profile selected"
-                        description="Switch to a profile to view and add memories."
+                        title={currentUserLocked ? "Profile locked" : "No profile selected"}
+                        description={currentUserLocked ? "Unlock this profile to view and add memories." : "Switch to a profile to view and add memories."}
                       />
                     ) : manualMemories.length === 0 ? (
                       <EmptyState

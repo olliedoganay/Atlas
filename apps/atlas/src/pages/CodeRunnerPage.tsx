@@ -32,6 +32,7 @@ export function CodeRunnerPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [dockerReason, setDockerReason] = useState<string>("");
   const [vncUrl, setVncUrl] = useState<string | null>(null);
+  const [clientPreviewNonce, setClientPreviewNonce] = useState(0);
   const streamDisposer = useRef<(() => void) | null>(null);
   const outputRef = useRef<HTMLDivElement | null>(null);
   const currentRunId = useRef<string | null>(null);
@@ -183,10 +184,16 @@ export function CodeRunnerPage() {
   }, []);
 
   const rerun = useCallback(() => {
+    if (clientLang) {
+      setPhase("idle");
+      setErrorMessage(null);
+      setClientPreviewNonce((current) => current + 1);
+      return;
+    }
     currentRunId.current = null;
     setRunId(null);
     void beginServerRun();
-  }, [beginServerRun]);
+  }, [beginServerRun, clientLang]);
 
   if (!language) {
     return (
@@ -222,7 +229,7 @@ export function CodeRunnerPage() {
 
       <main className={`runner-body${vncUrl ? " with-vnc" : ""}`}>
         {clientLang ? (
-          <ClientPreview code={code} />
+          <ClientPreview code={code} key={clientPreviewNonce} />
         ) : phase === "docker-down" ? (
           <DockerDownPanel reason={dockerReason} onRetry={rerun} />
         ) : vncUrl ? (
