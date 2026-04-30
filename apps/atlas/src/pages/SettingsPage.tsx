@@ -31,11 +31,9 @@ import {
   getStatus,
   getUsers,
   lockUser,
-  openExternalUrl,
   resetAll,
   unlockUser,
 } from "../lib/api";
-import { ATLAS_SUPPORT_EMAIL, buildGeneralAiReportMailto } from "../lib/reporting";
 import { useAtlasStore } from "../store/useAtlasStore";
 
 type SettingsSection = "general" | "profiles" | "models" | "connections" | "data" | "about";
@@ -826,17 +824,8 @@ export function SettingsPage() {
                 <SettingsRow label="Privacy model" description="Chats, saved runs, and memory live on this device.">
                   <Chip intent="muted">Stored locally</Chip>
                 </SettingsRow>
-                <SettingsRow label="Report AI content" description="Send inappropriate generated output reports to the publisher.">
-                  <button
-                    className="ghost-button compact-button"
-                    onClick={() => void openExternalUrl(buildGeneralAiReportMailto())}
-                    type="button"
-                  >
-                    {ATLAS_SUPPORT_EMAIL}
-                  </button>
-                </SettingsRow>
-                <SettingsRow label="Updates" description="New versions ship through the Microsoft Store.">
-                  <Chip intent="muted">Microsoft Store</Chip>
+                <SettingsRow label="Updates" description="New versions ship as Windows MSI installers.">
+                  <Chip intent="muted">MSI</Chip>
                 </SettingsRow>
                 <SettingsRow label="License" description="Open source under MIT. Brand and trademark are not licensed.">
                   <Chip intent="muted">MIT</Chip>
