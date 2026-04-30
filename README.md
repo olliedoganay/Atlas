@@ -2,7 +2,7 @@
 
 Atlas Chat is a local-first desktop app for working with local Ollama models. It provides a multi-thread chat workspace, profile-scoped memory, hardware-aware model discovery, run inspection, and a built-in code runner while keeping Atlas-managed state on the local machine.
 
-Current version: `1.0.10`
+Current version: `1.0.11`
 
 ## Highlights
 
@@ -24,7 +24,7 @@ Atlas requires a local Ollama runtime. Docker is optional for chat, but required
 For normal Windows usage, install the packaged desktop release instead of running from source.
 
 1. Open `https://github.com/olliedoganay/Atlas/releases/latest`.
-2. Download the current Windows MSI installer.
+2. Download the current Windows x64 MSI installer.
 3. Install and launch `Atlas Chat`.
 
 Atlas Chat does not currently publish macOS or Linux installers. Use the source workflow on those platforms.
@@ -222,7 +222,7 @@ Artifacts are written under:
 apps\atlas\src-tauri\target\release\bundle\
 ```
 
-Atlas builds MSI as the canonical Windows installer.
+Atlas builds MSI as the canonical Windows installer. The Windows release workflow publishes MSI artifacts only.
 
 ## Repository Layout
 
