@@ -81,13 +81,15 @@ Windows:
 .\scripts\start_atlas_dev.ps1
 ```
 
-The launcher reuses an existing Atlas dev session when possible. Otherwise it starts `npm run tauri dev` in `apps/atlas`, which can create a large Rust `src-tauri/target` cache on first compile.
+The launcher reuses an existing Atlas dev session when possible. When an already-built `target\debug\atlas-desktop.exe` exists, it starts the Vite frontend and reuses that desktop executable to avoid rebuilding the Rust/Tauri target cache on every launch.
 
-For a local test shortcut that should reuse an already-built desktop executable instead of recompiling Rust on every launch:
+When you intentionally need to rebuild the Rust/Tauri desktop shell after native source changes:
 
 ```powershell
-.\scripts\start_atlas_dev.ps1 -ReuseExistingDesktop
+.\scripts\start_atlas_dev.ps1 -RebuildDesktop
 ```
+
+First compile, or any explicit rebuild, can create a large Rust `src-tauri/target` cache.
 
 macOS and Linux:
 
