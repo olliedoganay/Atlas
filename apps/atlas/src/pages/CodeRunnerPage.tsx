@@ -20,6 +20,12 @@ type OutputLine = {
 
 type Phase = "loading" | "docker-down" | "running" | "finished" | "error" | "idle";
 
+export const CLIENT_PREVIEW_SANDBOX = "allow-scripts allow-forms allow-modals allow-popups allow-pointer-lock";
+
+export function buildClientPreviewBlob(code: string): Blob {
+  return new Blob([code], { type: "text/html;charset=utf-8" });
+}
+
 export function CodeRunnerPage() {
   const { token = "" } = useParams();
   const [phase, setPhase] = useState<Phase>("loading");
@@ -322,11 +328,21 @@ function DockerDownPanel({ reason, onRetry }: { reason: string; onRetry: () => v
 }
 
 function ClientPreview({ code }: { code: string }) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    const url = URL.createObjectURL(buildClientPreviewBlob(code));
+    setPreviewUrl(url);
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [code]);
+
   return (
     <iframe
       className="runner-iframe"
-      sandbox="allow-scripts allow-forms allow-modals allow-popups allow-pointer-lock"
-      srcDoc={code}
+      sandbox={CLIENT_PREVIEW_SANDBOX}
+      src={previewUrl ?? "about:blank"}
       title="Atlas runner preview"
     />
   );
