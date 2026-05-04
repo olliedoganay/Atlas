@@ -1,3 +1,7 @@
+param(
+  [switch]$ReuseExistingDesktop
+)
+
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -90,6 +94,22 @@ function Start-AtlasDesktopExecutable {
   return $true
 }
 
+function Start-AtlasViteDevServer {
+  Start-Process -FilePath "npm.cmd" -ArgumentList @("run", "dev") -WorkingDirectory $atlasDir -WindowStyle Hidden | Out-Null
+}
+
+function Wait-AtlasViteDevServer {
+  for ($attempt = 0; $attempt -lt 80; $attempt++) {
+    $owner = Get-PortOwner -Port $vitePort
+    if (Test-AtlasViteProcess $owner) {
+      return $owner
+    }
+    Start-Sleep -Milliseconds 250
+  }
+
+  return $null
+}
+
 function Stop-AtlasOwnedProcess($ProcessInfo, [string]$Label) {
   if (-not $ProcessInfo) {
     return
@@ -134,6 +154,19 @@ if (-not $existingAtlas -and $atlasViteRunning) {
     exit 0
   }
   Write-Host "No reusable desktop binary was found. Recycling the old dev session first." -ForegroundColor Yellow
+}
+
+if ($ReuseExistingDesktop -and -not $existingAtlas -and -not $atlasViteRunning -and (Test-Path $debugExe)) {
+  Write-Host "Starting Atlas dev frontend and reusing the existing desktop binary." -ForegroundColor Green
+  Write-Host "This avoids rebuilding the Rust/Tauri target cache on every shortcut launch." -ForegroundColor DarkGray
+  Start-AtlasViteDevServer
+  $portOwner = Wait-AtlasViteDevServer
+  if (-not $portOwner) {
+    throw "Atlas dev server did not start on port $vitePort."
+  }
+  if (Start-AtlasDesktopExecutable) {
+    exit 0
+  }
 }
 
 if ($atlasViteRunning) {
