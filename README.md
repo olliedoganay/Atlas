@@ -81,7 +81,13 @@ Windows:
 .\scripts\start_atlas_dev.ps1
 ```
 
-The launcher reuses an existing Atlas dev session when possible. Otherwise it starts `npm run tauri dev` in `apps/atlas`.
+The launcher reuses an existing Atlas dev session when possible. Otherwise it starts `npm run tauri dev` in `apps/atlas`, which can create a large Rust `src-tauri/target` cache on first compile.
+
+For a local test shortcut that should reuse an already-built desktop executable instead of recompiling Rust on every launch:
+
+```powershell
+.\scripts\start_atlas_dev.ps1 -ReuseExistingDesktop
+```
 
 macOS and Linux:
 
