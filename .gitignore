@@ -1,5 +1,5 @@
 .env
-.env
+.claude/
 .venv/
 .pytest_cache/
 .mypy_cache/
