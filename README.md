@@ -1,8 +1,23 @@
 # Atlas Chat
 
+[![CI](https://github.com/olliedoganay/Atlas/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/olliedoganay/Atlas/actions/workflows/ci.yml)
+[![Windows release](https://github.com/olliedoganay/Atlas/actions/workflows/release-windows.yml/badge.svg)](https://github.com/olliedoganay/Atlas/actions/workflows/release-windows.yml)
+[![Latest release](https://img.shields.io/github/v/release/olliedoganay/Atlas?label=latest%20release)](https://github.com/olliedoganay/Atlas/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Atlas Chat is a local-first desktop app for working with local Ollama models. It provides a multi-thread chat workspace, profile-scoped memory, hardware-aware model discovery, run inspection, and a built-in code runner while keeping Atlas-managed state on the local machine.
 
 Current version: `1.0.13`
+
+<p align="center">
+  <img src="docs/assets/atlas-chat-workspace.png" alt="Atlas Chat workspace" style="max-width: 100%; height: auto;">
+</p>
+
+## Download
+
+For normal Windows usage, install the packaged desktop release instead of running from source.
+
+[Download the latest Windows MSI](https://github.com/olliedoganay/Atlas/releases/latest)
 
 ## Highlights
 
@@ -20,8 +35,6 @@ Current version: `1.0.13`
 Atlas requires a local Ollama runtime. Docker is optional for chat, but required for server-side code execution.
 
 ## Install
-
-For normal Windows usage, install the packaged desktop release instead of running from source.
 
 1. Open `https://github.com/olliedoganay/Atlas/releases/latest`.
 2. Download the current Windows x64 MSI installer.
