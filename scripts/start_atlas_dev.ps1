@@ -1,5 +1,6 @@
 param(
-  [switch]$ReuseExistingDesktop
+  [switch]$ReuseExistingDesktop,
+  [switch]$RebuildDesktop
 )
 
 $ErrorActionPreference = "Stop"
@@ -156,7 +157,7 @@ if (-not $existingAtlas -and $atlasViteRunning) {
   Write-Host "No reusable desktop binary was found. Recycling the old dev session first." -ForegroundColor Yellow
 }
 
-if ($ReuseExistingDesktop -and -not $existingAtlas -and -not $atlasViteRunning -and (Test-Path $debugExe)) {
+if (-not $RebuildDesktop -and -not $existingAtlas -and -not $atlasViteRunning -and (Test-Path $debugExe)) {
   Write-Host "Starting Atlas dev frontend and reusing the existing desktop binary." -ForegroundColor Green
   Write-Host "This avoids rebuilding the Rust/Tauri target cache on every shortcut launch." -ForegroundColor DarkGray
   Start-AtlasViteDevServer
@@ -186,6 +187,7 @@ Set-Location $atlasDir
 
 Write-Host "Starting Atlas from source in $atlasDir" -ForegroundColor Cyan
 Write-Host "This launcher uses the current repo state, not the installed AppData build." -ForegroundColor DarkGray
+Write-Host "Pass -RebuildDesktop when you intentionally want to rebuild the Rust/Tauri desktop shell." -ForegroundColor DarkGray
 Write-Host ""
 
 npm run tauri dev
