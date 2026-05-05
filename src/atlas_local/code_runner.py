@@ -70,6 +70,8 @@ PYTHON_GUI_APT_PACKAGES = (
     "ca-certificates",
 )
 PYTHON_GUI_MARKERS = (
+    r"^\s*import\s+(tkinter|customtkinter|ttkbootstrap)\b",
+    r"^\s*from\s+(tkinter|customtkinter|ttkbootstrap)\b",
     r"\bpygame\.display\.set_mode\s*\(",
     r"\bTk\s*\(",
     r"\btk\.Tk\s*\(",
@@ -89,7 +91,7 @@ def _python_gui_detected(code: str) -> bool:
     if _python_gui_args(code):
         return True
     for marker in PYTHON_GUI_MARKERS:
-        if re.search(marker, code):
+        if re.search(marker, code, re.MULTILINE):
             return True
     return False
 

@@ -168,11 +168,17 @@ class CodeRunnerPolicyTests(unittest.TestCase):
         self.assertEqual(plan.image, PYTHON_GUI_IMAGE)
         self.assertTrue(plan.gui)
 
-    def test_tkinter_import_alone_does_not_force_gui_runner(self) -> None:
+    def test_tkinter_import_uses_gui_runner_for_system_tk_deps(self) -> None:
         plan = resolve_plan("python", "import tkinter as tk\nprint('cli mode')")
 
-        self.assertEqual(plan.image, "python:3.12-slim")
-        self.assertFalse(plan.gui)
+        self.assertEqual(plan.image, PYTHON_GUI_IMAGE)
+        self.assertTrue(plan.gui)
+
+    def test_tkinter_from_import_uses_gui_runner_for_system_tk_deps(self) -> None:
+        plan = resolve_plan("python", "from tkinter import ttk\nprint('cli mode')")
+
+        self.assertEqual(plan.image, PYTHON_GUI_IMAGE)
+        self.assertTrue(plan.gui)
 
     def test_direct_tkinter_window_uses_gui_runner(self) -> None:
         plan = resolve_plan("python", "import tkinter\nroot = tkinter.Tk()\nroot.mainloop()")
