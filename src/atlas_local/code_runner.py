@@ -33,7 +33,8 @@ class RunPlan:
     gui: bool = False
 
 
-PYTHON_GUI_IMAGE = "atlas-python-gui:latest"
+PYTHON_GUI_IMAGE = "atlas-python-gui:workspace1"
+LEGACY_PYTHON_GUI_IMAGES = ("atlas-python-gui:latest",)
 PYTHON_GUI_MARKERS = (
     "pygame",
     "tkinter",
@@ -360,9 +361,11 @@ def _ensure_python_gui_image(
     progress: "Any | None" = None,
 ) -> None:
     if _image_exists(PYTHON_GUI_IMAGE):
+        _remove_legacy_python_gui_images()
         return
     with _image_build_lock:
         if _image_exists(PYTHON_GUI_IMAGE):
+            _remove_legacy_python_gui_images()
             return
         dockerfile = Path(__file__).parent / "runner_images" / "python_gui.Dockerfile"
         if not dockerfile.exists():
@@ -401,6 +404,22 @@ def _ensure_python_gui_image(
             )
         if progress is not None:
             progress("[atlas-runner] GUI runner image ready.\n")
+        _remove_legacy_python_gui_images()
+
+
+def _remove_legacy_python_gui_images() -> None:
+    binary = _docker_binary()
+    if not binary:
+        return
+    for image in LEGACY_PYTHON_GUI_IMAGES:
+        if image == PYTHON_GUI_IMAGE or not _image_exists(image):
+            continue
+        subprocess.run(
+            [binary, "image", "rm", image],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
 
 
 def _python_gui_plan(code: str) -> RunPlan:
