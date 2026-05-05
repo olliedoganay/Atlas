@@ -29,7 +29,7 @@ vi.mock("../lib/api", () => ({
   streamRunnerRun: apiMocks.streamRunnerRun,
 }));
 
-import { buildClientPreviewBlob, CLIENT_PREVIEW_SANDBOX, CodeRunnerPage } from "./CodeRunnerPage";
+import { buildClientPreviewBlob, buildClientPreviewDocument, CLIENT_PREVIEW_SANDBOX, CodeRunnerPage } from "./CodeRunnerPage";
 
 function readBlobText(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -54,7 +54,7 @@ describe("CodeRunnerPage client preview", () => {
     window.localStorage.clear();
   });
 
-  it("keeps complete HTML documents intact for blob previews", async () => {
+  it("keeps complete HTML documents intact while adding preview diagnostics", async () => {
     const code = [
       "<!DOCTYPE html>",
       "<html>",
@@ -63,6 +63,27 @@ describe("CodeRunnerPage client preview", () => {
       "</html>",
     ].join("");
 
+    const preview = buildClientPreviewDocument(code, "test-channel");
+
+    expect(preview).toContain("<!DOCTYPE html>");
+    expect(preview).toContain("<style>canvas{background:#111}</style>");
+    expect(preview).toContain("<canvas id=\"gameCanvas\"></canvas>");
+    expect(preview).toContain("<script>window.atlasPreviewRan=true;</script>");
+    expect(preview).toContain("atlas-client-preview");
+    expect(preview).toContain("test-channel");
+  });
+
+  it("wraps HTML fragments in a runnable preview document", () => {
+    const preview = buildClientPreviewDocument("<h1>Hello</h1>", "fragment-channel");
+
+    expect(preview).toContain("<!DOCTYPE html>");
+    expect(preview).toContain('<meta charset="utf-8" />');
+    expect(preview).toContain("<body><h1>Hello</h1></body>");
+    expect(preview).toContain("fragment-channel");
+  });
+
+  it("can still build raw HTML blobs for callers that need them", async () => {
+    const code = "<!DOCTYPE html><html><body>raw</body></html>";
     const blob = buildClientPreviewBlob(code);
 
     expect(blob.type).toBe("text/html;charset=utf-8");

@@ -1,7 +1,7 @@
 import tauriConfig from "../../src-tauri/tauri.conf.json";
 import { describe, expect, it } from "vitest";
 
-const FRAME_SOURCES = ["'self'", "data:", "blob:", "http://127.0.0.1:*", "http://localhost:*"];
+const FRAME_SOURCES = ["'self'", "about:", "data:", "blob:", "http://127.0.0.1:*", "http://localhost:*"];
 
 function directiveValue(csp: string, directive: string): string {
   const entry = csp

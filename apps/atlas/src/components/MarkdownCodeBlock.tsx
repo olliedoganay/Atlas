@@ -123,7 +123,7 @@ function RunButton({ launching, onRun }: { launching: boolean; onRun: () => Prom
       type="button"
     >
       <Play size={14} />
-      {launching ? "Opening…" : "Run"}
+      {launching ? "Opening..." : "Run"}
     </button>
   );
 }

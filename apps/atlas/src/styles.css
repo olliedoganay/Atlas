@@ -2991,12 +2991,60 @@ pre {
   font-style: italic;
 }
 
+.runner-client-preview {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  background: #ffffff;
+}
+
 .runner-iframe {
   flex: 1;
   width: 100%;
   height: 100%;
   border: 0;
   background: #ffffff;
+}
+
+.runner-client-console {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  max-height: 34%;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid rgba(230, 118, 118, 0.28);
+  background: rgba(12, 14, 19, 0.92);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+  color: #d8dde7;
+  font-family: "IBM Plex Mono", "Cascadia Code", monospace;
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.runner-client-console-line {
+  display: flex;
+  gap: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.runner-client-console-line.error {
+  color: #f0b3b3;
+}
+
+.runner-client-console-line.warn {
+  color: #f3d18a;
+}
+
+.runner-client-console-level {
+  flex: 0 0 auto;
+  min-width: 38px;
+  color: #9ca3af;
+  text-transform: uppercase;
 }
 
 .runner-body.with-vnc {

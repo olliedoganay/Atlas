@@ -21,9 +21,108 @@ type OutputLine = {
 type Phase = "loading" | "docker-down" | "running" | "finished" | "error" | "idle";
 
 export const CLIENT_PREVIEW_SANDBOX = "allow-scripts allow-forms allow-modals allow-popups allow-pointer-lock";
+export const CLIENT_PREVIEW_MESSAGE_SOURCE = "atlas-client-preview";
 
-export function buildClientPreviewBlob(code: string): Blob {
-  return new Blob([code], { type: "text/html;charset=utf-8" });
+type ClientPreviewConsoleLevel = "log" | "warn" | "error";
+
+type ClientPreviewEvent = {
+  source: typeof CLIENT_PREVIEW_MESSAGE_SOURCE;
+  channel: string;
+  type: "ready" | "console" | "error";
+  level?: ClientPreviewConsoleLevel;
+  text?: string;
+};
+
+type ClientPreviewLine = {
+  level: ClientPreviewConsoleLevel;
+  text: string;
+};
+
+export function buildClientPreviewDocument(code: string, channel: string): string {
+  const bootstrap = buildClientPreviewBootstrap(channel);
+  if (isCompleteHtmlDocument(code)) {
+    return injectClientPreviewBootstrap(code, bootstrap);
+  }
+  return [
+    "<!DOCTYPE html>",
+    "<html>",
+    "<head>",
+    '<meta charset="utf-8" />',
+    '<meta name="viewport" content="width=device-width, initial-scale=1" />',
+    bootstrap,
+    "</head>",
+    "<body>",
+    code,
+    "</body>",
+    "</html>",
+  ].join("");
+}
+
+export function buildClientPreviewBlob(code: string, channel = ""): Blob {
+  return new Blob([channel ? buildClientPreviewDocument(code, channel) : code], { type: "text/html;charset=utf-8" });
+}
+
+function isCompleteHtmlDocument(code: string): boolean {
+  return /<!doctype\s+html/i.test(code) || /<html[\s>]/i.test(code);
+}
+
+function injectClientPreviewBootstrap(code: string, bootstrap: string): string {
+  if (/<head[\s>]/i.test(code)) {
+    return code.replace(/<head([^>]*)>/i, `<head$1>${bootstrap}`);
+  }
+  if (/<body[\s>]/i.test(code)) {
+    return code.replace(/<body([^>]*)>/i, `<body$1>${bootstrap}`);
+  }
+  if (/<html[\s>]/i.test(code)) {
+    return code.replace(/<html([^>]*)>/i, `<html$1><head>${bootstrap}</head>`);
+  }
+  return `${bootstrap}${code}`;
+}
+
+function buildClientPreviewBootstrap(channel: string): string {
+  const source = JSON.stringify(CLIENT_PREVIEW_MESSAGE_SOURCE);
+  const channelValue = JSON.stringify(channel);
+  const script = [
+    "(() => {",
+    `  const source = ${source};`,
+    `  const channel = ${channelValue};`,
+    '  const send = (payload) => { try { parent.postMessage({ source, channel, ...payload }, "*"); } catch {} };',
+    "  const stringify = (value) => {",
+    '    try {',
+    '      if (typeof value === "string") return value;',
+    "      if (value instanceof Error) return value.stack || value.message;",
+    "      const json = JSON.stringify(value);",
+    "      return json === undefined ? String(value) : json;",
+    "    } catch {",
+    "      return String(value);",
+    "    }",
+    "  };",
+    '  ["log", "warn", "error"].forEach((level) => {',
+    "    const original = console[level];",
+    "    console[level] = (...args) => {",
+    '      send({ type: "console", level, text: args.map(stringify).join(" ") });',
+    "      original.apply(console, args);",
+    "    };",
+    "  });",
+    '  window.addEventListener("error", (event) => {',
+    "    const text = [event.message, event.filename || \"\", event.lineno ? String(event.lineno) : \"\", event.colno ? String(event.colno) : \"\"].filter(Boolean).join(\":\");",
+    '    send({ type: "error", level: "error", text });',
+    "  });",
+    '  window.addEventListener("unhandledrejection", (event) => {',
+    '    send({ type: "error", level: "error", text: stringify(event.reason) });',
+    "  });",
+    '  window.addEventListener("load", () => {',
+    '    send({ type: "ready" });',
+    "    setTimeout(() => {",
+    "      try {",
+    "        window.focus();",
+    "        document.body?.focus?.();",
+    "      } catch {}",
+    "    }, 0);",
+    "  });",
+    "})();",
+  ].join("\n");
+  return `<script>${script}</script>`;
 }
 
 export function CodeRunnerPage() {
@@ -328,23 +427,62 @@ function DockerDownPanel({ reason, onRetry }: { reason: string; onRetry: () => v
 }
 
 function ClientPreview({ code }: { code: string }) {
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const frameRef = useRef<HTMLIFrameElement | null>(null);
+  const channel = useMemo(() => {
+    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+      return crypto.randomUUID();
+    }
+    return `preview-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }, []);
+  const [consoleLines, setConsoleLines] = useState<ClientPreviewLine[]>([]);
+  const previewDocument = useMemo(() => buildClientPreviewDocument(code, channel), [channel, code]);
 
   useEffect(() => {
-    const url = URL.createObjectURL(buildClientPreviewBlob(code));
-    setPreviewUrl(url);
-    return () => {
-      URL.revokeObjectURL(url);
+    setConsoleLines([]);
+  }, [previewDocument]);
+
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      const data = event.data as Partial<ClientPreviewEvent> | null;
+      if (!data || data.source !== CLIENT_PREVIEW_MESSAGE_SOURCE || data.channel !== channel) {
+        return;
+      }
+      if (data.type === "console" || data.type === "error") {
+        const text = String(data.text ?? "").trim();
+        if (!text) {
+          return;
+        }
+        const level = data.type === "error" ? "error" : data.level ?? "log";
+        setConsoleLines((current) => [...current.slice(-79), { level, text }]);
+      }
     };
-  }, [code]);
+    window.addEventListener("message", handleMessage);
+    return () => {
+      window.removeEventListener("message", handleMessage);
+    };
+  }, [channel]);
 
   return (
-    <iframe
-      className="runner-iframe"
-      sandbox={CLIENT_PREVIEW_SANDBOX}
-      src={previewUrl ?? "about:blank"}
-      title="Atlas runner preview"
-    />
+    <div className="runner-client-preview">
+      <iframe
+        className="runner-iframe"
+        onLoad={() => frameRef.current?.contentWindow?.focus()}
+        ref={frameRef}
+        sandbox={CLIENT_PREVIEW_SANDBOX}
+        srcDoc={previewDocument}
+        title="Atlas runner preview"
+      />
+      {consoleLines.length > 0 ? (
+        <div className="runner-client-console" role="log">
+          {consoleLines.map((line, index) => (
+            <div className={`runner-client-console-line ${line.level}`} key={`${index}-${line.text}`}>
+              <span className="runner-client-console-level">{line.level}</span>
+              <span>{line.text}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
