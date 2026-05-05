@@ -71,7 +71,7 @@ LANGUAGES: dict[str, LanguageSpec] = {
         filename="main.py",
         command=[
             "sh",
-            "-lc",
+            "-c",
             (
                 "set -e; cp /work/main.py /tmp/main.py; cd /tmp; "
                 "PY_IMPORTS=$(python - <<'PY'\n"
@@ -105,7 +105,7 @@ LANGUAGES: dict[str, LanguageSpec] = {
         filename="main.js",
         command=[
             "sh",
-            "-lc",
+            "-c",
             (
                 "set -e; mkdir -p /tmp/app; cp /work/main.js /tmp/app/main.js; cd /tmp/app; "
                 "DEPS=$(node -e \"const fs=require('fs');const src=fs.readFileSync('/tmp/app/main.js','utf8');const core=new Set(require('module').builtinModules);const s=new Set();const re=/require\\(['\\\"]([^'\\\"]+)['\\\"]\\)|from ['\\\"]([^'\\\"]+)['\\\"]|import ['\\\"]([^'\\\"]+)['\\\"]/g;let m;while((m=re.exec(src))){let p=m[1]||m[2]||m[3];if(!p||p.startsWith('.')||p.startsWith('/')||p.startsWith('node:'))continue;if(p.startsWith('@')){p=p.split('/').slice(0,2).join('/')}else{p=p.split('/')[0]}if(!core.has(p))s.add(p)}process.stdout.write([...s].join(' '))\"); "
@@ -119,7 +119,7 @@ LANGUAGES: dict[str, LanguageSpec] = {
         filename="main.ts",
         command=[
             "sh",
-            "-lc",
+            "-c",
             (
                 "set -e; mkdir -p /tmp/app; cp /work/main.ts /tmp/app/main.ts; cd /tmp/app; "
                 "DEPS=$(node -e \"const fs=require('fs');const src=fs.readFileSync('/tmp/app/main.ts','utf8');const core=new Set(require('module').builtinModules);const s=new Set();const re=/require\\(['\\\"]([^'\\\"]+)['\\\"]\\)|from ['\\\"]([^'\\\"]+)['\\\"]|import ['\\\"]([^'\\\"]+)['\\\"]/g;let m;while((m=re.exec(src))){let p=m[1]||m[2]||m[3];if(!p||p.startsWith('.')||p.startsWith('/')||p.startsWith('node:'))continue;if(p.startsWith('@')){p=p.split('/').slice(0,2).join('/')}else{p=p.split('/')[0]}if(!core.has(p))s.add(p)}process.stdout.write([...s].join(' '))\"); "
@@ -134,7 +134,7 @@ LANGUAGES: dict[str, LanguageSpec] = {
         filename="main.go",
         command=[
             "sh",
-            "-lc",
+            "-c",
             (
                 "set -e; mkdir -p /tmp/app; cp /work/main.go /tmp/app/main.go; cd /tmp/app; "
                 "go mod init atlasrun >/dev/null 2>&1 || true; "
@@ -149,7 +149,7 @@ LANGUAGES: dict[str, LanguageSpec] = {
         filename="main.rs",
         command=[
             "sh",
-            "-lc",
+            "-c",
             (
                 "set -e; mkdir -p /tmp/app/src; cp /work/main.rs /tmp/app/src/main.rs; cd /tmp/app; "
                 "printf '[package]\\nname=\"atlasrun\"\\nversion=\"0.1.0\"\\nedition=\"2021\"\\n' > Cargo.toml; "
@@ -162,24 +162,24 @@ LANGUAGES: dict[str, LanguageSpec] = {
     "c": LanguageSpec(
         image="gcc:latest",
         filename="main.c",
-        command=["sh", "-lc", "cp /work/main.c /tmp/main.c && gcc /tmp/main.c -o /tmp/app -lm && /tmp/app"],
+        command=["sh", "-c", "cp /work/main.c /tmp/main.c && gcc /tmp/main.c -o /tmp/app -lm && /tmp/app"],
     ),
     "cpp": LanguageSpec(
         image="gcc:latest",
         filename="main.cpp",
-        command=["sh", "-lc", "cp /work/main.cpp /tmp/main.cpp && g++ /tmp/main.cpp -o /tmp/app -lm && /tmp/app"],
+        command=["sh", "-c", "cp /work/main.cpp /tmp/main.cpp && g++ /tmp/main.cpp -o /tmp/app -lm && /tmp/app"],
     ),
     "java": LanguageSpec(
         image="openjdk:21-slim",
         filename="Main.java",
-        command=["sh", "-lc", "cp /work/Main.java /tmp/Main.java && cd /tmp && javac Main.java && java Main"],
+        command=["sh", "-c", "cp /work/Main.java /tmp/Main.java && cd /tmp && javac Main.java && java Main"],
     ),
     "ruby": LanguageSpec(
         image="ruby:3-alpine",
         filename="main.rb",
         command=[
             "sh",
-            "-lc",
+            "-c",
             (
                 "set -e; apk add --no-cache build-base >/dev/null 2>&1 || true; "
                 "cp /work/main.rb /tmp/main.rb; cd /tmp; "
@@ -194,7 +194,7 @@ LANGUAGES: dict[str, LanguageSpec] = {
         filename="main.php",
         command=[
             "sh",
-            "-lc",
+            "-c",
             (
                 "set -e; mkdir -p /tmp/app; cp /work/main.php /tmp/app/main.php; cd /tmp/app; "
                 "PKGS=$(php -r '$s=file_get_contents(\"/tmp/app/main.php\"); preg_match_all(\"/(?:use|require(?:_once)?\\s*\\(?)\\s*[\\\"\\\\']?([A-Za-z0-9_\\\\\\\\\\/\\\\.]+)/\", $s, $m); print implode(\" \", array_unique($m[1]));'); "
@@ -213,26 +213,26 @@ LANGUAGES: dict[str, LanguageSpec] = {
         filename="Program.cs",
         command=[
             "sh",
-            "-lc",
+            "-c",
             "mkdir -p /tmp/app && cp /work/Program.cs /tmp/app/Program.cs && cd /tmp/app && dotnet new console --force -o . >/dev/null && cp /work/Program.cs ./Program.cs && dotnet run --nologo",
         ],
     ),
     "kotlin": LanguageSpec(
         image="zenika/kotlin:1.9-jdk17",
         filename="main.kts",
-        command=["sh", "-lc", "cp /work/main.kts /tmp/main.kts && kotlinc -script /tmp/main.kts"],
+        command=["sh", "-c", "cp /work/main.kts /tmp/main.kts && kotlinc -script /tmp/main.kts"],
     ),
     "swift": LanguageSpec(
         image="swift:5.9",
         filename="main.swift",
-        command=["sh", "-lc", "cp /work/main.swift /tmp/main.swift && swift /tmp/main.swift"],
+        command=["sh", "-c", "cp /work/main.swift /tmp/main.swift && swift /tmp/main.swift"],
     ),
     "perl": LanguageSpec(
         image="perl:5",
         filename="main.pl",
         command=[
             "sh",
-            "-lc",
+            "-c",
             (
                 "set -e; cp /work/main.pl /tmp/main.pl; "
                 "MODS=$(grep -Eo '^\\s*use\\s+[A-Za-z0-9_:]+' /tmp/main.pl | awk '{print $2}' | grep -Ev '^(strict|warnings|utf8|lib|feature|constant|vars|parent|base|overload|Exporter|Carp)$' | sort -u || true); "
@@ -251,7 +251,7 @@ LANGUAGES: dict[str, LanguageSpec] = {
         filename="main.R",
         command=[
             "sh",
-            "-lc",
+            "-c",
             (
                 "set -e; cp /work/main.R /tmp/main.R; "
                 "PKGS=$(grep -Eo '(library|require)\\([A-Za-z0-9._]+' /tmp/main.R | sed -E 's/(library|require)\\(//' | sort -u || true); "
@@ -270,7 +270,7 @@ LANGUAGES: dict[str, LanguageSpec] = {
         filename="main.dart",
         command=[
             "sh",
-            "-lc",
+            "-c",
             (
                 "set -e; mkdir -p /tmp/app/bin; cp /work/main.dart /tmp/app/bin/main.dart; cd /tmp/app; "
                 "dart create -q -t console --force . >/dev/null 2>&1 || true; "
@@ -435,7 +435,7 @@ def _python_gui_plan(code: str) -> RunPlan:
     return RunPlan(
         image=PYTHON_GUI_IMAGE,
         filename="main.py",
-        command=["sh", "-lc", install_script],
+        command=["sh", "-c", install_script],
         ports={novnc_host_port: NOVNC_CONTAINER_PORT},
         gui=True,
     )

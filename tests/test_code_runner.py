@@ -4,7 +4,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from atlas_local.code_runner import CodeRunner, RunPlan, _runner_network_policy, _runner_timeout_seconds
+from atlas_local.code_runner import (
+    CodeRunner,
+    LANGUAGES,
+    RunPlan,
+    _runner_network_policy,
+    _runner_timeout_seconds,
+)
 
 
 class CodeRunnerPolicyTests(unittest.TestCase):
@@ -73,6 +79,12 @@ class CodeRunnerPolicyTests(unittest.TestCase):
         self.assertIn("atlas.runner=1", args)
         self.assertEqual(response["network"], "none")
         self.assertEqual(response["timeout_seconds"], 120)
+
+    def test_docker_commands_do_not_use_login_shells(self) -> None:
+        for language, spec in LANGUAGES.items():
+            with self.subTest(language=language):
+                if len(spec.command) >= 2 and spec.command[0] == "sh":
+                    self.assertNotEqual(spec.command[1], "-lc")
 
 
 if __name__ == "__main__":
