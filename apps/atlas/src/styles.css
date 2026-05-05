@@ -2709,7 +2709,30 @@ pre {
 }
 
 .stream-waiting-text.deciding-sweep {
-  color: var(--muted-strong);
+  color: var(--accent);
+  text-shadow: 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent),
+    0 0 12px color-mix(in srgb, var(--accent) 42%, transparent);
+  animation: deciding-glow 2.8s ease-in-out infinite;
+}
+
+@keyframes deciding-glow {
+  0%,
+  100% {
+    color: var(--muted-strong);
+    text-shadow: 0 0 0 transparent;
+  }
+  45%,
+  60% {
+    color: var(--accent);
+    text-shadow: 0 0 1px color-mix(in srgb, var(--accent) 62%, transparent),
+      0 0 14px color-mix(in srgb, var(--accent) 48%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stream-waiting-text.deciding-sweep {
+    animation: none;
+  }
 }
 
 .thinking-toggle {
