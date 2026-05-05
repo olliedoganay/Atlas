@@ -137,6 +137,31 @@ describe("CodeRunnerPage client preview", () => {
     });
     container.remove();
   });
+
+  it("hides the GUI viewer after a VNC-backed run exits", async () => {
+    apiMocks.execCode.mockResolvedValue({ run_id: "run-1", vnc_url: "http://127.0.0.1:6080/vnc.html" });
+    apiMocks.streamRunnerRun.mockImplementation((_runId, onEvent) => {
+      onEvent({ type: "exit", code: 0, duration_ms: 1620 });
+      return vi.fn();
+    });
+    window.localStorage.setItem(
+      "atlas-runner:token-1",
+      JSON.stringify({ language: "python", code: "import tkinter\nprint('done')" }),
+    );
+    const { root, container } = renderRunnerPage();
+
+    await flushEffects();
+
+    expect(container.textContent).toContain("Done");
+    expect(container.textContent).toContain("No output.");
+    expect(container.querySelector(".runner-vnc-frame")).toBeNull();
+    expect(container.querySelector(".runner-vnc-placeholder")).toBeNull();
+
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+  });
 });
 
 function renderRunnerPage(): { root: Root; container: HTMLDivElement } {

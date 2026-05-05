@@ -170,6 +170,7 @@ export function CodeRunnerPage() {
   const currentRunId = useRef<string | null>(null);
 
   const clientLang = useMemo(() => (language ? isClientLanguage(language) : false), [language]);
+  const showVncPane = Boolean(vncUrl && phase !== "finished" && phase !== "error");
 
   useEffect(() => {
     if (!token) {
@@ -359,12 +360,12 @@ export function CodeRunnerPage() {
         </div>
       </header>
 
-      <main className={`runner-body${vncUrl ? " with-vnc" : ""}`}>
+      <main className={`runner-body${showVncPane ? " with-vnc" : ""}`}>
         {clientLang ? (
           <ClientPreview code={code} key={clientPreviewNonce} />
         ) : phase === "docker-down" ? (
           <DockerDownPanel reason={dockerReason} onRetry={rerun} />
-        ) : vncUrl ? (
+        ) : showVncPane && vncUrl ? (
           <>
             <VncPane url={vncUrl} />
             <ServerOutputPanel
