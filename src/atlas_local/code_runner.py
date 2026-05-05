@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import ast
 import os
 import queue
 import re
+import shlex
 import shutil
 import socket
 import subprocess
@@ -31,6 +33,8 @@ class RunPlan:
     command: list[str]
     ports: dict[int, int] = field(default_factory=dict)  # host:container
     gui: bool = False
+    requires_network: bool = False
+    uses_apt: bool = False
 
 
 PYTHON_GUI_IMAGE = "python:3.12-slim"
@@ -39,7 +43,7 @@ LEGACY_PYTHON_GUI_IMAGES = (
     "atlas-python-gui:workspace1",
     "atlas-python-gui:latest",
 )
-PYTHON_GUI_APT_PACKAGES = (
+PYTHON_GUI_BASE_APT_PACKAGES = (
     "xvfb",
     "x11vnc",
     "fluxbox",
@@ -47,28 +51,101 @@ PYTHON_GUI_APT_PACKAGES = (
     "websockify",
     "fonts-dejavu",
     "fontconfig",
-    "libsdl2-2.0-0",
-    "libsdl2-image-2.0-0",
-    "libsdl2-mixer-2.0-0",
-    "libsdl2-ttf-2.0-0",
-    "libfreetype6",
-    "libportmidi0",
-    "libx11-6",
-    "libxext6",
-    "libxrender1",
-    "libxtst6",
-    "libxi6",
-    "libgl1",
-    "libglib2.0-0",
-    "libsm6",
-    "libxrandr2",
-    "libxcursor1",
-    "libasound2",
-    "tcl8.6",
-    "tk8.6",
-    "tk",
     "ca-certificates",
 )
+PYTHON_SYSTEM_PACKAGE_RULES: dict[str, tuple[str, ...]] = {
+    "tkinter": ("tcl8.6", "tk8.6", "tk"),
+    "turtle": ("tcl8.6", "tk8.6", "tk"),
+    "customtkinter": ("tcl8.6", "tk8.6", "tk"),
+    "ttkbootstrap": ("tcl8.6", "tk8.6", "tk"),
+    "pygame": (
+        "libsdl2-2.0-0",
+        "libsdl2-image-2.0-0",
+        "libsdl2-mixer-2.0-0",
+        "libsdl2-ttf-2.0-0",
+        "libfreetype6",
+        "libportmidi0",
+        "libasound2",
+    ),
+    "cv2": ("libgl1", "libglib2.0-0", "libsm6", "libxext6", "libxrender1"),
+    "matplotlib": ("fontconfig", "libfreetype6", "tcl8.6", "tk8.6", "tk"),
+    "PIL": ("libjpeg62-turbo", "zlib1g"),
+    "PyQt5": (
+        "libgl1",
+        "libglib2.0-0",
+        "libdbus-1-3",
+        "libx11-xcb1",
+        "libxkbcommon-x11-0",
+        "libxcb-cursor0",
+        "libxcb-icccm4",
+        "libxcb-image0",
+        "libxcb-keysyms1",
+        "libxcb-randr0",
+        "libxcb-render-util0",
+        "libxcb-shape0",
+        "libxcb-xinerama0",
+        "libsm6",
+        "libxext6",
+        "libxrender1",
+    ),
+    "PyQt6": (
+        "libgl1",
+        "libglib2.0-0",
+        "libdbus-1-3",
+        "libx11-xcb1",
+        "libxkbcommon-x11-0",
+        "libxcb-cursor0",
+        "libxcb-icccm4",
+        "libxcb-image0",
+        "libxcb-keysyms1",
+        "libxcb-randr0",
+        "libxcb-render-util0",
+        "libxcb-shape0",
+        "libxcb-xinerama0",
+        "libsm6",
+        "libxext6",
+        "libxrender1",
+    ),
+    "PySide6": (
+        "libgl1",
+        "libglib2.0-0",
+        "libdbus-1-3",
+        "libx11-xcb1",
+        "libxkbcommon-x11-0",
+        "libxcb-cursor0",
+        "libxcb-icccm4",
+        "libxcb-image0",
+        "libxcb-keysyms1",
+        "libxcb-randr0",
+        "libxcb-render-util0",
+        "libxcb-shape0",
+        "libxcb-xinerama0",
+        "libsm6",
+        "libxext6",
+        "libxrender1",
+    ),
+    "wx": ("libgtk-3-0", "libgl1", "libglib2.0-0"),
+    "sounddevice": ("libportaudio2",),
+    "pyaudio": ("portaudio19-dev", "build-essential"),
+}
+PYTHON_PIP_ALIASES = {
+    "cv2": "opencv-python",
+    "PIL": "Pillow",
+    "bs4": "beautifulsoup4",
+    "yaml": "PyYAML",
+    "sklearn": "scikit-learn",
+    "skimage": "scikit-image",
+}
+PYTHON_GUI_IMPORTS = {
+    "tkinter",
+    "turtle",
+    "customtkinter",
+    "ttkbootstrap",
+    "PyQt5",
+    "PyQt6",
+    "PySide6",
+    "wx",
+}
 PYTHON_GUI_MARKERS = (
     r"^\s*import\s+(tkinter|customtkinter|ttkbootstrap)\b",
     r"^\s*from\s+(tkinter|customtkinter|ttkbootstrap)\b",
@@ -87,7 +164,9 @@ PYTHON_GUI_MARKERS = (
 NOVNC_CONTAINER_PORT = 6080
 
 
-def _python_gui_detected(code: str) -> bool:
+def _python_gui_detected(code: str, imports: set[str] | None = None) -> bool:
+    if imports and imports.intersection(PYTHON_GUI_IMPORTS):
+        return True
     if _python_gui_args(code):
         return True
     for marker in PYTHON_GUI_MARKERS:
@@ -100,6 +179,51 @@ def _python_gui_args(code: str) -> list[str]:
     if re.search(r"add_argument\s*\([^)]*['\"]--gui['\"]", code, re.DOTALL):
         return ["--gui"]
     return []
+
+
+def _python_imports(code: str) -> set[str]:
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return _python_imports_by_regex(code)
+    imports: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for name in node.names:
+                root = name.name.split(".", 1)[0]
+                if root:
+                    imports.add(root)
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            root = node.module.split(".", 1)[0]
+            if root:
+                imports.add(root)
+    return imports
+
+
+def _python_imports_by_regex(code: str) -> set[str]:
+    imports: set[str] = set()
+    for match in re.finditer(r"^\s*(?:import|from)\s+([A-Za-z_][A-Za-z0-9_]*)", code, re.MULTILINE):
+        imports.add(match.group(1))
+    return imports
+
+
+def _python_pip_packages(imports: set[str]) -> list[str]:
+    stdlib = getattr(sys, "stdlib_module_names", set())
+    packages = {
+        PYTHON_PIP_ALIASES.get(name, name)
+        for name in imports
+        if name and name not in stdlib
+    }
+    return sorted(packages)
+
+
+def _python_apt_packages(imports: set[str], gui: bool) -> list[str]:
+    packages: list[str] = []
+    if gui:
+        packages.extend(PYTHON_GUI_BASE_APT_PACKAGES)
+    for name in sorted(imports):
+        packages.extend(PYTHON_SYSTEM_PACKAGE_RULES.get(name, ()))
+    return sorted(dict.fromkeys(packages))
 
 
 def _reserve_host_port() -> int:
@@ -393,68 +517,75 @@ def _remove_legacy_python_gui_images(binary: str | None = None) -> None:
         )
 
 
-def _python_gui_plan(code: str) -> RunPlan:
-    novnc_host_port = _reserve_host_port()
+def _python_plan(code: str) -> RunPlan:
+    imports = _python_imports(code)
+    gui = _python_gui_detected(code, imports)
+    pip_packages = _python_pip_packages(imports)
+    apt_packages = _python_apt_packages(imports, gui)
     gui_args = " ".join(_python_gui_args(code))
     gui_args_suffix = f" {gui_args}" if gui_args else ""
-    apt_packages = " ".join(PYTHON_GUI_APT_PACKAGES)
-    install_script = (
-        "set -e; cp /work/main.py /tmp/main.py; cd /tmp; "
-        "export DEBIAN_FRONTEND=noninteractive DISPLAY=:99 SCREEN_GEOMETRY=1280x800x24 "
-        "VNC_PORT=5900 NOVNC_PORT=6080 PYTHONUNBUFFERED=1 SDL_AUDIODRIVER=dummy "
-        "PYGAME_HIDE_SUPPORT_PROMPT=1 ALSA_CONFIG_PATH=/dev/null; "
-        "echo \"[atlas-runner] installing GUI system dependencies\"; "
-        "apt-get update >/dev/null; "
-        f"apt-get install -y --no-install-recommends {apt_packages} >/dev/null; "
-        "rm -rf /var/lib/apt/lists/*; "
-        "ln -sf /usr/share/novnc/vnc.html /usr/share/novnc/index.html; "
-        "mkdir -p /root/.fluxbox; "
-        "printf '%s\\n' 'session.screen0.workspaces: 1' 'session.screen0.workspaceNames: Main' "
-        "'session.screen0.toolbar.tools: workspacename, iconbar, systemtray, clock' > /root/.fluxbox/init; "
-        "rm -f /tmp/.X99-lock /tmp/.X11-unix/X99 2>/dev/null || true; "
-        "Xvfb :99 -screen 0 \"$SCREEN_GEOMETRY\" -ac +extension GLX +render -noreset >/tmp/xvfb.log 2>&1 & "
-        "sleep 0.6; "
-        "fluxbox -rc /root/.fluxbox/init >/tmp/fluxbox.log 2>&1 & "
-        "x11vnc -display :99 -nopw -forever -shared -rfbport \"$VNC_PORT\" -quiet >/tmp/x11vnc.log 2>&1 & "
-        "websockify --web /usr/share/novnc \"$NOVNC_PORT\" \"localhost:$VNC_PORT\" >/tmp/novnc.log 2>&1 & "
-        "sleep 0.4; "
-        "PY_IMPORTS=$(python - <<'PY'\n"
-        "import ast, sys\n"
-        "STDLIB = set(sys.stdlib_module_names)\n"
-        "ALIAS = {'cv2':'opencv-python','sklearn':'scikit-learn','PIL':'Pillow','bs4':'beautifulsoup4','yaml':'PyYAML','skimage':'scikit-image'}\n"
-        "src = open('/tmp/main.py').read()\n"
-        "try:\n"
-        "    tree = ast.parse(src)\n"
-        "except SyntaxError:\n"
-        "    sys.exit(0)\n"
-        "pkgs = set()\n"
-        "for node in ast.walk(tree):\n"
-        "    if isinstance(node, ast.Import):\n"
-        "        for n in node.names:\n"
-        "            pkgs.add(n.name.split('.')[0])\n"
-        "    elif isinstance(node, ast.ImportFrom):\n"
-        "        if node.module and node.level == 0:\n"
-        "            pkgs.add(node.module.split('.')[0])\n"
-        "needed = sorted({ALIAS.get(p, p) for p in pkgs if p and p not in STDLIB})\n"
-        "print(' '.join(needed))\n"
-        "PY\n"
-        "); "
-        "if [ -n \"$PY_IMPORTS\" ]; then echo \"[atlas-runner] installing: $PY_IMPORTS\"; pip install --quiet --no-input --disable-pip-version-check --root-user-action=ignore $PY_IMPORTS || true; fi; "
-        "echo \"[atlas-runner] GUI ready on port 6080\"; "
-        f"python -u /tmp/main.py{gui_args_suffix}"
-    )
+    script_parts = [
+        "set -e",
+        "cp /work/main.py /tmp/main.py",
+        "cd /tmp",
+        (
+            "export DEBIAN_FRONTEND=noninteractive DISPLAY=:99 SCREEN_GEOMETRY=1280x800x24 "
+            "VNC_PORT=5900 NOVNC_PORT=6080 PYTHONUNBUFFERED=1 SDL_AUDIODRIVER=dummy "
+            "PYGAME_HIDE_SUPPORT_PROMPT=1 ALSA_CONFIG_PATH=/dev/null"
+        ),
+    ]
+    if apt_packages:
+        apt_args = shlex.join(apt_packages)
+        script_parts.extend(
+            [
+                f"echo {shlex.quote('[atlas-runner] installing system dependencies: ' + ' '.join(apt_packages))}",
+                "apt-get update >/dev/null",
+                f"apt-get install -y --no-install-recommends {apt_args} >/dev/null",
+                "rm -rf /var/lib/apt/lists/*",
+            ],
+        )
+    if gui:
+        script_parts.extend(
+            [
+                "ln -sf /usr/share/novnc/vnc.html /usr/share/novnc/index.html",
+                "mkdir -p /root/.fluxbox",
+                (
+                    "printf '%s\\n' 'session.screen0.workspaces: 1' 'session.screen0.workspaceNames: Main' "
+                    "'session.screen0.toolbar.tools: workspacename, iconbar, systemtray, clock' > /root/.fluxbox/init"
+                ),
+                "rm -f /tmp/.X99-lock /tmp/.X11-unix/X99 2>/dev/null || true",
+                'Xvfb :99 -screen 0 "$SCREEN_GEOMETRY" -ac +extension GLX +render -noreset >/tmp/xvfb.log 2>&1 & sleep 0.6',
+                (
+                    "fluxbox -rc /root/.fluxbox/init >/tmp/fluxbox.log 2>&1 & "
+                    'x11vnc -display :99 -nopw -forever -shared -rfbport "$VNC_PORT" -quiet >/tmp/x11vnc.log 2>&1 & '
+                    'websockify --web /usr/share/novnc "$NOVNC_PORT" "localhost:$VNC_PORT" >/tmp/novnc.log 2>&1 & '
+                    "sleep 0.4"
+                ),
+                "echo '[atlas-runner] GUI ready on port 6080'",
+            ],
+        )
+    if pip_packages:
+        pip_args = shlex.join(pip_packages)
+        script_parts.append(f"echo {shlex.quote('[atlas-runner] installing Python packages: ' + ' '.join(pip_packages))}")
+        script_parts.append(
+            f"pip install --quiet --no-input --disable-pip-version-check --root-user-action=ignore {pip_args}"
+        )
+    script_parts.append(f"python -u /tmp/main.py{gui_args_suffix}")
+    ports = {_reserve_host_port(): NOVNC_CONTAINER_PORT} if gui else {}
     return RunPlan(
         image=PYTHON_GUI_IMAGE,
         filename="main.py",
-        command=["sh", "-c", install_script],
-        ports={novnc_host_port: NOVNC_CONTAINER_PORT},
-        gui=True,
+        command=["sh", "-c", "; ".join(script_parts)],
+        ports=ports,
+        gui=gui,
+        requires_network=bool(apt_packages or pip_packages),
+        uses_apt=bool(apt_packages),
     )
 
 
 def resolve_plan(language: str, code: str, progress: "Any | None" = None) -> RunPlan:
-    if language == "python" and _python_gui_detected(code):
-        return _python_gui_plan(code)
+    if language == "python":
+        return _python_plan(code)
     spec = LANGUAGES[language]
     return RunPlan(image=spec.image, filename=spec.filename, command=list(spec.command))
 
@@ -463,7 +594,7 @@ def _runner_network_policy(plan: RunPlan) -> str:
     configured = os.environ.get(RUNNER_NETWORK_ENV, "none").strip().lower() or "none"
     if configured not in RUNNER_ALLOWED_NETWORKS:
         configured = "none"
-    if plan.ports and configured == "none":
+    if (plan.ports or plan.requires_network) and configured == "none":
         return "bridge"
     return configured
 
@@ -585,7 +716,7 @@ class CodeRunner:
             "-w",
             "/work",
         ]
-        if plan.gui:
+        if plan.uses_apt:
             for capability in ("CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"):
                 docker_args.extend(["--cap-add", capability])
         for host_port, container_port in plan.ports.items():

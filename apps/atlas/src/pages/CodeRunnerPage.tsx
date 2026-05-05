@@ -164,6 +164,7 @@ export function CodeRunnerPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [dockerReason, setDockerReason] = useState<string>("");
   const [vncUrl, setVncUrl] = useState<string | null>(null);
+  const [vncReady, setVncReady] = useState(false);
   const [clientPreviewNonce, setClientPreviewNonce] = useState(0);
   const [serverLogsOpen, setServerLogsOpen] = useState(false);
   const streamDisposer = useRef<(() => void) | null>(null);
@@ -171,7 +172,7 @@ export function CodeRunnerPage() {
   const currentRunId = useRef<string | null>(null);
 
   const clientLang = useMemo(() => (language ? isClientLanguage(language) : false), [language]);
-  const showVncPane = Boolean(vncUrl && phase !== "finished" && phase !== "error");
+  const showVncPane = Boolean(vncUrl && vncReady && phase !== "finished" && phase !== "error");
   const outputLineCount = output.length + (errorMessage ? 1 : 0);
 
   useEffect(() => {
@@ -211,6 +212,10 @@ export function CodeRunnerPage() {
   const handleEvent = useCallback(
     (event: RunnerEvent) => {
       if (event.type === "output") {
+        if (event.chunk.includes("GUI ready on port")) {
+          setVncReady(true);
+          setServerLogsOpen(false);
+        }
         setOutput((prev) => [...prev, { stream: event.stream, text: event.chunk }]);
         scrollToEnd();
       } else if (event.type === "exit") {
@@ -232,6 +237,8 @@ export function CodeRunnerPage() {
     setDurationMs(null);
     setErrorMessage(null);
     setVncUrl(null);
+    setVncReady(false);
+    setServerLogsOpen(false);
 
     let status: RunnerStatus;
     try {
@@ -253,7 +260,7 @@ export function CodeRunnerPage() {
       currentRunId.current = started.run_id;
       setRunId(started.run_id);
       setVncUrl(started.vnc_url ?? null);
-      setServerLogsOpen(!started.vnc_url);
+      setServerLogsOpen(false);
       setPhase("running");
       streamDisposer.current?.();
       streamDisposer.current = streamRunnerRun(started.run_id, handleEvent, (message) => {

@@ -107,6 +107,7 @@ class CodeRunnerPolicyTests(unittest.TestCase):
                 command=["sh", "-c", "echo gui"],
                 ports={12345: 6080},
                 gui=True,
+                uses_apt=True,
             )
             with (
                 patch("atlas_local.code_runner._docker_binary", return_value="docker"),
@@ -167,12 +168,44 @@ class CodeRunnerPolicyTests(unittest.TestCase):
 
         self.assertEqual(plan.image, PYTHON_GUI_IMAGE)
         self.assertTrue(plan.gui)
+        self.assertTrue(plan.uses_apt)
+        self.assertTrue(plan.requires_network)
+
+    def test_stdlib_python_keeps_default_network_isolation(self) -> None:
+        plan = resolve_plan("python", "import json\nprint(json.dumps({'ok': True}))")
+
+        self.assertFalse(plan.gui)
+        self.assertFalse(plan.uses_apt)
+        self.assertFalse(plan.requires_network)
+        with patch.dict("os.environ", {}, clear=False):
+            self.assertEqual(_runner_network_policy(plan), "none")
+
+    def test_python_imports_trigger_needed_pip_and_system_dependencies(self) -> None:
+        plan = resolve_plan("python", "import cv2\nprint(cv2.__version__)")
+
+        self.assertFalse(plan.gui)
+        self.assertTrue(plan.uses_apt)
+        self.assertTrue(plan.requires_network)
+        self.assertIn("opencv-python", plan.command[-1])
+        self.assertIn("libgl1", plan.command[-1])
+        with patch.dict("os.environ", {}, clear=False):
+            self.assertEqual(_runner_network_policy(plan), "bridge")
+
+    def test_customtkinter_import_triggers_pip_and_tk_system_dependencies(self) -> None:
+        plan = resolve_plan("python", "import customtkinter as ctk\napp = ctk.CTk()\napp.mainloop()")
+
+        self.assertTrue(plan.gui)
+        self.assertTrue(plan.uses_apt)
+        self.assertTrue(plan.requires_network)
+        self.assertIn("customtkinter", plan.command[-1])
+        self.assertIn("tcl8.6", plan.command[-1])
 
     def test_tkinter_import_uses_gui_runner_for_system_tk_deps(self) -> None:
         plan = resolve_plan("python", "import tkinter as tk\nprint('cli mode')")
 
         self.assertEqual(plan.image, PYTHON_GUI_IMAGE)
         self.assertTrue(plan.gui)
+        self.assertTrue(plan.uses_apt)
 
     def test_tkinter_from_import_uses_gui_runner_for_system_tk_deps(self) -> None:
         plan = resolve_plan("python", "from tkinter import ttk\nprint('cli mode')")

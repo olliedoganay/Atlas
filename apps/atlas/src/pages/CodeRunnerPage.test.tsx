@@ -166,6 +166,7 @@ describe("CodeRunnerPage client preview", () => {
   it("collapses VNC runner logs by default and lets the user open them", async () => {
     apiMocks.execCode.mockResolvedValue({ run_id: "run-1", vnc_url: "http://127.0.0.1:6080/vnc.html" });
     apiMocks.streamRunnerRun.mockImplementation((_runId, onEvent) => {
+      onEvent({ type: "output", stream: "stdout", chunk: "[atlas-runner] GUI ready on port 6080\n" });
       onEvent({ type: "output", stream: "stderr", chunk: "DeprecationWarning: test warning\n" });
       return vi.fn();
     });
@@ -188,6 +189,30 @@ describe("CodeRunnerPage client preview", () => {
 
     expect(container.querySelector(".runner-output")).not.toBeNull();
     expect(container.textContent).toContain("DeprecationWarning: test warning");
+
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("waits for the GUI ready event before loading the VNC frame", async () => {
+    apiMocks.execCode.mockResolvedValue({ run_id: "run-1", vnc_url: "http://127.0.0.1:6080/vnc.html" });
+    apiMocks.streamRunnerRun.mockImplementation((_runId, onEvent) => {
+      onEvent({ type: "output", stream: "stdout", chunk: "[atlas-runner] installing system dependencies\n" });
+      return vi.fn();
+    });
+    window.localStorage.setItem(
+      "atlas-runner:token-1",
+      JSON.stringify({ language: "python", code: "import tkinter\nroot = tkinter.Tk()" }),
+    );
+    const { root, container } = renderRunnerPage();
+
+    await flushEffects();
+
+    expect(container.querySelector(".runner-vnc-frame")).toBeNull();
+    expect(container.querySelector(".runner-output")).not.toBeNull();
+    expect(container.textContent).toContain("installing system dependencies");
 
     act(() => {
       root.unmount();
