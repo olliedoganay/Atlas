@@ -7,7 +7,7 @@
 
 Atlas Chat is a local-first desktop app for working with local Ollama models. It provides a multi-thread chat workspace, profile-scoped memory, hardware-aware model discovery, run inspection, and a built-in code runner while keeping Atlas-managed state on the local machine.
 
-Current version: `1.0.13`
+Current version: `1.0.14`
 
 <p align="center">
   <img src="docs/assets/atlas-chat-workspace.png" alt="Atlas Chat workspace" style="max-width: 100%; height: auto;">
@@ -186,16 +186,16 @@ Runtime overrides:
 
 Runnable code blocks get a **Run** button next to **Copy**. Clicking it opens a separate Atlas Run window that executes the snippet and streams output live. Closing the run window stops the run.
 
-Server-side languages run through Docker: Python, JavaScript, TypeScript, Go, Rust, C, C++, Java, Ruby, PHP, Bash, C#, Kotlin, Swift, Perl, Lua, R, Elixir, and Dart.
+Server-side languages run through Docker: Python, JavaScript, TypeScript, Go, Rust, C, C++, Java, Ruby, PHP, Bash, C#, Kotlin, Swift, Perl, Lua, R, Elixir, and Dart. The first run for a language may need its Docker image to be downloaded, which can use substantial disk space.
 
 HTML renders in a sandboxed client-side preview and does not require Docker.
 
 Runner behavior:
 
-- Dependencies are installed on demand based on snippet imports.
+- Dependencies are installed on demand based on snippet imports when outbound network access is enabled for the run.
 - Python GUI snippets can open a live embedded noVNC view for supported toolkits.
 - Docker-backed runs use disposable containers with CPU, memory, PID, timeout, and network controls.
-- Non-GUI Docker runs default to `--network none`; set `ATLAS_RUNNER_NETWORK=bridge` only when snippets need outbound dependency resolution.
+- Non-GUI Docker runs default to `--network none`; set `ATLAS_RUNNER_NETWORK=bridge` only when snippets need outbound dependency resolution or downloads.
 - `ATLAS_RUNNER_TIMEOUT_SECONDS` controls non-GUI run TTL and `ATLAS_RUNNER_GUI_TIMEOUT_SECONDS` controls GUI run TTL.
 - If Docker is unavailable, Atlas shows a retry path in the run window.
 
