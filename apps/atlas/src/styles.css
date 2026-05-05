@@ -2968,6 +2968,7 @@ pre {
 
 .runner-output {
   flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: 16px 18px;
   font-family: "IBM Plex Mono", "Cascadia Code", monospace;
@@ -2976,6 +2977,11 @@ pre {
   white-space: pre-wrap;
   word-break: break-word;
   background: #0c0e13;
+  user-select: text;
+}
+
+.runner-output * {
+  user-select: text;
 }
 
 .runner-line {
@@ -3051,9 +3057,101 @@ pre {
   flex-direction: row;
 }
 
-.runner-body.with-vnc .runner-output {
+.runner-body.with-vnc > .runner-output {
   flex: 0 0 320px;
   border-left: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.runner-log-drawer {
+  min-width: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  background: #0c0e13;
+}
+
+.runner-log-drawer.open {
+  flex: 0 0 340px;
+  display: flex;
+  flex-direction: column;
+}
+
+.runner-log-drawer.collapsed {
+  flex: 0 0 54px;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  background: #10131a;
+}
+
+.runner-log-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 10px 0 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  user-select: none;
+}
+
+.runner-log-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #d8dde7;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.runner-log-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  min-height: 22px;
+  margin-left: auto;
+  padding: 0 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #9ca3af;
+  font-size: 0.72rem;
+  line-height: 1;
+}
+
+.runner-log-close-button,
+.runner-log-rail-button {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  color: #c8ccd4;
+}
+
+.runner-log-close-button {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.runner-log-rail-button {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 12px 6px;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.runner-log-rail-button .runner-log-count {
+  margin-left: 0;
+}
+
+.runner-log-drawer.open .runner-output {
+  flex: 1;
+  min-height: 0;
+  padding: 12px 14px;
 }
 
 .runner-vnc {

@@ -162,6 +162,38 @@ describe("CodeRunnerPage client preview", () => {
     });
     container.remove();
   });
+
+  it("collapses VNC runner logs by default and lets the user open them", async () => {
+    apiMocks.execCode.mockResolvedValue({ run_id: "run-1", vnc_url: "http://127.0.0.1:6080/vnc.html" });
+    apiMocks.streamRunnerRun.mockImplementation((_runId, onEvent) => {
+      onEvent({ type: "output", stream: "stderr", chunk: "DeprecationWarning: test warning\n" });
+      return vi.fn();
+    });
+    window.localStorage.setItem(
+      "atlas-runner:token-1",
+      JSON.stringify({ language: "python", code: "import tkinter\nroot = tkinter.Tk()" }),
+    );
+    const { root, container } = renderRunnerPage();
+
+    await flushEffects();
+
+    const logsButton = container.querySelector<HTMLButtonElement>(".runner-log-rail-button");
+    expect(logsButton).not.toBeNull();
+    expect(container.querySelector(".runner-output")).toBeNull();
+    expect(container.textContent).not.toContain("DeprecationWarning");
+
+    act(() => {
+      logsButton?.click();
+    });
+
+    expect(container.querySelector(".runner-output")).not.toBeNull();
+    expect(container.textContent).toContain("DeprecationWarning: test warning");
+
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+  });
 });
 
 function renderRunnerPage(): { root: Root; container: HTMLDivElement } {

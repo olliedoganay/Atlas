@@ -1,5 +1,5 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Play, RotateCcw, Square } from "lucide-react";
+import { PanelRightClose, PanelRightOpen, Play, RotateCcw, Square, Terminal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 
@@ -165,12 +165,14 @@ export function CodeRunnerPage() {
   const [dockerReason, setDockerReason] = useState<string>("");
   const [vncUrl, setVncUrl] = useState<string | null>(null);
   const [clientPreviewNonce, setClientPreviewNonce] = useState(0);
+  const [serverLogsOpen, setServerLogsOpen] = useState(false);
   const streamDisposer = useRef<(() => void) | null>(null);
   const outputRef = useRef<HTMLDivElement | null>(null);
   const currentRunId = useRef<string | null>(null);
 
   const clientLang = useMemo(() => (language ? isClientLanguage(language) : false), [language]);
   const showVncPane = Boolean(vncUrl && phase !== "finished" && phase !== "error");
+  const outputLineCount = output.length + (errorMessage ? 1 : 0);
 
   useEffect(() => {
     if (!token) {
@@ -251,6 +253,7 @@ export function CodeRunnerPage() {
       currentRunId.current = started.run_id;
       setRunId(started.run_id);
       setVncUrl(started.vnc_url ?? null);
+      setServerLogsOpen(!started.vnc_url);
       setPhase("running");
       streamDisposer.current?.();
       streamDisposer.current = streamRunnerRun(started.run_id, handleEvent, (message) => {
@@ -368,9 +371,12 @@ export function CodeRunnerPage() {
         ) : showVncPane && vncUrl ? (
           <>
             <VncPane url={vncUrl} />
-            <ServerOutputPanel
+            <ServerLogDrawer
               errorMessage={errorMessage}
+              isOpen={serverLogsOpen}
+              onToggle={() => setServerLogsOpen((current) => !current)}
               output={output}
+              outputLineCount={outputLineCount}
               outputRef={outputRef}
               phase={phase}
             />
@@ -414,6 +420,63 @@ function RunnerStatusBadge({ phase, exitCode }: { phase: Phase; exitCode: number
     return <span className="runner-status fail">Docker down</span>;
   }
   return <span className="runner-status pending">Ready</span>;
+}
+
+function ServerLogDrawer({
+  errorMessage,
+  isOpen,
+  onToggle,
+  output,
+  outputLineCount,
+  outputRef,
+  phase,
+}: {
+  errorMessage: string | null;
+  isOpen: boolean;
+  onToggle: () => void;
+  output: OutputLine[];
+  outputLineCount: number;
+  outputRef: React.MutableRefObject<HTMLDivElement | null>;
+  phase: Phase;
+}) {
+  if (!isOpen) {
+    return (
+      <aside className="runner-log-drawer collapsed" aria-label="Runner logs">
+        <button
+          aria-expanded={false}
+          className="runner-log-rail-button"
+          onClick={onToggle}
+          title="Show runner logs"
+          type="button"
+        >
+          <PanelRightOpen size={15} />
+          <span>Logs</span>
+          {outputLineCount > 0 ? <span className="runner-log-count">{outputLineCount}</span> : null}
+        </button>
+      </aside>
+    );
+  }
+
+  return (
+    <aside className="runner-log-drawer open" aria-label="Runner logs">
+      <div className="runner-log-header">
+        <span className="runner-log-title">
+          <Terminal size={15} /> Logs
+        </span>
+        <span className="runner-log-count">{outputLineCount}</span>
+        <button
+          aria-expanded={true}
+          className="runner-log-close-button"
+          onClick={onToggle}
+          title="Hide runner logs"
+          type="button"
+        >
+          <PanelRightClose size={15} />
+        </button>
+      </div>
+      <ServerOutputPanel errorMessage={errorMessage} output={output} outputRef={outputRef} phase={phase} />
+    </aside>
+  );
 }
 
 function ServerOutputPanel({
