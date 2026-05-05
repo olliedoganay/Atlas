@@ -27,6 +27,7 @@ import {
   type ThreadMessage,
 } from "../lib/api";
 import { useBackendPhase } from "../lib/backendPhase";
+import { buildContextMeter } from "../lib/contextMeter";
 import { resolveStartupState } from "../lib/startupState";
 import { displayThreadTitle, editableThreadTitle, requestThreadTitle } from "../lib/threadTitles";
 import { useAtlasStore } from "../store/useAtlasStore";
@@ -657,67 +658,21 @@ export function WorkspacePage() {
     return items;
   }, [currentRunId, currentThreadCompactionNotice, currentThreadHasActiveRun, liveAnswer, pendingAttachments, pendingPrompt, visibleHistory]);
   const contextMeter = useMemo(() => {
-    const fallbackWindow = 8192;
-    const autoCompactRatio = contextUsage?.auto_compact_ratio || 0.72;
-    const detectedWindow = Number(
-      contextUsage?.context_window ||
-        currentThreadCompactionNotice?.detectedContextWindow ||
-        runDetails?.detected_context_window ||
-        0,
-    );
-    const contextWindow = detectedWindow > 0 ? detectedWindow : fallbackWindow;
-    const serverThreshold = Number(contextUsage?.auto_compact_threshold || 0);
-    const autoCompactBudget =
-      serverThreshold > 0
-        ? serverThreshold
-        : Math.max(1024, Math.round(contextWindow * autoCompactRatio));
-
-    let tokensUsed = Number(contextUsage?.representation_tokens ?? -1);
-    if (tokensUsed < 0) {
-      let charCount = 0;
-      for (const item of visibleHistory) {
-        charCount += (item.content ?? "").length;
-        if (item.thread_summary) {
-          charCount += item.thread_summary.length;
-        }
-        for (const attachment of item.attachments ?? []) {
-          if (attachment.text_content) {
-            charCount += attachment.text_content.length;
-          }
-        }
-      }
-      tokensUsed = Math.ceil(charCount / 4);
-    }
-    let liveTokenEstimate = 0;
-    if (currentThreadHasActiveRun) {
-      liveTokenEstimate += (pendingPrompt ?? "").length;
-      liveTokenEstimate += (liveAnswer ?? "").length;
-      for (const attachment of pendingAttachments) {
-        if (attachment.text_content) {
-          liveTokenEstimate += attachment.text_content.length;
-        }
-      }
-    }
-    liveTokenEstimate += prompt.length;
-    const projectedTokens = tokensUsed + Math.ceil(liveTokenEstimate / 4);
-
-    const rawRemaining = 1 - projectedTokens / autoCompactBudget;
-    const remainingRatio = Math.max(0, Math.min(1, rawRemaining));
-    const remainingPercent = Math.round(remainingRatio * 100);
-    const tone = remainingRatio <= 0.1 ? "critical" : remainingRatio <= 0.25 ? "warning" : "ok";
-
-    return {
-      contextWindow,
-      autoCompactBudget,
-      tokensUsed: projectedTokens,
-      remainingPercent,
-      tone,
-      detected: detectedWindow > 0,
-      fromServer: Boolean(contextUsage),
-    };
+    return buildContextMeter({
+      contextUsage,
+      compactionNotice: currentThreadCompactionNotice,
+      runDetectedContextWindow: runDetails?.detected_context_window,
+      visibleHistory,
+      hasActiveRun: currentThreadHasActiveRun,
+      pendingPrompt,
+      pendingAttachments,
+      liveAnswer,
+      draftPrompt: prompt,
+    });
   }, [
     contextUsage,
     currentThreadCompactionNotice?.detectedContextWindow,
+    currentThreadCompactionNotice?.historyRepresentationTokensAfterCompaction,
     currentThreadHasActiveRun,
     visibleHistory,
     liveAnswer,
