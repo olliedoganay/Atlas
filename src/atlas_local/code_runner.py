@@ -462,14 +462,7 @@ def _python_gui_plan(code: str) -> RunPlan:
 
 def resolve_plan(language: str, code: str, progress: "Any | None" = None) -> RunPlan:
     if language == "python" and _python_gui_detected(code):
-        if not _image_exists(PYTHON_GUI_IMAGE):
-            raise RuntimeError(
-                "Atlas needs to build a GUI runner image the first time you run "
-                "a graphical Python program. Run the CLI command "
-                "'atlas-build-gui-image' or restart the app — the build takes "
-                "1-3 minutes. (Missing image: "
-                f"{PYTHON_GUI_IMAGE})"
-            )
+        _ensure_python_gui_image(progress)
         return _python_gui_plan(code)
     spec = LANGUAGES[language]
     return RunPlan(image=spec.image, filename=spec.filename, command=list(spec.command))

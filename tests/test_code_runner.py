@@ -9,6 +9,7 @@ from atlas_local.code_runner import (
     LANGUAGES,
     PYTHON_GUI_IMAGE,
     RunPlan,
+    resolve_plan,
     _runner_network_policy,
     _runner_timeout_seconds,
 )
@@ -93,6 +94,14 @@ class CodeRunnerPolicyTests(unittest.TestCase):
         self.assertNotEqual(PYTHON_GUI_IMAGE, "atlas-python-gui:latest")
         self.assertIn("session.screen0.workspaces: 1", dockerfile)
         self.assertIn("fluxbox -rc /root/.fluxbox/init", dockerfile)
+
+    def test_python_gui_plan_builds_image_on_demand(self) -> None:
+        with patch("atlas_local.code_runner._ensure_python_gui_image") as ensure_image:
+            plan = resolve_plan("python", "import pygame\npygame.init()")
+
+        ensure_image.assert_called_once()
+        self.assertEqual(plan.image, PYTHON_GUI_IMAGE)
+        self.assertTrue(plan.gui)
 
 
 if __name__ == "__main__":
