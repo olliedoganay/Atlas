@@ -7,6 +7,7 @@ from unittest.mock import patch
 from atlas_local.code_runner import (
     CodeRunner,
     LANGUAGES,
+    PYTHON_GUI_IMAGE,
     RunPlan,
     _runner_network_policy,
     _runner_timeout_seconds,
@@ -22,7 +23,7 @@ class CodeRunnerPolicyTests(unittest.TestCase):
 
     def test_gui_runs_force_bridge_network_for_vnc_port(self) -> None:
         plan = RunPlan(
-            image="atlas-python-gui:latest",
+            image=PYTHON_GUI_IMAGE,
             filename="main.py",
             command=["python", "/work/main.py"],
             ports={12345: 6080},
@@ -85,6 +86,13 @@ class CodeRunnerPolicyTests(unittest.TestCase):
             with self.subTest(language=language):
                 if len(spec.command) >= 2 and spec.command[0] == "sh":
                     self.assertNotEqual(spec.command[1], "-lc")
+
+    def test_python_gui_image_uses_single_fluxbox_workspace(self) -> None:
+        dockerfile = Path("src/atlas_local/runner_images/python_gui.Dockerfile").read_text(encoding="utf-8")
+
+        self.assertNotEqual(PYTHON_GUI_IMAGE, "atlas-python-gui:latest")
+        self.assertIn("session.screen0.workspaces: 1", dockerfile)
+        self.assertIn("fluxbox -rc /root/.fluxbox/init", dockerfile)
 
 
 if __name__ == "__main__":

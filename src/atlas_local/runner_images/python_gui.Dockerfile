@@ -41,12 +41,18 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 RUN ln -sf /usr/share/novnc/vnc.html /usr/share/novnc/index.html \
+    && mkdir -p /root/.fluxbox \
+    && printf '%s\n' \
+        'session.screen0.workspaces: 1' \
+        'session.screen0.workspaceNames: Main' \
+        'session.screen0.toolbar.tools: workspacename, iconbar, systemtray, clock' \
+        > /root/.fluxbox/init \
     && printf '%s\n' '#!/bin/sh' \
         'set -e' \
         'rm -f /tmp/.X99-lock /tmp/.X11-unix/X99 2>/dev/null || true' \
         'Xvfb :99 -screen 0 "$SCREEN_GEOMETRY" -ac +extension GLX +render -noreset >/tmp/xvfb.log 2>&1 &' \
         'sleep 0.6' \
-        'fluxbox >/tmp/fluxbox.log 2>&1 &' \
+        'fluxbox -rc /root/.fluxbox/init >/tmp/fluxbox.log 2>&1 &' \
         'x11vnc -display :99 -nopw -forever -shared -rfbport "$VNC_PORT" -quiet >/tmp/x11vnc.log 2>&1 &' \
         'websockify --web /usr/share/novnc "$NOVNC_PORT" "localhost:$VNC_PORT" >/tmp/novnc.log 2>&1 &' \
         'sleep 0.4' \
