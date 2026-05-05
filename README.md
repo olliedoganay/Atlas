@@ -15,7 +15,7 @@ Current version: `1.0.16`
 
 ## Download
 
-For normal Windows usage, install the packaged desktop release instead of running from source.
+For desktop Windows usage, install the packaged desktop release instead of running from source.
 
 [Download the latest Windows MSI](https://github.com/olliedoganay/Atlas/releases/latest)
 
