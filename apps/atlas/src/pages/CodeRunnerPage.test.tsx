@@ -69,6 +69,8 @@ describe("CodeRunnerPage client preview", () => {
     expect(preview).toContain("<style>canvas{background:#111}</style>");
     expect(preview).toContain("<canvas id=\"gameCanvas\"></canvas>");
     expect(preview).toContain("<script>window.atlasPreviewRan=true;</script>");
+    expect(preview).toContain('http-equiv="Content-Security-Policy"');
+    expect(preview).toContain("style-src-elem");
     expect(preview).toContain("atlas-client-preview");
     expect(preview).toContain("test-channel");
   });

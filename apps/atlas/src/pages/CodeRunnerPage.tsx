@@ -22,6 +22,22 @@ type Phase = "loading" | "docker-down" | "running" | "finished" | "error" | "idl
 
 export const CLIENT_PREVIEW_SANDBOX = "allow-scripts allow-forms allow-modals allow-popups allow-pointer-lock";
 export const CLIENT_PREVIEW_MESSAGE_SOURCE = "atlas-client-preview";
+export const CLIENT_PREVIEW_CSP = [
+  "default-src 'none'",
+  "script-src 'unsafe-inline' 'unsafe-eval' data: blob: http: https:",
+  "script-src-elem 'unsafe-inline' 'unsafe-eval' data: blob: http: https:",
+  "script-src-attr 'unsafe-inline'",
+  "style-src 'unsafe-inline' data: blob: http: https:",
+  "style-src-elem 'unsafe-inline' data: blob: http: https:",
+  "style-src-attr 'unsafe-inline'",
+  "img-src data: blob: http: https:",
+  "font-src data: blob: http: https:",
+  "media-src data: blob: http: https:",
+  "connect-src data: blob: http: https: ws: wss:",
+  "worker-src data: blob:",
+  "child-src data: blob:",
+  "frame-src data: blob:",
+].join("; ");
 
 type ClientPreviewConsoleLevel = "log" | "warn" | "error";
 
@@ -39,9 +55,10 @@ type ClientPreviewLine = {
 };
 
 export function buildClientPreviewDocument(code: string, channel: string): string {
+  const csp = buildClientPreviewCspMeta();
   const bootstrap = buildClientPreviewBootstrap(channel);
   if (isCompleteHtmlDocument(code)) {
-    return injectClientPreviewBootstrap(code, bootstrap);
+    return injectClientPreviewHead(code, `${csp}${bootstrap}`);
   }
   return [
     "<!DOCTYPE html>",
@@ -49,6 +66,7 @@ export function buildClientPreviewDocument(code: string, channel: string): strin
     "<head>",
     '<meta charset="utf-8" />',
     '<meta name="viewport" content="width=device-width, initial-scale=1" />',
+    csp,
     bootstrap,
     "</head>",
     "<body>",
@@ -66,17 +84,22 @@ function isCompleteHtmlDocument(code: string): boolean {
   return /<!doctype\s+html/i.test(code) || /<html[\s>]/i.test(code);
 }
 
-function injectClientPreviewBootstrap(code: string, bootstrap: string): string {
+function injectClientPreviewHead(code: string, headContent: string): string {
   if (/<head[\s>]/i.test(code)) {
-    return code.replace(/<head([^>]*)>/i, `<head$1>${bootstrap}`);
+    return code.replace(/<head([^>]*)>/i, `<head$1>${headContent}`);
   }
   if (/<body[\s>]/i.test(code)) {
-    return code.replace(/<body([^>]*)>/i, `<body$1>${bootstrap}`);
+    return code.replace(/<body([^>]*)>/i, `<body$1>${headContent}`);
   }
   if (/<html[\s>]/i.test(code)) {
-    return code.replace(/<html([^>]*)>/i, `<html$1><head>${bootstrap}</head>`);
+    return code.replace(/<html([^>]*)>/i, `<html$1><head>${headContent}</head>`);
   }
-  return `${bootstrap}${code}`;
+  return `${headContent}${code}`;
+}
+
+function buildClientPreviewCspMeta(): string {
+  const escaped = CLIENT_PREVIEW_CSP.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+  return `<meta http-equiv="Content-Security-Policy" content="${escaped}" />`;
 }
 
 function buildClientPreviewBootstrap(channel: string): string {
@@ -110,6 +133,10 @@ function buildClientPreviewBootstrap(channel: string): string {
     "  });",
     '  window.addEventListener("unhandledrejection", (event) => {',
     '    send({ type: "error", level: "error", text: stringify(event.reason) });',
+    "  });",
+    '  window.addEventListener("securitypolicyviolation", (event) => {',
+    "    const blocked = event.blockedURI || \"inline\";",
+    '    send({ type: "error", level: "error", text: `CSP blocked ${event.violatedDirective}: ${blocked}` });',
     "  });",
     '  window.addEventListener("load", () => {',
     '    send({ type: "ready" });',

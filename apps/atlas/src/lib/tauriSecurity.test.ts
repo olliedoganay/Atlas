@@ -21,6 +21,8 @@ describe("Tauri security policy", () => {
       for (const source of FRAME_SOURCES) {
         expect(frameSrc).toContain(source);
       }
+      expect(policy).toContain("style-src-elem 'self' 'unsafe-inline'");
+      expect(policy).toContain("script-src-elem 'self' 'unsafe-inline'");
     }
   });
 });
