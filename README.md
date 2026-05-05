@@ -7,7 +7,7 @@
 
 Atlas Chat is a local-first desktop app for working with local Ollama models. It provides a multi-thread chat workspace, profile-scoped memory, hardware-aware model discovery, run inspection, and a built-in code runner while keeping Atlas-managed state on the local machine.
 
-Current version: `1.0.23`
+Current version: `1.0.24`
 
 <p align="center">
   <img src="docs/assets/atlas-chat-workspace.png" alt="Atlas Chat workspace" style="max-width: 100%; height: auto;">
@@ -193,8 +193,8 @@ HTML renders in a sandboxed client-side preview and does not require Docker.
 Runner behavior:
 
 - Dependencies are installed on demand based on snippet imports when outbound network access is enabled for the run.
-- Python GUI snippets can open a live embedded noVNC view for supported toolkits.
-- Docker-backed runs use disposable containers with CPU, memory, PID, timeout, and network controls.
+- Python GUI snippets can open a live embedded noVNC view for supported toolkits. GUI system packages are installed inside the disposable run container only when needed.
+- Docker-backed runs use disposable containers with CPU, memory, PID, timeout, and network controls. Closing the run window stops the container and removes the run-installed dependencies with it; Docker may still keep the base language image.
 - Non-GUI Docker runs default to `--network none`; set `ATLAS_RUNNER_NETWORK=bridge` only when snippets need outbound dependency resolution or downloads.
 - `ATLAS_RUNNER_TIMEOUT_SECONDS` controls non-GUI run TTL and `ATLAS_RUNNER_GUI_TIMEOUT_SECONDS` controls GUI run TTL.
 - If Docker is unavailable, Atlas shows a retry path in the run window.

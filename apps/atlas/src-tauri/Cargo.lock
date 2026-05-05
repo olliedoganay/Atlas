@@ -203,7 +203,7 @@ dependencies = [
 
 [[package]]
 name = "atlas-desktop"
-version = "1.0.23"
+version = "1.0.24"
 dependencies = [
  "serde",
  "serde_json",

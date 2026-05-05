@@ -5,7 +5,6 @@ import asyncio
 import json
 import os
 import queue
-import threading
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -107,26 +106,6 @@ def create_api_app(service: AtlasBackendService | None = None) -> FastAPI:
         if managed_service is None:
             managed_service = AtlasBackendService.create()
         app.state.service = managed_service
-
-        def _warm_gui_image() -> None:
-            try:
-                from atlas_local.code_runner import (
-                    PYTHON_GUI_IMAGE,
-                    _ensure_python_gui_image,
-                    _image_exists,
-                    docker_status,
-                )
-
-                if _image_exists(PYTHON_GUI_IMAGE):
-                    return
-                if not docker_status().get("available"):
-                    return
-                _ensure_python_gui_image()
-            except Exception:  # pragma: no cover - best-effort warm-up
-                pass
-
-        warm_thread = threading.Thread(target=_warm_gui_image, name="atlas-gui-warm", daemon=True)
-        warm_thread.start()
 
         try:
             yield

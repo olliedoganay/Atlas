@@ -33,8 +33,42 @@ class RunPlan:
     gui: bool = False
 
 
-PYTHON_GUI_IMAGE = "atlas-python-gui:workspace1"
-LEGACY_PYTHON_GUI_IMAGES = ("atlas-python-gui:latest",)
+PYTHON_GUI_IMAGE = "python:3.12-slim"
+LEGACY_PYTHON_GUI_IMAGES = (
+    "atlas-python-gui:workspace2",
+    "atlas-python-gui:workspace1",
+    "atlas-python-gui:latest",
+)
+PYTHON_GUI_APT_PACKAGES = (
+    "xvfb",
+    "x11vnc",
+    "fluxbox",
+    "novnc",
+    "websockify",
+    "fonts-dejavu",
+    "fontconfig",
+    "libsdl2-2.0-0",
+    "libsdl2-image-2.0-0",
+    "libsdl2-mixer-2.0-0",
+    "libsdl2-ttf-2.0-0",
+    "libfreetype6",
+    "libportmidi0",
+    "libx11-6",
+    "libxext6",
+    "libxrender1",
+    "libxtst6",
+    "libxi6",
+    "libgl1",
+    "libglib2.0-0",
+    "libsm6",
+    "libxrandr2",
+    "libxcursor1",
+    "libasound2",
+    "tcl8.6",
+    "tk8.6",
+    "tk",
+    "ca-certificates",
+)
 PYTHON_GUI_MARKERS = (
     r"\bpygame\.display\.set_mode\s*\(",
     r"\bTk\s*\(",
@@ -344,82 +378,11 @@ def _docker_binary() -> str | None:
     return shutil.which("docker")
 
 
-_image_build_lock = threading.Lock()
-
-
-def _image_exists(image: str) -> bool:
-    binary = _docker_binary()
-    if not binary:
-        return False
-    try:
-        completed = subprocess.run(
-            [binary, "image", "inspect", image],
-            capture_output=True,
-            timeout=15,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return completed.returncode == 0
-
-
-def _ensure_python_gui_image(
-    progress: "Any | None" = None,
-) -> None:
-    if _image_exists(PYTHON_GUI_IMAGE):
-        _remove_legacy_python_gui_images()
-        return
-    with _image_build_lock:
-        if _image_exists(PYTHON_GUI_IMAGE):
-            _remove_legacy_python_gui_images()
-            return
-        dockerfile = Path(__file__).parent / "runner_images" / "python_gui.Dockerfile"
-        if not dockerfile.exists():
-            raise RuntimeError(f"Runner image Dockerfile missing: {dockerfile}")
-        binary = _docker_binary()
-        if not binary:
-            raise RuntimeError("Docker CLI is unavailable while building the GUI runner image.")
-        if progress is not None:
-            progress("[atlas-runner] Building GUI runner image (one-time, ~1-3 min)…\n")
-        process = subprocess.Popen(
-            [
-                binary,
-                "build",
-                "-t",
-                PYTHON_GUI_IMAGE,
-                "-f",
-                str(dockerfile),
-                str(dockerfile.parent),
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
-        last_line = ""
-        assert process.stdout is not None
-        for line in process.stdout:
-            last_line = line.rstrip() or last_line
-            if progress is not None:
-                progress(line)
-        code_ = process.wait()
-        if code_ != 0:
-            raise RuntimeError(
-                f"Failed to build the Python GUI runner image: {last_line or 'see docker output'}"
-            )
-        if progress is not None:
-            progress("[atlas-runner] GUI runner image ready.\n")
-        _remove_legacy_python_gui_images()
-
-
-def _remove_legacy_python_gui_images() -> None:
-    binary = _docker_binary()
+def _remove_legacy_python_gui_images(binary: str | None = None) -> None:
+    binary = binary or _docker_binary()
     if not binary:
         return
     for image in LEGACY_PYTHON_GUI_IMAGES:
-        if image == PYTHON_GUI_IMAGE or not _image_exists(image):
-            continue
         subprocess.run(
             [binary, "image", "rm", image],
             stdout=subprocess.DEVNULL,
@@ -432,8 +395,27 @@ def _python_gui_plan(code: str) -> RunPlan:
     novnc_host_port = _reserve_host_port()
     gui_args = " ".join(_python_gui_args(code))
     gui_args_suffix = f" {gui_args}" if gui_args else ""
+    apt_packages = " ".join(PYTHON_GUI_APT_PACKAGES)
     install_script = (
         "set -e; cp /work/main.py /tmp/main.py; cd /tmp; "
+        "export DEBIAN_FRONTEND=noninteractive DISPLAY=:99 SCREEN_GEOMETRY=1280x800x24 "
+        "VNC_PORT=5900 NOVNC_PORT=6080 PYTHONUNBUFFERED=1 SDL_AUDIODRIVER=dummy "
+        "PYGAME_HIDE_SUPPORT_PROMPT=1 ALSA_CONFIG_PATH=/dev/null; "
+        "echo \"[atlas-runner] installing GUI system dependencies\"; "
+        "apt-get update >/dev/null; "
+        f"apt-get install -y --no-install-recommends {apt_packages} >/dev/null; "
+        "rm -rf /var/lib/apt/lists/*; "
+        "ln -sf /usr/share/novnc/vnc.html /usr/share/novnc/index.html; "
+        "mkdir -p /root/.fluxbox; "
+        "printf '%s\\n' 'session.screen0.workspaces: 1' 'session.screen0.workspaceNames: Main' "
+        "'session.screen0.toolbar.tools: workspacename, iconbar, systemtray, clock' > /root/.fluxbox/init; "
+        "rm -f /tmp/.X99-lock /tmp/.X11-unix/X99 2>/dev/null || true; "
+        "Xvfb :99 -screen 0 \"$SCREEN_GEOMETRY\" -ac +extension GLX +render -noreset >/tmp/xvfb.log 2>&1 & "
+        "sleep 0.6; "
+        "fluxbox -rc /root/.fluxbox/init >/tmp/fluxbox.log 2>&1 & "
+        "x11vnc -display :99 -nopw -forever -shared -rfbport \"$VNC_PORT\" -quiet >/tmp/x11vnc.log 2>&1 & "
+        "websockify --web /usr/share/novnc \"$NOVNC_PORT\" \"localhost:$VNC_PORT\" >/tmp/novnc.log 2>&1 & "
+        "sleep 0.4; "
         "PY_IMPORTS=$(python - <<'PY'\n"
         "import ast, sys\n"
         "STDLIB = set(sys.stdlib_module_names)\n"
@@ -470,7 +452,6 @@ def _python_gui_plan(code: str) -> RunPlan:
 
 def resolve_plan(language: str, code: str, progress: "Any | None" = None) -> RunPlan:
     if language == "python" and _python_gui_detected(code):
-        _ensure_python_gui_image(progress)
         return _python_gui_plan(code)
     spec = LANGUAGES[language]
     return RunPlan(image=spec.image, filename=spec.filename, command=list(spec.command))
@@ -562,6 +543,7 @@ class CodeRunner:
 
         self._cleanup_finished_runs()
         self._cleanup_stale_containers(binary)
+        _remove_legacy_python_gui_images(binary)
         plan = resolve_plan(resolved, code)
         run_id = uuid.uuid4().hex[:16]
         container_name = f"atlas-run-{run_id}"
@@ -601,6 +583,9 @@ class CodeRunner:
             "-w",
             "/work",
         ]
+        if plan.gui:
+            for capability in ("CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"):
+                docker_args.extend(["--cap-add", capability])
         for host_port, container_port in plan.ports.items():
             docker_args.extend(["-p", f"127.0.0.1:{host_port}:{container_port}"])
         docker_args.append(plan.image)

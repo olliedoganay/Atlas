@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import sys
@@ -47,8 +46,6 @@ def main() -> int:
         str(spec_root),
         "--paths",
         str(repo_root / "src"),
-        "--add-data",
-        f"{repo_root / 'src' / 'atlas_local' / 'runner_images'}{os.pathsep}atlas_local/runner_images",
         "--collect-submodules",
         "atlas_local",
         "--collect-submodules",

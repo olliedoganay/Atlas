@@ -1,15 +1,16 @@
 import tempfile
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from atlas_local.code_runner import (
     CodeRunner,
     LANGUAGES,
+    LEGACY_PYTHON_GUI_IMAGES,
     PYTHON_GUI_IMAGE,
     RunPlan,
     resolve_plan,
+    _remove_legacy_python_gui_images,
     _runner_network_policy,
     _runner_timeout_seconds,
 )
@@ -82,24 +83,88 @@ class CodeRunnerPolicyTests(unittest.TestCase):
         self.assertEqual(response["network"], "none")
         self.assertEqual(response["timeout_seconds"], 120)
 
+    def test_gui_start_keeps_only_package_install_capabilities(self) -> None:
+        captured: dict[str, list[str]] = {}
+
+        class FakeProcess:
+            stdout: list[str] = []
+            stderr: list[str] = []
+
+            def wait(self) -> int:
+                return 0
+
+            def kill(self) -> None:
+                return None
+
+        def fake_popen(args, **_kwargs):
+            captured["args"] = args
+            return FakeProcess()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = RunPlan(
+                image=PYTHON_GUI_IMAGE,
+                filename="main.py",
+                command=["sh", "-c", "echo gui"],
+                ports={12345: 6080},
+                gui=True,
+            )
+            with (
+                patch("atlas_local.code_runner._docker_binary", return_value="docker"),
+                patch("atlas_local.code_runner.resolve_plan", return_value=plan),
+                patch("atlas_local.code_runner.subprocess.Popen", side_effect=fake_popen),
+                patch(
+                    "atlas_local.code_runner.subprocess.run",
+                    return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
+                ),
+                patch("atlas_local.code_runner.tempfile.mkdtemp", return_value=tmp),
+            ):
+                CodeRunner().start("python", "print('hello')")
+
+        args = captured["args"]
+        added_caps = [
+            args[index + 1]
+            for index, value in enumerate(args)
+            if value == "--cap-add" and index + 1 < len(args)
+        ]
+        self.assertEqual(added_caps, ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"])
+
     def test_docker_commands_do_not_use_login_shells(self) -> None:
         for language, spec in LANGUAGES.items():
             with self.subTest(language=language):
                 if len(spec.command) >= 2 and spec.command[0] == "sh":
                     self.assertNotEqual(spec.command[1], "-lc")
 
-    def test_python_gui_image_uses_single_fluxbox_workspace(self) -> None:
-        dockerfile = Path("src/atlas_local/runner_images/python_gui.Dockerfile").read_text(encoding="utf-8")
+    def test_cleanup_removes_only_legacy_python_gui_images(self) -> None:
+        calls: list[list[str]] = []
 
-        self.assertNotEqual(PYTHON_GUI_IMAGE, "atlas-python-gui:latest")
-        self.assertIn("session.screen0.workspaces: 1", dockerfile)
-        self.assertIn("fluxbox -rc /root/.fluxbox/init", dockerfile)
+        def fake_run(args, **_kwargs):
+            calls.append(args)
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    def test_python_gui_plan_builds_image_on_demand(self) -> None:
-        with patch("atlas_local.code_runner._ensure_python_gui_image") as ensure_image:
-            plan = resolve_plan("python", "import pygame\npygame.display.set_mode((400, 300))")
+        with patch("atlas_local.code_runner.subprocess.run", side_effect=fake_run):
+            _remove_legacy_python_gui_images("docker")
 
-        ensure_image.assert_called_once()
+        removed_images = [args[-1] for args in calls]
+        self.assertEqual(removed_images, list(LEGACY_PYTHON_GUI_IMAGES))
+        self.assertNotIn(PYTHON_GUI_IMAGE, removed_images)
+
+    def test_python_gui_uses_disposable_base_image_and_runtime_dependencies(self) -> None:
+        plan = resolve_plan("python", "import tkinter\nroot = tkinter.Tk()\nroot.mainloop()")
+
+        self.assertEqual(PYTHON_GUI_IMAGE, "python:3.12-slim")
+        self.assertIn("atlas-python-gui:workspace1", LEGACY_PYTHON_GUI_IMAGES)
+        self.assertIn("atlas-python-gui:workspace2", LEGACY_PYTHON_GUI_IMAGES)
+        self.assertNotIn(PYTHON_GUI_IMAGE, LEGACY_PYTHON_GUI_IMAGES)
+        self.assertEqual(plan.image, PYTHON_GUI_IMAGE)
+        self.assertIn("apt-get install", plan.command[-1])
+        self.assertIn("session.screen0.workspaces: 1", plan.command[-1])
+        self.assertIn("fluxbox -rc /root/.fluxbox/init", plan.command[-1])
+        self.assertIn("tcl8.6", plan.command[-1])
+        self.assertIn("tk8.6", plan.command[-1])
+
+    def test_python_gui_plan_installs_gui_dependencies_on_demand(self) -> None:
+        plan = resolve_plan("python", "import pygame\npygame.display.set_mode((400, 300))")
+
         self.assertEqual(plan.image, PYTHON_GUI_IMAGE)
         self.assertTrue(plan.gui)
 
@@ -110,8 +175,7 @@ class CodeRunnerPolicyTests(unittest.TestCase):
         self.assertFalse(plan.gui)
 
     def test_direct_tkinter_window_uses_gui_runner(self) -> None:
-        with patch("atlas_local.code_runner._ensure_python_gui_image"):
-            plan = resolve_plan("python", "import tkinter\nroot = tkinter.Tk()\nroot.mainloop()")
+        plan = resolve_plan("python", "import tkinter\nroot = tkinter.Tk()\nroot.mainloop()")
 
         self.assertEqual(plan.image, PYTHON_GUI_IMAGE)
         self.assertTrue(plan.gui)
@@ -132,8 +196,7 @@ class CodeRunnerPolicyTests(unittest.TestCase):
             ],
         )
 
-        with patch("atlas_local.code_runner._ensure_python_gui_image"):
-            plan = resolve_plan("python", code)
+        plan = resolve_plan("python", code)
 
         self.assertTrue(plan.gui)
         self.assertIn("python -u /tmp/main.py --gui", plan.command[-1])
