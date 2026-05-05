@@ -27,7 +27,7 @@ import {
   type ThreadMessage,
 } from "../lib/api";
 import { useBackendPhase } from "../lib/backendPhase";
-import { buildContextMeter } from "../lib/contextMeter";
+import { buildContextMeter, type ContextMeter } from "../lib/contextMeter";
 import { resolveStartupState } from "../lib/startupState";
 import { displayThreadTitle, editableThreadTitle, requestThreadTitle } from "../lib/threadTitles";
 import { useAtlasStore } from "../store/useAtlasStore";
@@ -681,9 +681,7 @@ export function WorkspacePage() {
     prompt,
     runDetails?.detected_context_window,
   ]);
-  const contextMeterTitle = contextMeter.detected
-    ? `~${contextMeter.tokensUsed.toLocaleString()} of ~${contextMeter.autoCompactBudget.toLocaleString()} tokens used (model window ${contextMeter.contextWindow.toLocaleString()}${contextMeter.fromServer ? "" : ", estimated"}). Click to compact now.`
-    : `~${contextMeter.tokensUsed.toLocaleString()} tokens estimated. Exact model window unknown until the first run. Click to compact now.`;
+  const contextMeterTitle = formatContextMeterTitle(contextMeter, currentThreadHasActiveRun);
   const showOllamaWarning = startupState.key === "ollama-offline";
   const idleKicker =
     startupState.key === "ready" && selectedModel
@@ -1385,7 +1383,7 @@ export function WorkspacePage() {
           />
 
           <button
-            aria-label="Context remaining until auto-compact. Click to compact now."
+            aria-label={contextMeterTitle}
             className={`composer-context-meter composer-context-meter-${contextMeter.tone}`}
             disabled={isStreaming || !currentUserId || !threadHasHistory || startManualCompact.isPending}
             onClick={() => startManualCompact.mutate()}
@@ -1649,6 +1647,34 @@ function formatTemperatureLabel(value: number | null | undefined) {
     return "Model setting";
   }
   return value.toFixed(1);
+}
+
+function formatContextMeterTitle(meter: ContextMeter, hasActiveRun: boolean) {
+  if (!meter.detected) {
+    return `~${meter.tokensUsed.toLocaleString()} tokens estimated. Exact model window unknown until the first run. Click to compact now.`;
+  }
+  const sourceCopy = meter.fromServer ? "detected from Ollama" : "estimated";
+  const parts = [
+    `Prompt context: ~${meter.tokensUsed.toLocaleString()} of ~${meter.autoCompactBudget.toLocaleString()} auto-compact budget used.`,
+    `Model window: ${meter.contextWindow.toLocaleString()} tokens (${sourceCopy}).`,
+  ];
+  if (meter.summaryTokens || meter.rawMessageTokens) {
+    parts.push(
+      `Current representation: ${meter.summaryTokens.toLocaleString()} summary tokens + ${meter.rawMessageTokens.toLocaleString()} recent raw-message tokens.`,
+    );
+  }
+  if (meter.compactedMessageCount || meter.recentRawMessageCount || meter.messageCount) {
+    parts.push(
+      `Messages: ${meter.compactedMessageCount.toLocaleString()} compacted, ${meter.recentRawMessageCount.toLocaleString()} still raw, ${meter.messageCount.toLocaleString()} total.`,
+    );
+  }
+  if (hasActiveRun && meter.liveAnswerTokens > 0) {
+    parts.push(
+      `Live answer is ~${meter.liveAnswerTokens.toLocaleString()} tokens and will count after it is saved; projected next-turn usage is ~${meter.projectedTokensUsed.toLocaleString()} tokens.`,
+    );
+  }
+  parts.push("Click to compact now.");
+  return parts.join(" ");
 }
 
 function isNearBottom(element: HTMLDivElement, threshold = 72) {

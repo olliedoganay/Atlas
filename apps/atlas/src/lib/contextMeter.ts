@@ -12,7 +12,13 @@ type MeterContextUsage = {
   context_window?: number | null;
   auto_compact_ratio?: number | null;
   auto_compact_threshold?: number | null;
+  auto_compact_margin_tokens?: number | null;
   representation_tokens?: number | null;
+  summary_tokens?: number | null;
+  raw_message_tokens?: number | null;
+  compacted_message_count?: number | null;
+  recent_raw_message_count?: number | null;
+  message_count?: number | null;
 };
 
 type MeterCompactionNotice = {
@@ -36,7 +42,15 @@ export type ContextMeter = {
   contextWindow: number;
   autoCompactBudget: number;
   tokensUsed: number;
+  projectedTokensUsed: number;
+  liveAnswerTokens: number;
+  summaryTokens: number;
+  rawMessageTokens: number;
+  compactedMessageCount: number;
+  recentRawMessageCount: number;
+  messageCount: number;
   remainingPercent: number;
+  projectedRemainingPercent: number;
   tone: "ok" | "warning" | "critical";
   detected: boolean;
   fromServer: boolean;
@@ -87,33 +101,43 @@ export function buildContextMeter(input: ContextMeterInput): ContextMeter {
     tokensUsed = estimateHistoryTokens(input.visibleHistory);
   }
 
-  let liveCharEstimate = 0;
+  let pendingCharEstimate = 0;
   if (input.hasActiveRun) {
     if (compactedBaseTokens > 0) {
-      liveCharEstimate += (input.liveAnswer ?? "").length;
+      // The compaction event already includes the pending user turn in its post-compaction baseline.
     } else {
-      liveCharEstimate += (input.pendingPrompt ?? "").length;
-      liveCharEstimate += (input.liveAnswer ?? "").length;
+      pendingCharEstimate += (input.pendingPrompt ?? "").length;
       for (const attachment of input.pendingAttachments ?? []) {
         if (attachment.text_content) {
-          liveCharEstimate += attachment.text_content.length;
+          pendingCharEstimate += attachment.text_content.length;
         }
       }
     }
   }
-  liveCharEstimate += (input.draftPrompt ?? "").length;
+  pendingCharEstimate += (input.draftPrompt ?? "").length;
 
-  const projectedTokens = tokensUsed + Math.ceil(liveCharEstimate / 4);
-  const rawRemaining = 1 - projectedTokens / autoCompactBudget;
+  const liveAnswerTokens = input.hasActiveRun ? Math.ceil((input.liveAnswer ?? "").length / 4) : 0;
+  const tokensWithPendingPrompt = tokensUsed + Math.ceil(pendingCharEstimate / 4);
+  const projectedTokens = tokensWithPendingPrompt + liveAnswerTokens;
+  const rawRemaining = 1 - tokensWithPendingPrompt / autoCompactBudget;
   const remainingRatio = Math.max(0, Math.min(1, rawRemaining));
   const remainingPercent = Math.round(remainingRatio * 100);
+  const projectedRemainingRatio = Math.max(0, Math.min(1, 1 - projectedTokens / autoCompactBudget));
   const tone = remainingRatio <= 0.1 ? "critical" : remainingRatio <= 0.25 ? "warning" : "ok";
 
   return {
     contextWindow,
     autoCompactBudget,
-    tokensUsed: projectedTokens,
+    tokensUsed: tokensWithPendingPrompt,
+    projectedTokensUsed: projectedTokens,
+    liveAnswerTokens,
+    summaryTokens: positiveNumber(input.contextUsage?.summary_tokens),
+    rawMessageTokens: positiveNumber(input.contextUsage?.raw_message_tokens),
+    compactedMessageCount: positiveNumber(input.contextUsage?.compacted_message_count),
+    recentRawMessageCount: positiveNumber(input.contextUsage?.recent_raw_message_count),
+    messageCount: positiveNumber(input.contextUsage?.message_count),
     remainingPercent,
+    projectedRemainingPercent: Math.round(projectedRemainingRatio * 100),
     tone,
     detected: detectedWindow > 0,
     fromServer: Boolean(input.contextUsage),

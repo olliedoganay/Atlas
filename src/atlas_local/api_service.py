@@ -501,17 +501,27 @@ class AtlasBackendService:
         if effective_context_window <= 0:
             effective_context_window = detected_context_window
 
-        representation_tokens = self._count_thread_representation_tokens(
+        summary_tokens = self._count_messages_tokens(
             model=chat_model,
-            messages=messages,
-            thread_summary=thread_summary,
-            compacted_message_count=compacted_message_count,
+            messages=[SystemMessage(content=f"Conversation summary from earlier in this thread:\n{thread_summary}")]
+            if thread_summary.strip()
+            else [],
         )
+        raw_message_tokens = self._count_messages_tokens(
+            model=chat_model,
+            messages=messages[max(0, min(compacted_message_count, len(messages))) :],
+        )
+        representation_tokens = summary_tokens + raw_message_tokens
 
         auto_compact_ratio = 0.72
         auto_compact_threshold = (
             max(1024, int(effective_context_window * auto_compact_ratio))
             if effective_context_window > 0
+            else 0
+        )
+        auto_compact_margin_tokens = (
+            max(0, auto_compact_threshold - representation_tokens)
+            if auto_compact_threshold > 0
             else 0
         )
 
@@ -522,8 +532,15 @@ class AtlasBackendService:
             "context_window": effective_context_window,
             "auto_compact_ratio": auto_compact_ratio,
             "auto_compact_threshold": auto_compact_threshold,
+            "auto_compact_margin_tokens": auto_compact_margin_tokens,
             "representation_tokens": representation_tokens,
+            "summary_tokens": summary_tokens,
+            "raw_message_tokens": raw_message_tokens,
             "compacted_message_count": compacted_message_count,
+            "recent_raw_message_count": max(
+                0,
+                len(messages) - max(0, min(compacted_message_count, len(messages))),
+            ),
             "message_count": len(messages),
         }
 
@@ -1414,12 +1431,29 @@ class AtlasBackendService:
             if not batch_messages or consumed <= 0:
                 break
 
-            updated_summary = self._summarize_message_batch(
+            current_representation_tokens = self._count_thread_representation_tokens(
+                model=runtime.context.chat_model,
+                messages=all_messages,
+                thread_summary=updated_summary,
+                compacted_message_count=compacted_count,
+            )
+            proposed_summary = self._summarize_message_batch(
                 model=runtime.context.chat_model,
                 existing_summary=updated_summary,
                 messages=batch_messages,
             )
-            compacted_count += consumed
+            proposed_compacted_count = compacted_count + consumed
+            proposed_representation_tokens = self._count_thread_representation_tokens(
+                model=runtime.context.chat_model,
+                messages=all_messages,
+                thread_summary=proposed_summary,
+                compacted_message_count=proposed_compacted_count,
+            )
+            if proposed_representation_tokens >= current_representation_tokens:
+                break
+
+            updated_summary = proposed_summary
+            compacted_count = proposed_compacted_count
             state["thread_summary"] = updated_summary
             state["compacted_message_count"] = compacted_count
             max_iterations -= 1
@@ -1431,7 +1465,7 @@ class AtlasBackendService:
         }
 
     def _message_token_counter(self, model: str):
-        provider = getattr(self.app, "llm_provider", None)
+        provider = getattr(getattr(self, "app", None), "llm_provider", None)
         counter = getattr(provider, "count_message_tokens", None)
         if not callable(counter):
             return None
@@ -1501,14 +1535,33 @@ class AtlasBackendService:
                 "detected_context_window": effective_context_window,
             }
 
-        updated_summary = self._summarize_message_batch(
+        current_representation_tokens = self._count_thread_representation_tokens(
+            model=runtime.context.chat_model,
+            messages=all_messages,
+            thread_summary=updated_summary,
+            compacted_message_count=compacted_count,
+        )
+        proposed_summary = self._summarize_message_batch(
             model=runtime.context.chat_model,
             existing_summary=updated_summary,
             messages=batch_messages,
         )
+        proposed_compacted_count = compacted_count + consumed
+        proposed_representation_tokens = self._count_thread_representation_tokens(
+            model=runtime.context.chat_model,
+            messages=all_messages,
+            thread_summary=proposed_summary,
+            compacted_message_count=proposed_compacted_count,
+        )
+        if proposed_representation_tokens >= current_representation_tokens:
+            return {
+                "thread_summary": updated_summary,
+                "compacted_message_count": compacted_count,
+                "detected_context_window": effective_context_window,
+            }
         return {
-            "thread_summary": updated_summary,
-            "compacted_message_count": compacted_count + consumed,
+            "thread_summary": proposed_summary,
+            "compacted_message_count": proposed_compacted_count,
             "detected_context_window": effective_context_window,
         }
 
@@ -1524,12 +1577,14 @@ class AtlasBackendService:
             return existing_summary
 
         prompt_parts = [
-            "Condense the earlier part of this conversation into a compact working summary that preserves exact details needed to continue the thread correctly.",
-            "Keep durable user facts, active goals, explicit constraints, exact names and titles, chronology, worldbuilding details, list items, code/file references, decisions, and unresolved tasks.",
+            "Merge the earlier part of this conversation into a compact working summary that preserves exact details needed to continue the thread correctly.",
+            "Keep durable user facts, active goals, explicit constraints, exact names and titles, chronology, worldbuilding details, list items, decisions, and unresolved tasks.",
+            "Preserve exact code-facing details: repository names, file paths, function names, commands, package names, versions, errors, screenshots referenced by path, release tags, and test results.",
+            "When existing summary content and the new chunk overlap, merge them into a single current view instead of duplicating old bullets.",
             "Do not replace specific details with vague phrases like 'details were discussed' or 'a plan was outlined'.",
             "If the conversation contains creative work, preserve concrete canon details such as character names, relationships, settings, episode labels, plot beats, tone, style, and production constraints.",
-            "Use short bullets under these headings when relevant: Canon details, Active goals, Constraints and style, Open threads.",
-            "Keep it concise but detail-dense. Stay under 420 words.",
+            "Use short bullets under these headings when relevant: Current objective, Durable facts, Decisions and constraints, Code and file references, Open tasks, Canon details.",
+            "Keep it concise but detail-dense. Stay under 520 words.",
         ]
         if existing_summary.strip():
             prompt_parts.append("\nExisting summary:\n" + existing_summary.strip())
@@ -1776,8 +1831,22 @@ def _render_messages_for_summary(messages: list[HumanMessage | AIMessage]) -> st
 
 def _message_text_for_summary(message: HumanMessage | AIMessage) -> str:
     text = _latest_user_text({"messages": [message]}) if isinstance(message, HumanMessage) else _chunk_to_text(message)
-    cleaned = " ".join(str(text).split()).strip()
-    return cleaned
+    return _clean_transcript_text(str(text))
+
+
+def _clean_transcript_text(text: str) -> str:
+    lines = [line.rstrip() for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    cleaned: list[str] = []
+    blank = False
+    for line in lines:
+        if not line.strip():
+            if not blank and cleaned:
+                cleaned.append("")
+            blank = True
+            continue
+        cleaned.append(line)
+        blank = False
+    return "\n".join(cleaned).strip()
 
 
 def _fallback_summary(*, existing_summary: str, transcript: str) -> str:

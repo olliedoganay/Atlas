@@ -430,7 +430,116 @@ class ContextCompactionTests(unittest.TestCase):
         prompt = str(captured["prompt"])
         self.assertIn("preserves exact details", prompt)
         self.assertIn("Canon details", prompt)
+        self.assertIn("repository names, file paths, function names, commands", prompt)
+        self.assertIn("Current objective", prompt)
         self.assertIn("Do not replace specific details with vague phrases", prompt)
+
+    def test_summarize_message_batch_preserves_code_references_in_transcript(self) -> None:
+        service = AtlasBackendService.__new__(AtlasBackendService)
+        captured: dict[str, object] = {}
+
+        class _FakeChat:
+            def invoke(self, messages: list[HumanMessage]) -> SimpleNamespace:
+                captured["prompt"] = str(messages[0].content)
+                return SimpleNamespace(content="summary output")
+
+        service.app = SimpleNamespace(
+            llm_provider=SimpleNamespace(chat=lambda *_args, **_kwargs: _FakeChat())
+        )
+
+        AtlasBackendService._summarize_message_batch(
+            service,
+            model="gpt-oss:20b",
+            existing_summary="Existing exact path: apps/atlas/src/pages/WorkspacePage.tsx",
+            messages=[
+                HumanMessage(
+                    content=(
+                        "Keep command `cargo check --manifest-path apps/atlas/src-tauri/Cargo.toml` "
+                        "and error `ImportError: libtk8.6.so`."
+                    )
+                ),
+                AIMessage(content="Patch file src/atlas_local/code_runner.py and tag v1.0.25."),
+            ],
+        )
+
+        prompt = str(captured["prompt"])
+        self.assertIn("apps/atlas/src/pages/WorkspacePage.tsx", prompt)
+        self.assertIn("cargo check --manifest-path apps/atlas/src-tauri/Cargo.toml", prompt)
+        self.assertIn("ImportError: libtk8.6.so", prompt)
+        self.assertIn("src/atlas_local/code_runner.py", prompt)
+        self.assertIn("v1.0.25", prompt)
+
+    def test_auto_compaction_rejects_non_reducing_summary(self) -> None:
+        service = AtlasBackendService.__new__(AtlasBackendService)
+        service.app = SimpleNamespace(
+            llm_provider=SimpleNamespace(
+                count_message_tokens=lambda _model, messages: sum(
+                    len(str(message.content)) // 4 + 8 for message in messages
+                ),
+            )
+        )
+        service._summarize_message_batch = lambda **_: "bloated summary " * 1000
+        state = {
+            "messages": [
+                HumanMessage(content="u1" * 1000),
+                AIMessage(content="a1" * 1000),
+                HumanMessage(content="u2" * 1000),
+                AIMessage(content="a2" * 1000),
+            ],
+            "thread_summary": "",
+            "compacted_message_count": 0,
+        }
+        runtime = SimpleNamespace(
+            context=SimpleNamespace(
+                auto_compact_long_chats=True,
+                effective_context_window=1024,
+                chat_model="gemma4:e4b",
+            )
+        )
+
+        result = AtlasBackendService._maybe_compact_context(service, state=state, runtime=runtime)
+
+        self.assertEqual(result["thread_summary"], "")
+        self.assertEqual(result["compacted_message_count"], 0)
+
+    def test_get_thread_context_usage_reports_summary_and_raw_breakdown(self) -> None:
+        service = AtlasBackendService.__new__(AtlasBackendService)
+        service._ensure_user_unlocked = lambda _user_id: None
+        service.run_store = SimpleNamespace(get_thread=lambda **_: {"chat_model": "gpt-oss:20b"})
+        service.app = SimpleNamespace(
+            llm_provider=SimpleNamespace(
+                effective_context_window=lambda _model: 8192,
+                count_message_tokens=lambda _model, messages: len(messages) * 100,
+            )
+        )
+        service._get_snapshot = lambda **_: SimpleNamespace(
+            values={
+                "messages": [
+                    HumanMessage(content="old user"),
+                    AIMessage(content="old answer"),
+                    HumanMessage(content="recent user"),
+                    AIMessage(content="recent answer"),
+                ],
+                "thread_summary": "- old user asked for exact paths",
+                "compacted_message_count": 2,
+                "detected_context_window": 4096,
+            }
+        )
+
+        usage = AtlasBackendService.get_thread_context_usage(
+            service,
+            user_id="research_user",
+            thread_id="main",
+        )
+
+        self.assertEqual(usage["context_window"], 8192)
+        self.assertEqual(usage["summary_tokens"], 100)
+        self.assertEqual(usage["raw_message_tokens"], 200)
+        self.assertEqual(usage["representation_tokens"], 300)
+        self.assertEqual(usage["compacted_message_count"], 2)
+        self.assertEqual(usage["recent_raw_message_count"], 2)
+        self.assertEqual(usage["message_count"], 4)
+        self.assertEqual(usage["auto_compact_threshold"], 5898)
 
     def test_execute_run_stops_before_synthesis_if_cancelled_during_auto_compaction(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -953,6 +1062,40 @@ class ManualCompactionTests(unittest.TestCase):
             compacted_message_count=result["compacted_message_count"],
         )
         self.assertLess(after_tokens, before_tokens)
+
+    def test_manual_compact_context_rejects_non_reducing_summary(self) -> None:
+        service = AtlasBackendService.__new__(AtlasBackendService)
+        service.app = SimpleNamespace(
+            llm_provider=SimpleNamespace(
+                count_message_tokens=lambda _model, messages: sum(
+                    len(str(message.content)) // 4 + 8 for message in messages
+                ),
+            )
+        )
+        service._summarize_message_batch = lambda **_: "oversized manual summary " * 1000
+        state = {
+            "messages": [
+                HumanMessage(content="u1" * 1000),
+                AIMessage(content="a1" * 1000),
+                HumanMessage(content="u2" * 1000),
+                AIMessage(content="a2" * 1000),
+                HumanMessage(content="latest"),
+                AIMessage(content="answer"),
+            ],
+            "thread_summary": "",
+            "compacted_message_count": 0,
+        }
+        runtime = SimpleNamespace(
+            context=SimpleNamespace(
+                effective_context_window=4096,
+                chat_model="gemma4:e4b",
+            )
+        )
+
+        result = AtlasBackendService._manual_compact_context(service, state=state, runtime=runtime)
+
+        self.assertEqual(result["thread_summary"], "")
+        self.assertEqual(result["compacted_message_count"], 0)
 
     def test_execute_compact_run_persists_manual_timeline_event(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

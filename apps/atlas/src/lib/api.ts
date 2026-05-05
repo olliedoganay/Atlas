@@ -363,8 +363,12 @@ export type ThreadContextUsage = {
   context_window: number;
   auto_compact_ratio: number;
   auto_compact_threshold: number;
+  auto_compact_margin_tokens: number;
   representation_tokens: number;
+  summary_tokens: number;
+  raw_message_tokens: number;
   compacted_message_count: number;
+  recent_raw_message_count: number;
   message_count: number;
 };
 

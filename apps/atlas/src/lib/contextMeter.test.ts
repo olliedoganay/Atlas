@@ -22,18 +22,25 @@ describe("buildContextMeter", () => {
       draftPrompt: "",
     });
 
-    expect(meter.tokensUsed).toBe(440);
-    expect(meter.remainingPercent).toBe(93);
+    expect(meter.tokensUsed).toBe(320);
+    expect(meter.projectedTokensUsed).toBe(440);
+    expect(meter.remainingPercent).toBe(95);
+    expect(meter.projectedRemainingPercent).toBe(93);
     expect(meter.tone).toBe("ok");
   });
 
-  it("keeps charging live answer text before a compaction event arrives", () => {
+  it("keeps the stable meter from draining on unsaved live answer text", () => {
     const meter = buildContextMeter({
       contextUsage: {
         context_window: 8192,
         auto_compact_ratio: 0.72,
         auto_compact_threshold: 5898,
         representation_tokens: 300,
+        summary_tokens: 120,
+        raw_message_tokens: 180,
+        compacted_message_count: 4,
+        recent_raw_message_count: 2,
+        message_count: 6,
       },
       visibleHistory: [],
       hasActiveRun: true,
@@ -42,9 +49,16 @@ describe("buildContextMeter", () => {
       draftPrompt: "",
     });
 
-    expect(meter.tokensUsed).toBeGreaterThan(5700);
-    expect(meter.remainingPercent).toBeLessThan(4);
-    expect(meter.tone).toBe("critical");
+    expect(meter.tokensUsed).toBeLessThan(400);
+    expect(meter.remainingPercent).toBeGreaterThan(90);
+    expect(meter.projectedTokensUsed).toBeGreaterThan(5700);
+    expect(meter.projectedRemainingPercent).toBeLessThan(4);
+    expect(meter.summaryTokens).toBe(120);
+    expect(meter.rawMessageTokens).toBe(180);
+    expect(meter.compactedMessageCount).toBe(4);
+    expect(meter.recentRawMessageCount).toBe(2);
+    expect(meter.messageCount).toBe(6);
+    expect(meter.tone).toBe("ok");
   });
 
   it("falls back to the visible history estimate when the backend has not reported usage yet", () => {
