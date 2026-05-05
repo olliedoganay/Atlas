@@ -157,7 +157,7 @@ export function resolveStartupState({
       tone: "muted",
       shellLabel: "Choose a model",
       idleKicker: "New thread",
-      headerSummary: "Choose a local model and temperature before the first message.",
+      headerSummary: "Choose a local model before the first message.",
       idleTitle: "Choose a model",
       idleDescription: "Select a local chat model before starting this thread.",
       composerPlaceholder: "Choose a local model to start this chat.",
@@ -171,8 +171,8 @@ export function resolveStartupState({
     shellLabel: "Ready",
     idleKicker: "New thread",
     headerSummary: threadHasHistory
-      ? "This chat is locked to its original model and temperature."
-      : "Model and temperature lock after the first message in this thread.",
+      ? "This chat is locked to its original model and temperature setting."
+      : "Model and temperature setting lock after the first message in this thread.",
     idleTitle: "New thread",
     idleDescription: selectedModelSupportsImages
       ? "Ask a question, upload a photo for context, or use this thread as a clean branch for a new line of thinking."

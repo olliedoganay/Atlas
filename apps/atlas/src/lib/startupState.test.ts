@@ -102,6 +102,6 @@ describe("resolveStartupState", () => {
     });
 
     expect(state.key).toBe("ready");
-    expect(state.headerSummary).toBe("This chat is locked to its original model and temperature.");
+    expect(state.headerSummary).toBe("This chat is locked to its original model and temperature setting.");
   });
 });
