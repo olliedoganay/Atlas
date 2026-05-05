@@ -36,28 +36,34 @@ class RunPlan:
 PYTHON_GUI_IMAGE = "atlas-python-gui:workspace1"
 LEGACY_PYTHON_GUI_IMAGES = ("atlas-python-gui:latest",)
 PYTHON_GUI_MARKERS = (
-    "pygame",
-    "tkinter",
-    "turtle",
-    "PyQt5",
-    "PyQt6",
-    "PySide2",
-    "PySide6",
-    "wx",
-    "kivy",
-    "matplotlib.pyplot",
-    "plt.show",
+    r"\bpygame\.display\.set_mode\s*\(",
+    r"\bTk\s*\(",
+    r"\btk\.Tk\s*\(",
+    r"\btkinter\.Tk\s*\(",
+    r"\bttkbootstrap\.Window\s*\(",
+    r"\bturtle\.(Screen|done|mainloop)\s*\(",
+    r"\bQApplication\s*\(",
+    r"\bwx\.App\s*\(",
+    r"\bApp\s*\(\)\.run\s*\(",
+    r"\bplt\.show\s*\(",
+    r"\bmatplotlib\.pyplot\.show\s*\(",
 )
 NOVNC_CONTAINER_PORT = 6080
 
 
 def _python_gui_detected(code: str) -> bool:
-    lowered = code
+    if _python_gui_args(code):
+        return True
     for marker in PYTHON_GUI_MARKERS:
-        pattern = rf"(?:^|[^A-Za-z0-9_]){re.escape(marker)}(?:[^A-Za-z0-9_]|$)"
-        if re.search(pattern, lowered):
+        if re.search(marker, code):
             return True
     return False
+
+
+def _python_gui_args(code: str) -> list[str]:
+    if re.search(r"add_argument\s*\([^)]*['\"]--gui['\"]", code, re.DOTALL):
+        return ["--gui"]
+    return []
 
 
 def _reserve_host_port() -> int:
@@ -424,6 +430,8 @@ def _remove_legacy_python_gui_images() -> None:
 
 def _python_gui_plan(code: str) -> RunPlan:
     novnc_host_port = _reserve_host_port()
+    gui_args = " ".join(_python_gui_args(code))
+    gui_args_suffix = f" {gui_args}" if gui_args else ""
     install_script = (
         "set -e; cp /work/main.py /tmp/main.py; cd /tmp; "
         "PY_IMPORTS=$(python - <<'PY'\n"
@@ -449,7 +457,7 @@ def _python_gui_plan(code: str) -> RunPlan:
         "); "
         "if [ -n \"$PY_IMPORTS\" ]; then echo \"[atlas-runner] installing: $PY_IMPORTS\"; pip install --quiet --no-input --disable-pip-version-check --root-user-action=ignore $PY_IMPORTS || true; fi; "
         "echo \"[atlas-runner] GUI ready on port 6080\"; "
-        "python -u /tmp/main.py"
+        f"python -u /tmp/main.py{gui_args_suffix}"
     )
     return RunPlan(
         image=PYTHON_GUI_IMAGE,

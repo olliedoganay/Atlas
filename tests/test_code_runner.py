@@ -97,11 +97,46 @@ class CodeRunnerPolicyTests(unittest.TestCase):
 
     def test_python_gui_plan_builds_image_on_demand(self) -> None:
         with patch("atlas_local.code_runner._ensure_python_gui_image") as ensure_image:
-            plan = resolve_plan("python", "import pygame\npygame.init()")
+            plan = resolve_plan("python", "import pygame\npygame.display.set_mode((400, 300))")
 
         ensure_image.assert_called_once()
         self.assertEqual(plan.image, PYTHON_GUI_IMAGE)
         self.assertTrue(plan.gui)
+
+    def test_tkinter_import_alone_does_not_force_gui_runner(self) -> None:
+        plan = resolve_plan("python", "import tkinter as tk\nprint('cli mode')")
+
+        self.assertEqual(plan.image, "python:3.12-slim")
+        self.assertFalse(plan.gui)
+
+    def test_direct_tkinter_window_uses_gui_runner(self) -> None:
+        with patch("atlas_local.code_runner._ensure_python_gui_image"):
+            plan = resolve_plan("python", "import tkinter\nroot = tkinter.Tk()\nroot.mainloop()")
+
+        self.assertEqual(plan.image, PYTHON_GUI_IMAGE)
+        self.assertTrue(plan.gui)
+
+    def test_python_gui_plan_passes_gui_flag_when_declared(self) -> None:
+        code = "\n".join(
+            [
+                "import argparse",
+                "import tkinter as tk",
+                "parser = argparse.ArgumentParser()",
+                "parser.add_argument('--gui', action='store_true')",
+                "args = parser.parse_args()",
+                "if args.gui:",
+                "    root = tk.Tk()",
+                "    root.mainloop()",
+                "else:",
+                "    print('cli mode')",
+            ],
+        )
+
+        with patch("atlas_local.code_runner._ensure_python_gui_image"):
+            plan = resolve_plan("python", code)
+
+        self.assertTrue(plan.gui)
+        self.assertIn("python -u /tmp/main.py --gui", plan.command[-1])
 
 
 if __name__ == "__main__":
