@@ -204,8 +204,6 @@ Runner behavior:
 
 ## Architecture and Security
 
-For the full threat model and protection boundaries, see [SECURITY.md](SECURITY.md).
-
 Atlas is built as a local desktop system:
 
 - The Tauri shell starts and manages a loopback-only backend.
