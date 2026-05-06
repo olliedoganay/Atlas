@@ -63,7 +63,7 @@ fn open_external_url(url: String) -> Result<(), String> {
 fn is_allowed_external_url(url: &str) -> bool {
     matches!(
         url,
-        "https://ollama.com/download" | "https://github.com/olliedoganay/Atlas"
+        "https://ollama.com/download" | "https://github.com/olliedoganay/Atlas.Chat"
     )
 }
 
