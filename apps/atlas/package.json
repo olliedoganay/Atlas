@@ -1,13 +1,13 @@
 {
   "name": "atlas-desktop",
   "private": true,
-  "version": "1.0.25",
+  "version": "1.0.26",
   "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "build:backend": "..\\..\\.venv\\Scripts\\python.exe ..\\..\\scripts\\build_atlas_backend.py",
+    "build:backend": "node ../../scripts/run_repo_python.mjs ../../scripts/build_atlas_backend.py",
     "build:release": "npm run build:backend && npm run build",
     "preview": "vite preview",
     "test": "vitest run",

@@ -2,12 +2,13 @@
 
 [![CI](https://github.com/olliedoganay/Atlas/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/olliedoganay/Atlas/actions/workflows/ci.yml)
 [![Windows release](https://github.com/olliedoganay/Atlas/actions/workflows/release-windows.yml/badge.svg)](https://github.com/olliedoganay/Atlas/actions/workflows/release-windows.yml)
+[![Linux release](https://github.com/olliedoganay/Atlas/actions/workflows/release-linux.yml/badge.svg)](https://github.com/olliedoganay/Atlas/actions/workflows/release-linux.yml)
 [![Latest release](https://img.shields.io/github/v/release/olliedoganay/Atlas?label=latest%20release)](https://github.com/olliedoganay/Atlas/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Atlas Chat is a local-first desktop app for working with local Ollama models. It provides a multi-thread chat workspace, profile-scoped memory, hardware-aware model discovery, run inspection, and a built-in code runner while keeping Atlas-managed state on the local machine.
 
-Current version: `1.0.25`
+Current version: `1.0.26`
 
 <p align="center">
   <img src="docs/assets/atlas-chat-workspace.png" alt="Atlas Chat workspace" style="max-width: 100%; height: auto;">
@@ -15,9 +16,9 @@ Current version: `1.0.25`
 
 ## Download
 
-For desktop Windows usage, install the packaged desktop release instead of running from source.
+For normal desktop usage, install the packaged desktop release instead of running from source.
 
-[Download the latest Windows MSI](https://github.com/olliedoganay/Atlas/releases/latest)
+[Download the latest release](https://github.com/olliedoganay/Atlas/releases/latest)
 
 ## Highlights
 
@@ -37,10 +38,12 @@ Atlas requires a local Ollama runtime. Docker is optional for chat, but required
 ## Install
 
 1. Open `https://github.com/olliedoganay/Atlas/releases/latest`.
-2. Download the current Windows x64 MSI installer.
+2. Download the installer for your platform:
+   - Windows: current x64 MSI installer.
+   - Linux: current x64 `.deb` package or AppImage.
 3. Install and launch `Atlas Chat`.
 
-Atlas Chat does not currently publish macOS or Linux installers. Use the source workflow on those platforms.
+Atlas Chat does not currently publish macOS installers. Use the source workflow on macOS.
 
 ## Requirements
 
@@ -62,8 +65,8 @@ python -m venv .venv
 pip install -r requirements.txt
 pip install -e .
 Copy-Item .env.example .env
-# Pull any chat model you prefer. This is only an example.
-ollama pull llama3.1:8b
+# Pull any chat model you prefer.
+ollama pull gpt-oss:20b
 ollama pull nomic-embed-text:latest
 Set-Location apps\atlas
 npm install
@@ -78,8 +81,8 @@ source .venv/bin/activate
 pip install -r requirements.txt
 pip install -e .
 cp .env.example .env
-# Pull any chat model you prefer. This is only an example.
-ollama pull llama3.1:8b
+# Pull any chat model you prefer.
+ollama pull gpt-oss:20b
 ollama pull nomic-embed-text:latest
 cd apps/atlas
 npm install
@@ -244,6 +247,8 @@ apps\atlas\src-tauri\target\release\bundle\
 ```
 
 Atlas builds MSI as the canonical Windows installer. The Windows release workflow publishes MSI artifacts only.
+
+Linux release bundles are built on GitHub Actions with the `release-linux` workflow. It publishes `.deb` and AppImage artifacts for tagged releases.
 
 ## Repository Layout
 

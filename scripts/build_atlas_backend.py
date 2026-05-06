@@ -70,12 +70,13 @@ def main() -> int:
     try:
         subprocess.run(command, check=True, cwd=repo_root)
 
-        built_backend_exe = dist_root / "atlas-backend.exe"
-        if not built_backend_exe.exists():
-            raise RuntimeError(f"Backend build output was not created: {built_backend_exe}")
+        backend_binary_name = "atlas-backend.exe" if sys.platform == "win32" else "atlas-backend"
+        built_backend = dist_root / backend_binary_name
+        if not built_backend.exists():
+            raise RuntimeError(f"Backend build output was not created: {built_backend}")
 
         backend_resource_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(built_backend_exe, backend_resource_dir / "atlas-backend.exe")
+        shutil.copy2(built_backend, backend_resource_dir / backend_binary_name)
         shutil.copytree(repo_root / "prompts", prompt_resource_dir, dirs_exist_ok=True)
         _wait_for_tree_ready(backend_resource_dir)
         # Windows can briefly hold newly copied native extension files while

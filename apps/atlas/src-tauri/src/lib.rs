@@ -368,12 +368,22 @@ fn backend_command(
 fn packaged_sidecar(app: &AppHandle) -> Option<(PathBuf, PathBuf)> {
     let resource_dir = app.path().resource_dir().ok()?;
     for asset_root in [resource_dir.clone(), resource_dir.join("resources")] {
-        let sidecar = asset_root.join("backend").join("atlas-backend.exe");
-        if sidecar.exists() {
-            return Some((sidecar, asset_root));
+        for binary_name in packaged_backend_binary_names() {
+            let sidecar = asset_root.join("backend").join(binary_name);
+            if sidecar.exists() {
+                return Some((sidecar, asset_root));
+            }
         }
     }
     None
+}
+
+fn packaged_backend_binary_names() -> &'static [&'static str] {
+    if cfg!(windows) {
+        &["atlas-backend.exe", "atlas-backend"]
+    } else {
+        &["atlas-backend", "atlas-backend.exe"]
+    }
 }
 
 fn repo_root() -> Result<PathBuf, String> {
