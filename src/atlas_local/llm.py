@@ -270,19 +270,6 @@ def _context_from_show_payload(payload: dict[str, Any]) -> int | None:
                 parsed = _parse_positive_int(value)
                 if parsed:
                     return parsed
-
-    model_info = payload.get("model_info", {})
-    if isinstance(model_info, dict):
-        preferred_key = next((key for key in model_info if key.endswith(".context_length")), None)
-        if preferred_key:
-            parsed = _parse_positive_int(model_info.get(preferred_key))
-            if parsed:
-                return parsed
-        fallback_key = next((key for key in model_info if key.endswith(".original_context_length")), None)
-        if fallback_key:
-            parsed = _parse_positive_int(model_info.get(fallback_key))
-            if parsed:
-                return parsed
     return None
 
 

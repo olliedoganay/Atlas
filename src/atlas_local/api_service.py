@@ -1241,6 +1241,7 @@ class AtlasBackendService:
             )
             compaction = self._manual_compact_context(state=state, runtime=runtime)
             state.update(compaction)
+            manual_compaction_status = str(compaction.get("manual_compaction_status", "") or "")
             updated_compacted_count = int(state.get("compacted_message_count", 0) or 0)
             representation_tokens_after = self._count_thread_representation_tokens(
                 model=chat_model,
@@ -1249,9 +1250,20 @@ class AtlasBackendService:
                 compacted_message_count=updated_compacted_count,
             )
             if updated_compacted_count <= prior_compacted_count:
-                raise RuntimeError("This thread does not have enough older context to compact yet.")
+                if manual_compaction_status == "summary_too_large":
+                    raise RuntimeError(
+                        "Manual compact could not reduce this thread: the generated summary would be larger than "
+                        "the messages it replaces."
+                    )
+                raise RuntimeError(
+                    "Manual compact skipped: only the most recent messages remain raw, so there is no older "
+                    "context to compact."
+                )
             if representation_tokens_after >= representation_tokens_before:
-                raise RuntimeError("Manual compact would not reduce the current thread context.")
+                raise RuntimeError(
+                    "Manual compact could not reduce this thread: the generated summary would be larger than "
+                    "the messages it replaces."
+                )
 
             self._persist_compaction_event(
                 run_id=run_id,
@@ -1508,32 +1520,14 @@ class AtlasBackendService:
         updated_summary = str(state.get("thread_summary", "") or "")
         compacted_count = max(0, min(int(state.get("compacted_message_count", 0) or 0), len(all_messages)))
         remaining_messages = all_messages[compacted_count:]
+        no_change_payload = {
+            "thread_summary": updated_summary,
+            "compacted_message_count": compacted_count,
+            "detected_context_window": effective_context_window,
+            "manual_compaction_status": "nothing_to_compact",
+        }
         if len(remaining_messages) <= 2:
-            return {
-                "thread_summary": updated_summary,
-                "compacted_message_count": compacted_count,
-                "detected_context_window": effective_context_window,
-            }
-
-        recent_window = min(8, max(2, len(remaining_messages) // 2))
-        cutoff = len(all_messages) - recent_window
-        if cutoff <= compacted_count:
-            return {
-                "thread_summary": updated_summary,
-                "compacted_message_count": compacted_count,
-                "detected_context_window": effective_context_window,
-            }
-
-        batch_messages, consumed = _select_messages_for_compaction(
-            all_messages[compacted_count:cutoff],
-            max_chars=max(6000, int(max(effective_context_window, 1024) * 3)),
-        )
-        if not batch_messages or consumed <= 0:
-            return {
-                "thread_summary": updated_summary,
-                "compacted_message_count": compacted_count,
-                "detected_context_window": effective_context_window,
-            }
+            return no_change_payload
 
         current_representation_tokens = self._count_thread_representation_tokens(
             model=runtime.context.chat_model,
@@ -1541,29 +1535,60 @@ class AtlasBackendService:
             thread_summary=updated_summary,
             compacted_message_count=compacted_count,
         )
-        proposed_summary = self._summarize_message_batch(
-            model=runtime.context.chat_model,
-            existing_summary=updated_summary,
-            messages=batch_messages,
-        )
-        proposed_compacted_count = compacted_count + consumed
-        proposed_representation_tokens = self._count_thread_representation_tokens(
-            model=runtime.context.chat_model,
-            messages=all_messages,
-            thread_summary=proposed_summary,
-            compacted_message_count=proposed_compacted_count,
-        )
-        if proposed_representation_tokens >= current_representation_tokens:
+        attempted_summary = False
+        attempted_consumed_counts: set[int] = set()
+        max_chars = max(6000, int(max(effective_context_window, 1024) * 3))
+        for recent_window in _manual_compaction_recent_windows(
+            total_message_count=len(all_messages),
+            compacted_message_count=compacted_count,
+        ):
+            cutoff = len(all_messages) - recent_window
+            if cutoff <= compacted_count:
+                continue
+            batch_messages, consumed = _select_messages_for_compaction(
+                all_messages[compacted_count:cutoff],
+                max_chars=max_chars,
+            )
+            if not batch_messages or consumed <= 0 or consumed in attempted_consumed_counts:
+                continue
+            attempted_consumed_counts.add(consumed)
+            attempted_summary = True
+            replacement_tokens = self._count_messages_tokens(
+                model=runtime.context.chat_model,
+                messages=batch_messages,
+            )
+            proposed_summary = self._summarize_message_batch(
+                model=runtime.context.chat_model,
+                existing_summary=updated_summary,
+                messages=batch_messages,
+                target_words=_summary_target_words(
+                    existing_summary=updated_summary,
+                    messages=batch_messages,
+                    replacement_tokens=replacement_tokens,
+                    effective_context_window=effective_context_window,
+                ),
+            )
+            proposed_compacted_count = compacted_count + consumed
+            proposed_representation_tokens = self._count_thread_representation_tokens(
+                model=runtime.context.chat_model,
+                messages=all_messages,
+                thread_summary=proposed_summary,
+                compacted_message_count=proposed_compacted_count,
+            )
+            if proposed_representation_tokens < current_representation_tokens:
+                return {
+                    "thread_summary": proposed_summary,
+                    "compacted_message_count": proposed_compacted_count,
+                    "detected_context_window": effective_context_window,
+                    "manual_compaction_status": "compacted",
+                }
+
+        if attempted_summary:
             return {
-                "thread_summary": updated_summary,
-                "compacted_message_count": compacted_count,
-                "detected_context_window": effective_context_window,
+                **no_change_payload,
+                "manual_compaction_status": "summary_too_large",
             }
-        return {
-            "thread_summary": proposed_summary,
-            "compacted_message_count": proposed_compacted_count,
-            "detected_context_window": effective_context_window,
-        }
+        return no_change_payload
 
     def _summarize_message_batch(
         self,
@@ -1571,10 +1596,12 @@ class AtlasBackendService:
         model: str,
         existing_summary: str,
         messages: list[HumanMessage | AIMessage],
+        target_words: int | None = None,
     ) -> str:
         transcript = _render_messages_for_summary(messages)
         if not transcript:
             return existing_summary
+        word_limit = _normalized_summary_word_limit(target_words)
 
         prompt_parts = [
             "Merge the earlier part of this conversation into a compact working summary that preserves exact details needed to continue the thread correctly.",
@@ -1584,7 +1611,7 @@ class AtlasBackendService:
             "Do not replace specific details with vague phrases like 'details were discussed' or 'a plan was outlined'.",
             "If the conversation contains creative work, preserve concrete canon details such as character names, relationships, settings, episode labels, plot beats, tone, style, and production constraints.",
             "Use short bullets under these headings when relevant: Current objective, Durable facts, Decisions and constraints, Code and file references, Open tasks, Canon details.",
-            "Keep it concise but detail-dense. Stay under 520 words.",
+            f"Keep it concise but detail-dense. Stay under {word_limit} words and make the merged summary shorter than the existing summary plus the new chunk it replaces.",
         ]
         if existing_summary.strip():
             prompt_parts.append("\nExisting summary:\n" + existing_summary.strip())
@@ -1795,6 +1822,40 @@ def _estimate_thread_representation_tokens(
             [SystemMessage(content=f"Conversation summary from earlier in this thread:\n{summary}")]
         )
     return total
+
+
+def _manual_compaction_recent_windows(
+    *,
+    total_message_count: int,
+    compacted_message_count: int,
+) -> list[int]:
+    remaining_count = max(0, int(total_message_count or 0) - max(0, int(compacted_message_count or 0)))
+    if remaining_count <= 2:
+        return []
+    initial_window = min(8, max(4, int(total_message_count or 0) // 2))
+    return list(range(initial_window, 1, -1))
+
+
+def _summary_target_words(
+    *,
+    existing_summary: str,
+    messages: list[HumanMessage | AIMessage],
+    replacement_tokens: int,
+    effective_context_window: int,
+) -> int:
+    replacement_word_count = len(_render_messages_for_summary(messages).split()) + len(existing_summary.split())
+    replacement_word_cap = max(40, replacement_word_count - 1) if replacement_word_count > 1 else 160
+    token_budget_words = max(40, int(max(1, replacement_tokens) * 0.55))
+    context_budget_words = max(80, int(max(effective_context_window, 1024) * 0.08))
+    return _normalized_summary_word_limit(
+        min(replacement_word_cap, token_budget_words, context_budget_words)
+    )
+
+
+def _normalized_summary_word_limit(target_words: int | None) -> int:
+    if target_words is None:
+        return 520
+    return max(40, min(520, int(target_words or 0)))
 
 
 def _select_messages_for_compaction(

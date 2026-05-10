@@ -1021,7 +1021,13 @@ class ManualCompactionTests(unittest.TestCase):
         service = AtlasBackendService.__new__(AtlasBackendService)
         summarized_batches: list[list[HumanMessage | AIMessage]] = []
 
-        def summarize_message_batch(*, model: str, existing_summary: str, messages: list[HumanMessage | AIMessage]) -> str:
+        def summarize_message_batch(
+            *,
+            model: str,
+            existing_summary: str,
+            messages: list[HumanMessage | AIMessage],
+            target_words: int | None = None,
+        ) -> str:
             summarized_batches.append(messages)
             return "manual summary"
 
@@ -1049,6 +1055,7 @@ class ManualCompactionTests(unittest.TestCase):
 
         self.assertEqual(result["thread_summary"], "manual summary")
         self.assertGreater(result["compacted_message_count"], 0)
+        self.assertEqual(result["manual_compaction_status"], "compacted")
         self.assertEqual(len(summarized_batches), 1)
 
         before_tokens = _estimate_thread_representation_tokens(
@@ -1062,6 +1069,59 @@ class ManualCompactionTests(unittest.TestCase):
             compacted_message_count=result["compacted_message_count"],
         )
         self.assertLess(after_tokens, before_tokens)
+
+    def test_manual_compact_context_retries_wider_batch_when_first_summary_does_not_reduce(self) -> None:
+        service = AtlasBackendService.__new__(AtlasBackendService)
+        summarized_batch_sizes: list[int] = []
+        target_word_limits: list[int | None] = []
+
+        def summarize_message_batch(
+            *,
+            model: str,
+            existing_summary: str,
+            messages: list[HumanMessage | AIMessage],
+            target_words: int | None = None,
+        ) -> str:
+            summarized_batch_sizes.append(len(messages))
+            target_word_limits.append(target_words)
+            if len(messages) < 4:
+                return "oversized manual summary " * 1000
+            return "tight summary"
+
+        service.app = SimpleNamespace(
+            llm_provider=SimpleNamespace(
+                count_message_tokens=lambda _model, messages: sum(
+                    len(str(message.content)) // 4 + 8 for message in messages
+                ),
+            )
+        )
+        service._summarize_message_batch = summarize_message_batch
+        state = {
+            "messages": [
+                HumanMessage(content="u1" * 1000),
+                AIMessage(content="a1" * 1000),
+                HumanMessage(content="u2" * 1000),
+                AIMessage(content="a2" * 1000),
+                HumanMessage(content="latest"),
+                AIMessage(content="answer"),
+            ],
+            "thread_summary": "",
+            "compacted_message_count": 0,
+        }
+        runtime = SimpleNamespace(
+            context=SimpleNamespace(
+                effective_context_window=4096,
+                chat_model="gemma4:e4b",
+            )
+        )
+
+        result = AtlasBackendService._manual_compact_context(service, state=state, runtime=runtime)
+
+        self.assertEqual(summarized_batch_sizes, [2, 3, 4])
+        self.assertTrue(all(limit is not None and limit < 520 for limit in target_word_limits))
+        self.assertEqual(result["thread_summary"], "tight summary")
+        self.assertEqual(result["compacted_message_count"], 4)
+        self.assertEqual(result["manual_compaction_status"], "compacted")
 
     def test_manual_compact_context_rejects_non_reducing_summary(self) -> None:
         service = AtlasBackendService.__new__(AtlasBackendService)
@@ -1096,6 +1156,7 @@ class ManualCompactionTests(unittest.TestCase):
 
         self.assertEqual(result["thread_summary"], "")
         self.assertEqual(result["compacted_message_count"], 0)
+        self.assertEqual(result["manual_compaction_status"], "summary_too_large")
 
     def test_execute_compact_run_persists_manual_timeline_event(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1205,7 +1266,62 @@ class ManualCompactionTests(unittest.TestCase):
 
             stored = store.get_run(artifact["run_id"])
             self.assertEqual(stored["status"], "failed")
-            self.assertIn("does not have enough older context", stored["error"])
+            self.assertIn("no older context to compact", stored["error"])
+
+    def test_execute_compact_run_reports_non_reducing_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = load_config(project_root=Path(temp_dir), env={})
+            store = RunStore(config)
+            service = AtlasBackendService(
+                config=config,
+                app=SimpleNamespace(
+                    llm_provider=SimpleNamespace(
+                        abort_active_requests=lambda: None,
+                        effective_context_window=lambda _model: 4096,
+                    ),
+                    graph=SimpleNamespace(update_state=lambda *_args, **_kwargs: None),
+                    close=lambda: None,
+                ),
+                run_store=store,
+                run_hub=RunHub(),
+            )
+            service._summarize_message_batch = lambda **_: "oversized manual summary " * 1000  # type: ignore[method-assign]
+            service._get_snapshot = lambda **_: SimpleNamespace(
+                values={
+                    "messages": [
+                        HumanMessage(content="u1" * 1000),
+                        AIMessage(content="a1" * 1000),
+                        HumanMessage(content="u2" * 1000),
+                        AIMessage(content="a2" * 1000),
+                        HumanMessage(content="latest"),
+                        AIMessage(content="answer"),
+                    ],
+                    "thread_summary": "",
+                    "compacted_message_count": 0,
+                    "timeline_events": [],
+                }
+            )
+
+            artifact = store.create_run(
+                mode="compact",
+                user_id="research_user",
+                thread_id="main",
+                chat_model="gemma4:e4b",
+                temperature=0.0,
+                prompt="",
+                status="running",
+            )
+
+            service._execute_compact_run(
+                run_id=artifact["run_id"],
+                user_id="research_user",
+                thread_id="main",
+                chat_model="gemma4:e4b",
+            )
+
+            stored = store.get_run(artifact["run_id"])
+            self.assertEqual(stored["status"], "failed")
+            self.assertIn("generated summary would be larger than the messages it replaces", stored["error"])
 
 
 class QueuedExecutionTests(unittest.TestCase):
