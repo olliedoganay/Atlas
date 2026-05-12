@@ -8,7 +8,7 @@
 
 Atlas Chat is a local-first desktop app for working with local Ollama models. It provides a multi-thread chat workspace, profile-scoped memory, hardware-aware model discovery, run inspection, and a built-in code runner while keeping Atlas-managed state on the local machine.
 
-Current version: `1.0.29`
+Current version: `1.0.30`
 
 <p align="center">
   <img src="docs/assets/atlas-chat-workspace.png" alt="Atlas Chat workspace" style="max-width: 100%; height: auto;">
@@ -231,6 +231,14 @@ Optional flags:
 - `-SkipFrontend`
 
 Plain `pytest` from the repo root is also safe because test discovery is scoped to `tests/`.
+
+Before cutting a release tag, bump every checked manifest together:
+
+```powershell
+.venv\Scripts\python.exe scripts\bump_atlas_version.py X.Y.Z
+```
+
+Omit the version argument to advance to the next patch version.
 
 Build the Windows MSI release bundle:
 

@@ -4104,48 +4104,74 @@ pre {
 
 .settings-about {
   display: grid;
-  gap: 14px;
+  gap: 16px;
   max-width: 920px;
 }
 
-.settings-about-hero {
+.settings-about-overview {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  gap: 24px;
-  padding: 16px 0 18px;
+  gap: 16px;
+  padding: 18px 0;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
 }
 
-.settings-about-hero-copy {
+.settings-about-product {
   display: grid;
-  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 14px;
   min-width: 0;
 }
 
-.settings-about-hero-copy h3 {
+.settings-about-logo {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+}
+
+.settings-about-copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.settings-about-copy h3 {
   margin: 0;
   font-family: "Space Grotesk", sans-serif;
-  font-size: 1.45rem;
-  line-height: 1.12;
+  font-size: 1.25rem;
+  line-height: 1.15;
 }
 
-.settings-about-hero-copy p:not(.eyebrow) {
+.settings-about-copy p:not(.eyebrow) {
   margin: 0;
-  max-width: 680px;
+  max-width: 720px;
   color: var(--muted);
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
-.settings-about-release {
+.settings-about-status-grid {
   display: grid;
-  gap: 4px;
-  min-width: 136px;
-  text-align: right;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--border);
 }
 
-.settings-about-release span {
+.settings-about-status-item {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 12px 14px;
+  border-right: 1px solid var(--border);
+  background: var(--surface-muted);
+}
+
+.settings-about-status-item:last-child {
+  border-right: 0;
+}
+
+.settings-about-status-item span {
   color: var(--muted);
   font-size: 0.72rem;
   font-weight: 700;
@@ -4153,33 +4179,38 @@ pre {
   text-transform: uppercase;
 }
 
-.settings-about-release strong {
+.settings-about-status-item strong {
+  min-width: 0;
+  overflow: hidden;
   font-family: "Space Grotesk", sans-serif;
-  font-size: 1.12rem;
+  font-size: 1rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.settings-about-rows .settings-row > span {
-  max-width: 340px;
+.settings-about-status-item p {
+  margin: 0;
+  min-width: 0;
   overflow: hidden;
-  color: var(--text);
-  text-align: right;
+  color: var(--muted);
+  font-size: var(--text-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 @media (max-width: 920px) {
-  .settings-about-hero {
+  .settings-about-status-grid {
     grid-template-columns: 1fr;
   }
 
-  .settings-about-release {
-    min-width: 0;
-    text-align: left;
+  .settings-about-status-item {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
   }
 
-  .settings-about-rows .settings-row > span {
-    max-width: 100%;
-    text-align: left;
+  .settings-about-status-item:last-child {
+    border-bottom: 0;
   }
 }
 
@@ -5266,7 +5297,8 @@ pre {
 :root[data-theme] .discovery-panel,
 :root[data-theme] .discovery-model-row,
 :root[data-theme] .discovery-installed-card,
-:root[data-theme] .settings-about-hero,
+:root[data-theme] .settings-about-overview,
+:root[data-theme] .settings-about-status-item,
 :root[data-theme] .settings-user-card,
 :root[data-theme] .settings-memory-card,
 :root[data-theme] .message-bubble,

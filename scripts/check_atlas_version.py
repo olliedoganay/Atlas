@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import tomllib
 from pathlib import Path
 
@@ -19,17 +20,43 @@ def _normalize_tag(tag: str) -> str:
 
 def _load_versions(repo_root: Path) -> dict[str, str]:
     package_json = json.loads((repo_root / "apps" / "atlas" / "package.json").read_text(encoding="utf-8"))
+    package_lock = json.loads((repo_root / "apps" / "atlas" / "package-lock.json").read_text(encoding="utf-8"))
     tauri_conf = json.loads(
         (repo_root / "apps" / "atlas" / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8")
     )
     cargo_toml = tomllib.loads((repo_root / "apps" / "atlas" / "src-tauri" / "Cargo.toml").read_text(encoding="utf-8"))
+    cargo_lock = (repo_root / "apps" / "atlas" / "src-tauri" / "Cargo.lock").read_text(encoding="utf-8")
     pyproject = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
+    readme = (repo_root / "README.md").read_text(encoding="utf-8")
+    cargo_lock_version = _cargo_lock_package_version(cargo_lock, package_name="atlas-desktop")
+    readme_version = _readme_current_version(readme)
     return {
         "package.json": str(package_json["version"]).strip(),
+        "package-lock.json": str(package_lock["version"]).strip(),
+        "package-lock.json packages[\"\"]": str(package_lock["packages"][""]["version"]).strip(),
         "tauri.conf.json": str(tauri_conf["version"]).strip(),
         "Cargo.toml": str(cargo_toml["package"]["version"]).strip(),
+        "Cargo.lock atlas-desktop": cargo_lock_version,
         "pyproject.toml": str(pyproject["project"]["version"]).strip(),
+        "README.md": readme_version,
     }
+
+
+def _cargo_lock_package_version(content: str, *, package_name: str) -> str:
+    match = re.search(
+        rf'(?ms)^\[\[package\]\]\s+name = "{re.escape(package_name)}"\s+version = "([^"]+)"',
+        content,
+    )
+    if not match:
+        raise SystemExit(f"Could not find {package_name!r} in Cargo.lock.")
+    return match.group(1).strip()
+
+
+def _readme_current_version(content: str) -> str:
+    match = re.search(r"(?m)^Current version: `([^`]+)`$", content)
+    if not match:
+        raise SystemExit("Could not find README current version line.")
+    return match.group(1).strip()
 
 
 def main() -> int:

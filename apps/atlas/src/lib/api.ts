@@ -60,6 +60,7 @@ export type StoredMemory = {
 export type BackendStatus = {
   status: string;
   product_name: string;
+  version?: string;
   backend: string;
   default_chat_temperature: number | null;
   chat_temperature: number | null;

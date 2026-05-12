@@ -35,6 +35,7 @@ from .security import (
 )
 from .session import scoped_thread_id
 from .text_normalization import MojibakeRepairStream
+from .version import atlas_version
 
 
 @dataclass
@@ -116,6 +117,7 @@ class AtlasBackendService:
         return {
             "status": "ok",
             "product_name": "Atlas Chat",
+            "version": atlas_version(),
             "backend": "Atlas Chat local runtime",
             "default_chat_temperature": self.config.chat_temperature,
             "chat_temperature": self.config.chat_temperature,

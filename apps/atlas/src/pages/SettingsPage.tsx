@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Database,
+  ExternalLink,
   Info,
   Lock,
   Monitor,
@@ -22,6 +22,7 @@ import { Chip, ChipList } from "../components/ui/Chip";
 import { EmptyState } from "../components/ui/EmptyState";
 import { SettingsRow } from "../components/ui/SettingsRow";
 import { StatusPill } from "../components/ui/StatusPill";
+import packageInfo from "../../package.json";
 import {
   createMemory,
   createUser,
@@ -32,6 +33,7 @@ import {
   getStatus,
   getUsers,
   lockUser,
+  openExternalUrl,
   resetAll,
   unlockUser,
 } from "../lib/api";
@@ -67,7 +69,7 @@ export function SettingsPage() {
   const [pendingDeleteUserId, setPendingDeleteUserId] = useState<string | null>(null);
   const [unlockTargetUserId, setUnlockTargetUserId] = useState<string | null>(null);
   const [unlockPassword, setUnlockPassword] = useState("");
-  const [appVersion, setAppVersion] = useState("1.0.11");
+  const [appVersion, setAppVersion] = useState(packageInfo.version);
   const { data: status } = useQuery({
     queryKey: ["status"],
     queryFn: getStatus,
@@ -156,18 +158,11 @@ export function SettingsPage() {
   ]);
 
   useEffect(() => {
-    let cancelled = false;
-    void getVersion()
-      .then((version) => {
-        if (!cancelled && version.trim()) {
-          setAppVersion(version.trim());
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    const backendVersion = status?.version?.trim();
+    if (backendVersion) {
+      setAppVersion(backendVersion);
+    }
+  }, [status?.version]);
 
   const allReset = useMutation({
     mutationFn: resetAll,
@@ -314,7 +309,7 @@ export function SettingsPage() {
           ? "Local services Atlas Chat depends on."
           : section === "data"
             ? "Storage protection, reset controls, and manual memory."
-            : "Product identity and release details.";
+            : "Version, runtime status, and local data boundaries.";
 
   return (
     <div className="settings-page">
@@ -817,30 +812,76 @@ export function SettingsPage() {
 
           {section === "about" ? (
             <div className="settings-about">
-              <section className="settings-about-hero" aria-labelledby="about-product-title">
-                <div className="settings-about-hero-copy">
-                  <p className="eyebrow">Atlas Chat Desktop</p>
-                  <h3 id="about-product-title">{status?.product_name || "Atlas Chat"}</h3>
-                  <p>
-                    A local-first desktop app for private chats with local Ollama models. Includes profile-scoped memory,
-                    hardware-aware model discovery, and a sandboxed code runner.
-                  </p>
+              <section className="settings-about-overview" aria-labelledby="about-product-title">
+                <div className="settings-about-product">
+                  <img alt="" className="settings-about-logo" src="/AtlasLogo.png" />
+                  <div className="settings-about-copy">
+                    <p className="eyebrow">Desktop application</p>
+                    <h3 id="about-product-title">{status?.product_name || "Atlas Chat"}</h3>
+                    <p>
+                      Workspace for local Ollama models with profile-scoped chats, local memory, model discovery,
+                      diagnostics, and code execution support.
+                    </p>
+                  </div>
                 </div>
-                <div className="settings-about-release">
-                  <span>Current version</span>
-                  <strong>{`v${appVersion}`}</strong>
+
+                <div className="settings-about-status-grid" aria-label="Application status">
+                  <div className="settings-about-status-item">
+                    <span>Version</span>
+                    <strong>{`v${appVersion}`}</strong>
+                    <p>Application</p>
+                  </div>
+                  <div className="settings-about-status-item">
+                    <span>Backend</span>
+                    <strong>{status ? "Online" : "Unavailable"}</strong>
+                    <p>{status?.runtime_mode || "Waiting for runtime"}</p>
+                  </div>
+                  <div className="settings-about-status-item">
+                    <span>Ollama</span>
+                    <strong>{models?.ollama_online ? "Connected" : "Not running"}</strong>
+                    <p>
+                      {models?.ollama_online
+                        ? `${models.models.length} chat model${models.models.length === 1 ? "" : "s"} installed`
+                        : "Local model service"}
+                    </p>
+                  </div>
                 </div>
               </section>
 
               <div className="settings-rows settings-about-rows">
-                <SettingsRow label="Privacy model" description="Chats, saved runs, and memory live on this device.">
-                  <Chip intent="muted">Stored locally</Chip>
+                <SettingsRow
+                  label="Data boundary"
+                  description="Profiles, chats, saved runs, and memory are stored under Atlas-managed local data folders."
+                >
+                  <Chip intent="muted">Local device</Chip>
                 </SettingsRow>
-                <SettingsRow label="Updates" description="New versions ship as Windows MSI installers.">
-                  <Chip intent="muted">MSI</Chip>
+
+                <SettingsRow
+                  label="Storage protection"
+                  description={
+                    allDataEncrypted
+                      ? "Run files, SQLite state, and local vector storage report at-rest protection on this machine."
+                      : "Some local stores report without at-rest protection in the current runtime."
+                  }
+                >
+                  <StatusPill intent={allDataEncrypted ? "ok" : "warn"}>
+                    {allDataEncrypted ? "Protected" : "Review"}
+                  </StatusPill>
                 </SettingsRow>
-                <SettingsRow label="License" description="Open source under MIT. Brand and trademark are not licensed.">
+
+                <SettingsRow label="License" description="Application source is MIT licensed. Brand and trademark rights are separate.">
                   <Chip intent="muted">MIT</Chip>
+                </SettingsRow>
+
+                <SettingsRow label="Project" description="Open the public repository for source, issues, and release notes.">
+                  <button
+                    className="ghost-button compact-button"
+                    onClick={() => void openExternalUrl("https://github.com/olliedoganay/Atlas.Chat")}
+                    type="button"
+                  >
+                    <ExternalLink size={14} />
+                    GitHub
+                  </button>
                 </SettingsRow>
               </div>
             </div>
