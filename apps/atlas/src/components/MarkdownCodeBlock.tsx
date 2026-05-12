@@ -46,9 +46,16 @@ export function MarkdownCodeBlock({ code, language }: MarkdownCodeBlockProps) {
   const runnable = resolveRunnableLanguage(language);
 
   const copy = async () => {
-    await navigator.clipboard.writeText(code);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1200);
+    try {
+      if (!navigator.clipboard?.writeText) {
+        return;
+      }
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      // Clipboard access can be denied in browser preview or locked-down desktop contexts.
+    }
   };
 
   const run = async () => {

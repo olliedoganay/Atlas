@@ -16,7 +16,17 @@ import {
 import { type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
-import { duplicateThread, getModels, getStatus, getThreads, getUsers, resetThread, restartManagedBackend, type ThreadSummary } from "../lib/api";
+import {
+  duplicateThread,
+  getModels,
+  getStatus,
+  getThreads,
+  getUsers,
+  resetThread,
+  restartManagedBackend,
+  type ThreadSummary,
+  type UserSummary,
+} from "../lib/api";
 import { ChatSearchDialog } from "./ChatSearchDialog";
 import { FirstRunWizard } from "./FirstRunWizard";
 import { ProfileMenu } from "./ProfileMenu";
@@ -25,6 +35,7 @@ import { RunStreamCoordinator } from "./RunStreamCoordinator";
 import { useAtlasStore } from "../store/useAtlasStore";
 import { useBackendPhase } from "../lib/backendPhase";
 import { resolveStartupState } from "../lib/startupState";
+import { PROFILE_SETTINGS_PATH } from "../lib/settingsSections";
 import { displayThreadTitle, editableThreadTitle, threadInitial } from "../lib/threadTitles";
 
 const navigation = [
@@ -203,6 +214,9 @@ export function AtlasShell() {
   }, [threads]);
 
   const displayThreadItems = useMemo(() => {
+    if (!currentUserId || currentUserLocked) {
+      return [];
+    }
     if (!currentThreadId || threadItems.some((item) => item.thread_id === currentThreadId)) {
       return threadItems;
     }
@@ -220,7 +234,15 @@ export function AtlasShell() {
       },
       ...threadItems,
     ];
-  }, [currentThreadId, currentThreadTitle, currentUserId, draftThreadModel, draftThreadTemperature, threadItems]);
+  }, [
+    currentThreadId,
+    currentThreadTitle,
+    currentUserId,
+    currentUserLocked,
+    draftThreadModel,
+    draftThreadTemperature,
+    threadItems,
+  ]);
 
   useEffect(() => {
     if (usersFetched && currentUserId && !currentUserProfile) {
@@ -352,7 +374,7 @@ export function AtlasShell() {
 
   const handleProfileUnlock = (_userId: string) => {
     setIsSearchOpen(false);
-    navigate("/settings");
+    navigate(PROFILE_SETTINGS_PATH);
   };
 
   const showFirstRun =
@@ -463,14 +485,16 @@ export function AtlasShell() {
                                 <Copy size={14} />
                               </button>
                             ) : null}
-                            <button
-                              aria-label={`Delete ${displayThreadTitle(thread)}`}
-                              className="ghost-button icon-button thread-card-delete"
-                              onClick={() => setThreadToDelete(thread)}
-                              type="button"
-                            >
-                              <X size={14} />
-                            </button>
+                            {persistedThread ? (
+                              <button
+                                aria-label={`Delete ${displayThreadTitle(thread)}`}
+                                className="ghost-button icon-button thread-card-delete"
+                                onClick={() => setThreadToDelete(thread)}
+                                type="button"
+                              >
+                                <X size={14} />
+                              </button>
+                            ) : null}
                             <button
                               className="thread-card-main"
                               onClick={() => selectThread(thread)}
@@ -574,6 +598,20 @@ export function AtlasShell() {
           ollamaOnline={Boolean(models?.ollama_online)}
           onDismiss={() => setFirstRunDismissed(true)}
           onProfileCreated={async (userId) => {
+            queryClient.setQueryData<UserSummary[]>(["users"], (current = []) => {
+              if (current.some((user) => user.user_id === userId)) {
+                return current;
+              }
+              return [
+                ...current,
+                {
+                  user_id: userId,
+                  protection: "passwordless",
+                  locked: false,
+                  updated_at: new Date().toISOString(),
+                },
+              ];
+            });
             await handleProfilePick(userId);
           }}
         />

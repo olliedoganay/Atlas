@@ -3,6 +3,7 @@ import { ChevronDown, Lock, Settings as SettingsIcon, Unlock, User } from "lucid
 import { useNavigate } from "react-router-dom";
 
 import type { UserSummary } from "../lib/api";
+import { PROFILE_SETTINGS_PATH } from "../lib/settingsSections";
 
 export function ProfileMenu({
   users,
@@ -66,7 +67,7 @@ export function ProfileMenu({
       {open ? (
         <div className="profile-menu-pop" role="menu">
           {users.length === 0 ? (
-            <div className="profile-menu-empty">No profiles yet. Create one in Settings.</div>
+            <div className="profile-menu-empty">No profiles yet. Create one in Profiles.</div>
           ) : (
             users.map((user) => {
               const isActive = user.user_id === currentUserId;
@@ -102,7 +103,7 @@ export function ProfileMenu({
             className="profile-menu-link"
             onClick={() => {
               setOpen(false);
-              navigate("/settings");
+              navigate(PROFILE_SETTINGS_PATH);
             }}
             role="menuitem"
             type="button"

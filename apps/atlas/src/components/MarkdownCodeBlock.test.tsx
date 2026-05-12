@@ -20,6 +20,7 @@ import { MarkdownCodeBlock } from "./MarkdownCodeBlock";
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
+const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(Navigator.prototype, "clipboard");
 
 function render(element: React.ReactElement) {
   container = document.createElement("div");
@@ -40,6 +41,12 @@ describe("MarkdownCodeBlock", () => {
     container?.remove();
     container = null;
     runnerMocks.openRunnerWindow.mockClear();
+    vi.restoreAllMocks();
+    if (originalClipboardDescriptor) {
+      Object.defineProperty(Navigator.prototype, "clipboard", originalClipboardDescriptor);
+    } else {
+      Reflect.deleteProperty(Navigator.prototype, "clipboard");
+    }
   });
 
   it("shows Run next to Copy for runnable code blocks", async () => {
@@ -67,4 +74,41 @@ describe("MarkdownCodeBlock", () => {
     expect(buttons).toHaveLength(1);
     expect(buttons[0].textContent).toContain("Copy");
   });
+
+  it("copies code when clipboard access is available", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    setClipboard({ writeText } as unknown as Clipboard);
+    const node = render(<MarkdownCodeBlock code="print('hello')" language="python" />);
+    const copyButton = Array.from(node.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Copy"),
+    );
+
+    await act(async () => {
+      copyButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(writeText).toHaveBeenCalledWith("print('hello')");
+    expect(copyButton?.textContent).toContain("Copied");
+  });
+
+  it("does not throw when clipboard access is unavailable", async () => {
+    setClipboard(undefined);
+    const node = render(<MarkdownCodeBlock code="print('hello')" language="python" />);
+    const copyButton = Array.from(node.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Copy"),
+    );
+
+    await act(async () => {
+      copyButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(copyButton?.textContent).toContain("Copy");
+  });
 });
+
+function setClipboard(value: Clipboard | undefined) {
+  Object.defineProperty(Navigator.prototype, "clipboard", {
+    configurable: true,
+    get: () => value,
+  });
+}

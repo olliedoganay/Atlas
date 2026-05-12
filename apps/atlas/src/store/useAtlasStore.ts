@@ -177,6 +177,7 @@ export const useAtlasStore = create<AtlasState>()(
       failRun: (message, userId, threadId) =>
         set((state) => ({
           currentRunId: null,
+          currentRunMode: null,
           activeRunUserId: userId ?? state.activeRunUserId,
           activeRunThreadId: threadId ?? state.activeRunThreadId,
           isStreaming: false,

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Database,
   Info,
@@ -34,13 +35,14 @@ import {
   resetAll,
   unlockUser,
 } from "../lib/api";
+import { normalizeSettingsSection, type SettingsSection } from "../lib/settingsSections";
 import { useAtlasStore } from "../store/useAtlasStore";
 
-type SettingsSection = "general" | "profiles" | "models" | "connections" | "data" | "about";
 type UserProtectionMode = "passwordless" | "password";
 
 export function SettingsPage() {
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const theme = useAtlasStore((state) => state.theme);
   const setTheme = useAtlasStore((state) => state.setTheme);
   const currentUserId = useAtlasStore((state) => state.currentUserId);
@@ -56,7 +58,8 @@ export function SettingsPage() {
   const setCrossChatMemoryEnabled = useAtlasStore((state) => state.setCrossChatMemoryEnabled);
   const setAutoCompactLongChats = useAtlasStore((state) => state.setAutoCompactLongChats);
   const [dialog, setDialog] = useState<"all" | "user" | null>(null);
-  const [section, setSection] = useState<SettingsSection>("general");
+  const requestedSection = normalizeSettingsSection(searchParams.get("section"));
+  const [section, setSection] = useState<SettingsSection>(requestedSection);
   const [newUserId, setNewUserId] = useState("");
   const [newUserProtection, setNewUserProtection] = useState<UserProtectionMode>("passwordless");
   const [newUserPassword, setNewUserPassword] = useState("");
@@ -128,6 +131,10 @@ export function SettingsPage() {
       security?.sqlite_encrypted_at_rest &&
       security?.vector_store_encrypted_at_rest,
   );
+
+  useEffect(() => {
+    setSection(requestedSection);
+  }, [requestedSection]);
 
   useEffect(() => {
     if (usersFetched && currentUserId && !currentUser) {
@@ -278,6 +285,15 @@ export function SettingsPage() {
     await queryClient.invalidateQueries({ queryKey: ["status"] });
   };
 
+  const selectSection = (value: SettingsSection) => {
+    setSection(value);
+    if (value === "general") {
+      setSearchParams({}, { replace: true });
+      return;
+    }
+    setSearchParams({ section: value }, { replace: true });
+  };
+
   const sections = [
     { id: "general", label: "General", icon: SlidersHorizontal },
     { id: "profiles", label: "Profiles", icon: Users },
@@ -308,7 +324,7 @@ export function SettingsPage() {
             <button
               className={`settings-nav-button ${section === id ? "active" : ""}`}
               key={id}
-              onClick={() => setSection(id)}
+              onClick={() => selectSection(id)}
               type="button"
             >
               <Icon size={18} />

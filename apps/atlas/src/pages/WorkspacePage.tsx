@@ -28,6 +28,7 @@ import {
 } from "../lib/api";
 import { useBackendPhase } from "../lib/backendPhase";
 import { buildContextMeter, type ContextMeter } from "../lib/contextMeter";
+import { PROFILE_SETTINGS_PATH } from "../lib/settingsSections";
 import { resolveStartupState } from "../lib/startupState";
 import { displayThreadTitle, editableThreadTitle, requestThreadTitle } from "../lib/threadTitles";
 import { useAtlasStore } from "../store/useAtlasStore";
@@ -318,6 +319,7 @@ export function WorkspacePage() {
   const idleDescription = startupState.idleDescription;
   const composerPlaceholder = startupState.composerPlaceholder;
   const canStartChat = startupState.canStartChat;
+  const modelControlsDisabled = !currentUserId || currentUserLocked || availableModels.length === 0;
   const currentThreadCompactionNotice = useMemo(() => {
     if (!compactionNotice) {
       return null;
@@ -919,7 +921,7 @@ export function WorkspacePage() {
                 <label className="workspace-model-picker">
                   <select
                     className="select-input workspace-model-select"
-                    disabled={availableModels.length === 0}
+                    disabled={modelControlsDisabled}
                     onChange={(event) => setDraftThreadModel(event.currentTarget.value)}
                     value={selectedModel}
                   >
@@ -953,7 +955,7 @@ export function WorkspacePage() {
                 <label className="workspace-model-picker workspace-temperature-picker">
                   <select
                     className="select-input workspace-model-select"
-                    disabled={availableModels.length === 0}
+                    disabled={modelControlsDisabled}
                     onChange={(event) => setDraftThreadTemperature(parseTemperatureValue(event.currentTarget.value))}
                     value={formatTemperatureSelectValue(selectedTemperature)}
                   >
@@ -1046,7 +1048,7 @@ export function WorkspacePage() {
                       <div className="workspace-idle-actions">
                         <button
                           className="primary-button"
-                          onClick={() => navigate("/settings")}
+                          onClick={() => navigate(PROFILE_SETTINGS_PATH)}
                           type="button"
                         >
                           Create or pick a profile
@@ -1088,7 +1090,7 @@ export function WorkspacePage() {
                       <div className="workspace-idle-actions">
                         <button
                           className="primary-button"
-                          onClick={() => navigate("/settings")}
+                          onClick={() => navigate(PROFILE_SETTINGS_PATH)}
                           type="button"
                         >
                           Unlock in Settings
@@ -1407,6 +1409,7 @@ export function WorkspacePage() {
                 aria-expanded={isAttachmentMenuOpen}
                 aria-haspopup="menu"
                 className="ghost-button icon-button"
+                disabled={!canStartChat || isStreaming}
                 onClick={() => {
                   setIsReasoningMenuOpen(false);
                   setIsAttachmentMenuOpen((current) => !current);
