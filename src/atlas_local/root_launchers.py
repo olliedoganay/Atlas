@@ -12,9 +12,20 @@ DEFAULT_SMOKE_PROMPT = "Summarize the local-first architecture of this project i
 
 def maybe_reexec_with_repo_venv(script_path: Path) -> None:
     repo_root = script_path.resolve().parent
-    repo_python = repo_root / ".venv" / "Scripts" / "python.exe"
+    candidates = (
+        (
+            repo_root / ".venv" / "Scripts" / "python.exe",
+            repo_root / ".venv" / "Scripts" / "python",
+        )
+        if sys.platform == "win32"
+        else (
+            repo_root / ".venv" / "bin" / "python",
+            repo_root / ".venv" / "bin" / "python3",
+        )
+    )
+    repo_python = next((candidate for candidate in candidates if candidate.exists()), None)
 
-    if not repo_python.exists():
+    if repo_python is None:
         return
 
     current_python = Path(sys.executable).resolve()

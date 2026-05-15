@@ -85,6 +85,7 @@ jobs:
           name: atlas-linux-v${{ steps.version.outputs.atlas_version }}
           path: |
             apps/atlas/src-tauri/target/release/bundle/deb/*.deb
+            apps/atlas/src-tauri/target/release/bundle/rpm/*.rpm
             apps/atlas/src-tauri/target/release/bundle/appimage/*.AppImage
           if-no-files-found: error
 
@@ -95,6 +96,7 @@ jobs:
           name: Atlas v${{ steps.version.outputs.atlas_version }}
           files: |
             apps/atlas/src-tauri/target/release/bundle/deb/*.deb
+            apps/atlas/src-tauri/target/release/bundle/rpm/*.rpm
             apps/atlas/src-tauri/target/release/bundle/appimage/*.AppImage
           fail_on_unmatched_files: true
           generate_release_notes: true

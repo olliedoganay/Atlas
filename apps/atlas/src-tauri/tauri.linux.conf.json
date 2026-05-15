@@ -1,6 +1,6 @@
 {
   "bundle": {
-    "targets": ["deb", "appimage"],
+    "targets": ["deb", "rpm", "appimage"],
     "linux": {
       "deb": {
         "depends": [
@@ -10,6 +10,15 @@
           "librsvg2-2"
         ],
         "section": "utils"
+      },
+      "rpm": {
+        "depends": [
+          "webkit2gtk4.1",
+          "gtk3",
+          "libappindicator-gtk3",
+          "librsvg2"
+        ],
+        "release": "1"
       },
       "appimage": {
         "bundleMediaFramework": false

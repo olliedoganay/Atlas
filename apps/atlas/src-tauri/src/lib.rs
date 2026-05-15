@@ -201,12 +201,12 @@ fn start_backend(app: AppHandle, state: &State<'_, BackendState>) -> Result<(), 
                 }
 
                 let python_path = repo_root.join("src");
-                let existing_python_path = env::var("PYTHONPATH").unwrap_or_default();
-                let merged_python_path = if existing_python_path.is_empty() {
-                    python_path.display().to_string()
-                } else {
-                    format!("{};{}", python_path.display(), existing_python_path)
-                };
+                let mut python_paths = vec![python_path];
+                if let Some(existing_python_path) = env::var_os("PYTHONPATH") {
+                    python_paths.extend(env::split_paths(&existing_python_path));
+                }
+                let merged_python_path =
+                    env::join_paths(python_paths).map_err(|error| error.to_string())?;
                 command.env("PYTHONPATH", merged_python_path);
             }
             LaunchMode::Packaged {
@@ -340,12 +340,19 @@ fn backend_command(
         return Err("Packaged Atlas backend sidecar was not found.".to_string());
     }
 
-    let windows_python = repo_root.join(".venv").join("Scripts").join("python.exe");
-    let unix_python = repo_root.join(".venv").join("bin").join("python");
-    let program = if windows_python.exists() {
-        windows_python
-    } else if unix_python.exists() {
-        unix_python
+    let candidates = if cfg!(windows) {
+        vec![
+            repo_root.join(".venv").join("Scripts").join("python.exe"),
+            repo_root.join(".venv").join("Scripts").join("python"),
+        ]
+    } else {
+        vec![
+            repo_root.join(".venv").join("bin").join("python"),
+            repo_root.join(".venv").join("bin").join("python3"),
+        ]
+    };
+    let program = if let Some(repo_python) = candidates.into_iter().find(|path| path.exists()) {
+        repo_python
     } else if cfg!(windows) {
         PathBuf::from("python")
     } else {

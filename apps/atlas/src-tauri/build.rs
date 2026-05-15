@@ -12,8 +12,15 @@ fn main() {
 
     fs::create_dir_all(&backend_dir).expect("failed to create resources/backend");
     fs::create_dir_all(&prompts_dir).expect("failed to create resources/prompts");
-    fs::write(&backend_placeholder, b"").expect("failed to create backend placeholder");
-    fs::write(&prompts_placeholder, b"").expect("failed to create prompt placeholder");
+    write_placeholder_if_missing(&backend_placeholder, "backend");
+    write_placeholder_if_missing(&prompts_placeholder, "prompt");
 
     tauri_build::build()
+}
+
+fn write_placeholder_if_missing(path: &PathBuf, label: &str) {
+    if path.exists() {
+        return;
+    }
+    fs::write(path, b"").unwrap_or_else(|_| panic!("failed to create {label} placeholder"));
 }
