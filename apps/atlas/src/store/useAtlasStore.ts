@@ -52,6 +52,7 @@ type AtlasState = {
   compactionNotice: CompactionNotice | null;
   searchJumpTarget: SearchJumpTarget | null;
   recentSearchQueries: string[];
+  pinnedThreadKeys: string[];
   backendStartupStartedAt: number;
   isStreaming: boolean;
   firstRunDismissed: boolean;
@@ -88,6 +89,7 @@ type AtlasState = {
   stepSearchJumpTarget: (delta: number) => void;
   clearSearchJumpTarget: () => void;
   addRecentSearchQuery: (query: string) => void;
+  togglePinnedThread: (userId: string, threadId: string) => void;
   markBackendBooting: () => void;
   clearLiveRun: () => void;
 };
@@ -123,6 +125,7 @@ export const useAtlasStore = create<AtlasState>()(
       compactionNotice: null,
       searchJumpTarget: null,
       recentSearchQueries: [],
+      pinnedThreadKeys: [],
       backendStartupStartedAt: Date.now(),
       isStreaming: false,
       firstRunDismissed: false,
@@ -224,6 +227,20 @@ export const useAtlasStore = create<AtlasState>()(
           ].slice(0, 6);
           return { recentSearchQueries: deduped };
         }),
+      togglePinnedThread: (userId, threadId) =>
+        set((state) => {
+          const key = threadStorageKey(userId, threadId);
+          if (!key) {
+            return {};
+          }
+          const existing = new Set(state.pinnedThreadKeys);
+          if (existing.has(key)) {
+            existing.delete(key);
+          } else {
+            existing.add(key);
+          }
+          return { pinnedThreadKeys: Array.from(existing).slice(0, 100) };
+        }),
       markBackendBooting: () => set({ backendStartupStartedAt: Date.now() }),
       clearLiveRun: () =>
         set({
@@ -244,7 +261,7 @@ export const useAtlasStore = create<AtlasState>()(
     }),
     {
       name: "atlas-ui-state",
-      version: 11,
+      version: 12,
       migrate: (persistedState, version) => {
         if (!persistedState || typeof persistedState !== "object") {
           return persistedState as AtlasState;
@@ -273,6 +290,9 @@ export const useAtlasStore = create<AtlasState>()(
         if (version < 11) {
           migrated.firstRunDismissed = false;
         }
+        if (version < 12) {
+          migrated.pinnedThreadKeys = [];
+        }
         if (migrated.currentThreadTitle === "main") {
           migrated.currentThreadTitle = "Main";
         }
@@ -292,9 +312,19 @@ export const useAtlasStore = create<AtlasState>()(
         navWidth: state.navWidth,
         settingsSidebarCollapsed: state.settingsSidebarCollapsed,
         recentSearchQueries: state.recentSearchQueries,
+        pinnedThreadKeys: state.pinnedThreadKeys,
         firstRunDismissed: state.firstRunDismissed,
       }),
       storage: createJSONStorage(() => localStorage),
     },
   ),
 );
+
+function threadStorageKey(userId: string, threadId: string) {
+  const resolvedUserId = userId.trim();
+  const resolvedThreadId = threadId.trim();
+  if (!resolvedUserId || !resolvedThreadId) {
+    return "";
+  }
+  return `${resolvedUserId}::${resolvedThreadId}`;
+}

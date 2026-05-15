@@ -901,16 +901,24 @@ pre {
   text-align: left;
 }
 
+.thread-card-pin,
 .thread-card-delete {
   position: absolute;
   top: 8px;
-  right: 8px;
   z-index: 1;
   min-height: 30px;
   width: 30px;
   height: 30px;
   padding: 0;
   color: var(--muted);
+}
+
+.thread-card-pin {
+  right: 72px;
+}
+
+.thread-card-delete {
+  right: 8px;
 }
 
 .thread-card-duplicate {
@@ -925,6 +933,8 @@ pre {
   color: var(--muted);
 }
 
+.thread-card-pin:hover,
+.thread-card.pinned .thread-card-pin,
 .thread-card-duplicate:hover {
   color: var(--text);
 }
@@ -943,7 +953,7 @@ pre {
 }
 
 .thread-card-top {
-  padding-right: 64px;
+  padding-right: 96px;
 }
 
 .thread-card strong {
@@ -2299,6 +2309,10 @@ pre {
   font-family: inherit;
   font-size: 0.94rem;
   font-weight: 500;
+}
+
+.workspace-export-button {
+  min-height: var(--control-height);
 }
 
 .workspace-model-lock {
@@ -4154,7 +4168,7 @@ pre {
 
 .settings-about-status-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   border: 1px solid var(--border);
 }
 
@@ -5837,7 +5851,7 @@ body {
 }
 
 .thread-card-top {
-  padding-right: 60px;
+  padding-right: 90px;
 }
 
 .thread-card strong {
@@ -5859,6 +5873,7 @@ body {
   font-size: 0.73rem;
 }
 
+.thread-card-pin,
 .thread-card-duplicate,
 .thread-card-delete {
   top: 4px;
@@ -5870,10 +5885,15 @@ body {
   color: var(--muted);
 }
 
+:root[data-theme] .thread-card .thread-card-pin,
 :root[data-theme] .thread-card .thread-card-duplicate,
 :root[data-theme] .thread-card .thread-card-delete {
   background: transparent !important;
   border-color: transparent !important;
+}
+
+.thread-card-pin {
+  right: 60px;
 }
 
 .thread-card-duplicate {
@@ -5884,6 +5904,7 @@ body {
   right: 0;
 }
 
+.thread-card:not(:hover):not(.active):not(.pinned) .thread-card-pin,
 .thread-card:not(:hover):not(.active) .thread-card-duplicate,
 .thread-card:not(:hover):not(.active) .thread-card-delete {
   opacity: 0.58;

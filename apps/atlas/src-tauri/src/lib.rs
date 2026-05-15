@@ -16,6 +16,7 @@ use tauri::{webview::PageLoadEvent, AppHandle, Manager, RunEvent, State};
 use std::os::windows::process::CommandExt;
 
 const BACKEND_HOST: &str = "127.0.0.1";
+#[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 const BACKEND_START_ATTEMPTS: usize = 5;
 const BACKEND_STARTUP_GRACE_MS: u64 = 250;
@@ -26,6 +27,15 @@ struct BackendRuntime {
     host: String,
     port: u16,
     token: String,
+}
+
+#[derive(Clone, Serialize)]
+struct AppDiagnostics {
+    platform: String,
+    data_dir: String,
+    log_dir: String,
+    backend_log_path: String,
+    packaged_logs_enabled: bool,
 }
 
 #[derive(Default)]
@@ -58,6 +68,31 @@ fn open_external_url(url: String) -> Result<(), String> {
     } else {
         Err("External URL is not allowed.".to_string())
     }
+}
+
+#[tauri::command]
+fn app_diagnostics(app: AppHandle) -> Result<AppDiagnostics, String> {
+    let data_dir = atlas_data_dir(&app)?;
+    let log_dir = data_dir.join("logs");
+    let backend_log_path = log_dir.join("backend.log");
+    Ok(AppDiagnostics {
+        platform: env::consts::OS.to_string(),
+        data_dir: data_dir.to_string_lossy().to_string(),
+        log_dir: log_dir.to_string_lossy().to_string(),
+        backend_log_path: backend_log_path.to_string_lossy().to_string(),
+        packaged_logs_enabled: cfg!(debug_assertions) || packaged_backend_logs_enabled(),
+    })
+}
+
+#[tauri::command]
+fn open_app_location(app: AppHandle, location: String) -> Result<(), String> {
+    let path = match location.as_str() {
+        "data" => atlas_data_dir(&app)?,
+        "logs" => atlas_data_dir(&app)?.join("logs"),
+        _ => return Err("Atlas location is not allowed.".to_string()),
+    };
+    fs::create_dir_all(&path).map_err(|error| error.to_string())?;
+    open_local_path(&path)
 }
 
 fn is_allowed_external_url(url: &str) -> bool {
@@ -94,7 +129,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             restart_backend,
             backend_runtime,
-            open_external_url
+            open_external_url,
+            app_diagnostics,
+            open_app_location
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -138,6 +175,39 @@ fn open_allowed_external_url(url: &str) -> Result<(), String> {
 
     #[allow(unreachable_code)]
     Err("Opening external URLs is not supported on this platform.".to_string())
+}
+
+fn open_local_path(path: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        Command::new("explorer.exe")
+            .arg(path)
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|error| format!("Could not open Atlas location: {error}"))?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(path)
+            .spawn()
+            .map_err(|error| format!("Could not open Atlas location: {error}"))?;
+        return Ok(());
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .map_err(|error| format!("Could not open Atlas location: {error}"))?;
+        return Ok(());
+    }
+
+    #[allow(unreachable_code)]
+    Err("Opening local Atlas locations is not supported on this platform.".to_string())
 }
 
 fn reveal_main_window_after_delay(app: AppHandle) {
@@ -370,6 +440,17 @@ fn backend_command(
         ],
         LaunchMode::Development,
     ))
+}
+
+fn atlas_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    if cfg!(debug_assertions) {
+        return Ok(repo_root()?.join(".data"));
+    }
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("runtime"))
 }
 
 fn packaged_sidecar(app: &AppHandle) -> Option<(PathBuf, PathBuf)> {

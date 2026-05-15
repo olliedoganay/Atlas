@@ -81,6 +81,14 @@ export type BackendStatus = {
   };
 };
 
+export type AppDiagnostics = {
+  platform: string;
+  data_dir: string;
+  log_dir: string;
+  backend_log_path: string;
+  packaged_logs_enabled: boolean;
+};
+
 export type TemperaturePreset = {
   label: string;
   value: number;
@@ -728,6 +736,14 @@ export async function openExternalUrl(url: string) {
       throw error instanceof Error ? error : new Error("Could not open external URL.");
     }
   }
+}
+
+export async function getAppDiagnostics() {
+  return invoke<AppDiagnostics>("app_diagnostics");
+}
+
+export async function openAppLocation(location: "data" | "logs") {
+  return invoke("open_app_location", { location });
 }
 
 export async function waitForBackendReady(options?: { attempts?: number; delayMs?: number }) {

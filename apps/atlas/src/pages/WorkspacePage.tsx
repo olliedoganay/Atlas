@@ -1,6 +1,6 @@
 import * as ScrollArea from "@radix-ui/react-scroll-area";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Copy, CornerUpLeft, Edit3, ExternalLink, FileText, GitBranch, ImagePlus, Lightbulb, Lock, Plus, RotateCcw, Search, Send, Square, Terminal, X } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Copy, CornerUpLeft, Download, Edit3, ExternalLink, FileText, GitBranch, ImagePlus, Lightbulb, Lock, Plus, RotateCcw, Search, Send, Square, Terminal, X } from "lucide-react";
 import { ChangeEvent, FormEvent, KeyboardEvent, UIEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -27,7 +27,9 @@ import {
   type ThreadMessage,
 } from "../lib/api";
 import { useBackendPhase } from "../lib/backendPhase";
+import { buildChatMarkdownExport, chatExportFilename, downloadMarkdownFile } from "../lib/chatExport";
 import { buildContextMeter, type ContextMeter } from "../lib/contextMeter";
+import { detectDesktopPlatform, ollamaInstallCopy, platformShellName } from "../lib/platformCopy";
 import { PROFILE_SETTINGS_PATH } from "../lib/settingsSections";
 import { resolveStartupState } from "../lib/startupState";
 import { displayThreadTitle, editableThreadTitle, requestThreadTitle } from "../lib/threadTitles";
@@ -284,6 +286,9 @@ export function WorkspacePage() {
   const selectedTemperature = lockedThreadTemperature !== undefined ? lockedThreadTemperature : draftThreadTemperature;
   const starterChatModel = "gpt-oss:20b";
   const resolvedEmbedModel = status?.embed_model?.trim() || "nomic-embed-text:latest";
+  const desktopPlatform = detectDesktopPlatform();
+  const platformShell = platformShellName(desktopPlatform);
+  const platformOllamaInstallCopy = ollamaInstallCopy(desktopPlatform);
   const selectedModelDetails = useMemo(
     () => models?.model_details?.find((item) => item.name === selectedModel),
     [models?.model_details, selectedModel],
@@ -780,6 +785,24 @@ export function WorkspacePage() {
     }
   };
 
+  const handleExportMarkdown = () => {
+    const markdown = buildChatMarkdownExport(
+      {
+        title: currentThreadDisplayTitle,
+        threadId: currentThreadId,
+        userId: currentUserId,
+        model: selectedModel || lockedThreadModel || currentThread?.chat_model,
+      },
+      visibleHistory.map((message) => ({
+        role: message.role,
+        content: message.content,
+        attachments: message.attachments,
+        timestamp: message.timestamp,
+      })),
+    );
+    downloadMarkdownFile(chatExportFilename(currentThreadDisplayTitle, currentThreadId), markdown);
+  };
+
   const handleQuoteMessage = (message: ConversationMessage) => {
     const quoted = buildQuotedPrompt(message.content);
     setPrompt((current) => (current.trim() ? `${current.trim()}\n\n${quoted}` : quoted));
@@ -910,6 +933,20 @@ export function WorkspacePage() {
 
         <div className="workspace-header-controls">
           <div className="workspace-header-control-strip">
+            <div className="workspace-model-group">
+              <span className="workspace-model-label">Export</span>
+              <button
+                className="ghost-button compact-button workspace-export-button"
+                disabled={!visibleHistory.length}
+                onClick={handleExportMarkdown}
+                title={visibleHistory.length ? "Export chat to Markdown" : "No saved messages to export"}
+                type="button"
+              >
+                <Download size={15} />
+                Markdown
+              </button>
+            </div>
+
             <div className="workspace-model-group">
               <span className="workspace-model-label">Model</span>
               {lockedThreadModel ? (
@@ -1109,7 +1146,7 @@ export function WorkspacePage() {
                         <div className="wizard-help-steps">
                           <div>
                             <strong>1. Install Ollama</strong>
-                            <p>Download the Windows app, install it, and leave Ollama running.</p>
+                            <p>{platformOllamaInstallCopy}</p>
                             <a
                               className="source-link wizard-help-link"
                               href="https://ollama.com/download"
@@ -1126,7 +1163,7 @@ export function WorkspacePage() {
                           </div>
                           <div>
                             <strong>2. Pull a chat model</strong>
-                            <p>Open PowerShell and download this example chat model.</p>
+                            <p>Open {platformShell} and download this example chat model.</p>
                             <code>ollama pull {starterChatModel}</code>
                           </div>
                           <div>

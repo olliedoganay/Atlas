@@ -4,6 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import {
   Database,
   ExternalLink,
+  FolderOpen,
   Info,
   Lock,
   Monitor,
@@ -28,12 +29,14 @@ import {
   createUser,
   deleteMemory,
   deleteUser,
+  getAppDiagnostics,
   getMemories,
   getModels,
   getStatus,
   getUsers,
   lockUser,
   openExternalUrl,
+  openAppLocation,
   resetAll,
   unlockUser,
 } from "../lib/api";
@@ -70,6 +73,7 @@ export function SettingsPage() {
   const [unlockTargetUserId, setUnlockTargetUserId] = useState<string | null>(null);
   const [unlockPassword, setUnlockPassword] = useState("");
   const [appVersion, setAppVersion] = useState(packageInfo.version);
+  const [appDiagnostics, setAppDiagnostics] = useState<Awaited<ReturnType<typeof getAppDiagnostics>> | null>(null);
   const { data: status } = useQuery({
     queryKey: ["status"],
     queryFn: getStatus,
@@ -163,6 +167,24 @@ export function SettingsPage() {
       setAppVersion(backendVersion);
     }
   }, [status?.version]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getAppDiagnostics()
+      .then((diagnostics) => {
+        if (!cancelled) {
+          setAppDiagnostics(diagnostics);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAppDiagnostics(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const allReset = useMutation({
     mutationFn: resetAll,
@@ -845,6 +867,11 @@ export function SettingsPage() {
                         : "Local model service"}
                     </p>
                   </div>
+                  <div className="settings-about-status-item">
+                    <span>Platform</span>
+                    <strong>{formatPlatformLabel(appDiagnostics?.platform)}</strong>
+                    <p>{appDiagnostics?.packaged_logs_enabled ? "Logs enabled" : "Logs off by default"}</p>
+                  </div>
                 </div>
               </section>
 
@@ -871,6 +898,37 @@ export function SettingsPage() {
 
                 <SettingsRow label="License" description="Application source is MIT licensed. Brand and trademark rights are separate.">
                   <Chip intent="muted">MIT</Chip>
+                </SettingsRow>
+
+                <SettingsRow
+                  label="Local folders"
+                  description={appDiagnostics?.data_dir || "Atlas-managed local state and backend diagnostics."}
+                >
+                  <div className="inline-actions">
+                    <button
+                      className="ghost-button compact-button"
+                      onClick={() => void openAppLocation("data")}
+                      type="button"
+                    >
+                      <FolderOpen size={14} />
+                      Data
+                    </button>
+                    <button
+                      className="ghost-button compact-button"
+                      onClick={() => void openAppLocation("logs")}
+                      type="button"
+                    >
+                      <FolderOpen size={14} />
+                      Logs
+                    </button>
+                  </div>
+                </SettingsRow>
+
+                <SettingsRow
+                  label="Release"
+                  description="Version tags build Windows and Linux release assets through GitHub Actions."
+                >
+                  <Chip intent="accent">{`v${appVersion}`}</Chip>
                 </SettingsRow>
 
                 <SettingsRow label="Project" description="Open the public repository for source, issues, and release notes.">
@@ -950,6 +1008,22 @@ function describeUserProtection(user: { protection?: string; locked?: boolean })
     return user.locked ? "Password protected — Locked" : "Password protected";
   }
   return "Passwordless";
+}
+
+function formatPlatformLabel(value?: string) {
+  if (!value) {
+    return "Desktop";
+  }
+  if (value === "linux") {
+    return "Linux";
+  }
+  if (value === "windows") {
+    return "Windows";
+  }
+  if (value === "macos") {
+    return "macOS";
+  }
+  return value;
 }
 
 function getMutationErrorMessage(error: unknown) {

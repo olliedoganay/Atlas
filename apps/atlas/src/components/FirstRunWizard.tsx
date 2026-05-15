@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Check, ExternalLink, Terminal } from "lucide-react";
 
 import { createUser, openExternalUrl } from "../lib/api";
+import { detectDesktopPlatform, ollamaInstallCopy, platformShellName } from "../lib/platformCopy";
 
 type StepState = "active" | "pending" | "done";
 
@@ -44,6 +45,9 @@ export function FirstRunWizard({
   const allDone = profileCreated && ollamaOnline && hasLocalModels;
   const resolvedEmbedModel = embedModel?.trim() || "nomic-embed-text:latest";
   const starterChatModel = "gpt-oss:20b";
+  const platform = detectDesktopPlatform();
+  const shellName = platformShellName(platform);
+  const installCopy = ollamaInstallCopy(platform);
 
   return (
     <div className="wizard-overlay" role="dialog" aria-modal="true" aria-labelledby="wizard-title">
@@ -156,7 +160,7 @@ export function FirstRunWizard({
           <div className="wizard-help-steps">
             <div>
               <strong>1. Install Ollama</strong>
-              <p>Download the Windows app, install it, and leave Ollama running in the background.</p>
+              <p>{installCopy}</p>
               <a
                 className="source-link wizard-help-link"
                 href="https://ollama.com/download"
@@ -173,7 +177,7 @@ export function FirstRunWizard({
             </div>
             <div>
               <strong>2. Pull a chat model</strong>
-              <p>Open PowerShell and run this example command. You can choose a different model later.</p>
+              <p>Open {shellName} and run this example command. You can choose a different model later.</p>
               <code>ollama pull {starterChatModel}</code>
             </div>
             <div>

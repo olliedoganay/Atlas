@@ -26,4 +26,12 @@ describe("useAtlasStore run state", () => {
     expect(state.isStreaming).toBe(false);
     expect(state.liveError).toBe("Compaction failed.");
   });
+
+  it("toggles pinned chat keys per profile", () => {
+    useAtlasStore.getState().togglePinnedThread("ollie", "main");
+    expect(useAtlasStore.getState().pinnedThreadKeys).toEqual(["ollie::main"]);
+
+    useAtlasStore.getState().togglePinnedThread("ollie", "main");
+    expect(useAtlasStore.getState().pinnedThreadKeys).toEqual([]);
+  });
 });

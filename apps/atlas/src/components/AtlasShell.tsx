@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Compass,
   Copy,
+  Pin,
   Plus,
   RotateCcw,
   Search,
@@ -65,6 +66,8 @@ export function AtlasShell() {
   const setDraftThreadModel = useAtlasStore((state) => state.setDraftThreadModel);
   const setDraftThreadTemperature = useAtlasStore((state) => state.setDraftThreadTemperature);
   const setSearchJumpTarget = useAtlasStore((state) => state.setSearchJumpTarget);
+  const pinnedThreadKeys = useAtlasStore((state) => state.pinnedThreadKeys);
+  const togglePinnedThread = useAtlasStore((state) => state.togglePinnedThread);
   const backendStartupStartedAt = useAtlasStore((state) => state.backendStartupStartedAt);
   const markBackendBooting = useAtlasStore((state) => state.markBackendBooting);
   const toggleNavCollapsed = useAtlasStore((state) => state.toggleNavCollapsed);
@@ -217,23 +220,23 @@ export function AtlasShell() {
     if (!currentUserId || currentUserLocked) {
       return [];
     }
-    if (!currentThreadId || threadItems.some((item) => item.thread_id === currentThreadId)) {
-      return threadItems;
-    }
-    return [
-      {
-        user_id: currentUserId,
-        thread_id: currentThreadId,
-        title: editableThreadTitle(currentThreadTitle, currentThreadId),
-        chat_model: draftThreadModel,
-        temperature: draftThreadTemperature,
-        last_mode: "chat",
-        updated_at: new Date().toISOString(),
-        last_prompt: "",
-        last_run_id: "",
-      },
-      ...threadItems,
-    ];
+    const items = !currentThreadId || threadItems.some((item) => item.thread_id === currentThreadId)
+      ? threadItems
+      : [
+          {
+            user_id: currentUserId,
+            thread_id: currentThreadId,
+            title: editableThreadTitle(currentThreadTitle, currentThreadId),
+            chat_model: draftThreadModel,
+            temperature: draftThreadTemperature,
+            last_mode: "chat",
+            updated_at: new Date().toISOString(),
+            last_prompt: "",
+            last_run_id: "",
+          },
+          ...threadItems,
+        ];
+    return sortPinnedThreads(items, pinnedThreadKeys, currentUserId);
   }, [
     currentThreadId,
     currentThreadTitle,
@@ -241,6 +244,7 @@ export function AtlasShell() {
     currentUserLocked,
     draftThreadModel,
     draftThreadTemperature,
+    pinnedThreadKeys,
     threadItems,
   ]);
 
@@ -470,11 +474,23 @@ export function AtlasShell() {
                       <div className="thread-list">
                         {displayThreadItems.map((thread) => {
                           const persistedThread = threadItems.some((item) => isSameThread(item, thread, currentUserId));
+                          const pinned = isThreadPinned(thread, pinnedThreadKeys, currentUserId);
                           return (
                             <div
-                              className={`thread-card ${thread.thread_id === currentThreadId ? "active" : ""}`}
+                              className={`thread-card ${thread.thread_id === currentThreadId ? "active" : ""}${pinned ? " pinned" : ""}`}
                               key={thread.thread_id}
                             >
+                            {persistedThread ? (
+                              <button
+                                aria-label={`${pinned ? "Unpin" : "Pin"} ${displayThreadTitle(thread)}`}
+                                className="ghost-button icon-button thread-card-pin"
+                                onClick={() => togglePinnedThread(thread.user_id || currentUserId, thread.thread_id)}
+                                title={pinned ? "Unpin chat" : "Pin chat"}
+                                type="button"
+                              >
+                                <Pin size={14} fill={pinned ? "currentColor" : "none"} />
+                              </button>
+                            ) : null}
                             {persistedThread ? (
                               <button
                                 aria-label={`Duplicate ${displayThreadTitle(thread)}`}
@@ -694,6 +710,25 @@ function isSameThread(thread: ThreadSummary, target: ThreadSummary, fallbackUser
   const threadUserId = thread.user_id || fallbackUserId;
   const targetUserId = target.user_id || fallbackUserId;
   return threadUserId === targetUserId && thread.thread_id === target.thread_id;
+}
+
+function threadPinKey(thread: ThreadSummary, fallbackUserId: string) {
+  return `${thread.user_id || fallbackUserId}::${thread.thread_id}`;
+}
+
+function isThreadPinned(thread: ThreadSummary, pinnedThreadKeys: string[], fallbackUserId: string) {
+  return pinnedThreadKeys.includes(threadPinKey(thread, fallbackUserId));
+}
+
+function sortPinnedThreads(threads: ThreadSummary[], pinnedThreadKeys: string[], fallbackUserId: string) {
+  return [...threads].sort((left, right) => {
+    const leftPinned = isThreadPinned(left, pinnedThreadKeys, fallbackUserId);
+    const rightPinned = isThreadPinned(right, pinnedThreadKeys, fallbackUserId);
+    if (leftPinned !== rightPinned) {
+      return leftPinned ? -1 : 1;
+    }
+    return 0;
+  });
 }
 
 function clamp(value: number, min: number, max: number) {
