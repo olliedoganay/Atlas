@@ -3003,6 +3003,73 @@ pre {
   display: flex;
 }
 
+.runner-body.with-source {
+  flex-direction: row;
+}
+
+.runner-source-panel {
+  flex: 0 0 clamp(300px, 34vw, 430px);
+  min-width: 280px;
+  max-width: 460px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  background: #0f1218;
+}
+
+.runner-source-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 10px 0 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  user-select: none;
+}
+
+.runner-source-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #d8dde7;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.runner-source-language {
+  min-width: 0;
+  overflow: hidden;
+  color: #8b909a;
+  font-size: 0.76rem;
+  letter-spacing: 0.06em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.runner-source-copy {
+  margin-left: auto;
+  min-height: 30px;
+  padding: 0 9px;
+}
+
+.runner-source-code {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+  padding: 14px 16px;
+  color: #d7dbe2;
+  font-family: "IBM Plex Mono", "Cascadia Code", monospace;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  tab-size: 2;
+  white-space: pre;
+}
+
 .runner-output {
   flex: 1;
   min-height: 0;

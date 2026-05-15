@@ -4,11 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+const tauriWindowMocks = vi.hoisted(() => ({
+  getCurrentWindow: vi.fn(),
+}));
+
 vi.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: () => ({
-    onCloseRequested: vi.fn().mockResolvedValue(() => undefined),
-    setTitle: vi.fn().mockResolvedValue(undefined),
-  }),
+  getCurrentWindow: tauriWindowMocks.getCurrentWindow,
 }));
 
 vi.mock("react-router-dom", () => ({
@@ -43,6 +44,10 @@ function readBlobText(blob: Blob): Promise<string> {
 describe("CodeRunnerPage client preview", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    tauriWindowMocks.getCurrentWindow.mockReturnValue({
+      onCloseRequested: vi.fn().mockResolvedValue(() => undefined),
+      setTitle: vi.fn().mockResolvedValue(undefined),
+    });
     apiMocks.getRunnerStatus.mockResolvedValue({ available: true });
     apiMocks.execCode.mockResolvedValue({ run_id: "run-1" });
     apiMocks.stopRunnerRun.mockResolvedValue({ run_id: "run-1", status: "stopping" });
@@ -98,6 +103,55 @@ describe("CodeRunnerPage client preview", () => {
     expect(tokens).toContain("allow-scripts");
     expect(tokens).toContain("allow-pointer-lock");
     expect(tokens).not.toContain("allow-same-origin");
+  });
+
+  it("shows the runnable source beside the preview and lets the user hide it", async () => {
+    window.localStorage.setItem(
+      "atlas-runner:token-1",
+      JSON.stringify({ language: "html", code: "<h1>Hello Atlas</h1>" }),
+    );
+    const { root, container } = renderRunnerPage();
+
+    await flushEffects();
+
+    expect(container.querySelector(".runner-source-panel")?.textContent).toContain("<h1>Hello Atlas</h1>");
+    expect(container.querySelector(".runner-iframe")).not.toBeNull();
+
+    const sourceButton = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Source"),
+    );
+    act(() => {
+      sourceButton?.click();
+    });
+
+    expect(container.querySelector(".runner-source-panel")).toBeNull();
+    expect(container.querySelector(".runner-iframe")).not.toBeNull();
+
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("keeps the runner usable when the Tauri window API is unavailable", async () => {
+    tauriWindowMocks.getCurrentWindow.mockImplementation(() => {
+      throw new Error("Tauri window unavailable");
+    });
+    window.localStorage.setItem(
+      "atlas-runner:token-1",
+      JSON.stringify({ language: "html", code: "<h1>Browser preview</h1>" }),
+    );
+    const { root, container } = renderRunnerPage();
+
+    await flushEffects();
+
+    expect(container.querySelector(".runner-source-panel")?.textContent).toContain("Browser preview");
+    expect(container.querySelector(".runner-iframe")).not.toBeNull();
+
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
   });
 
   it("stops an active server run when the run page unmounts", async () => {

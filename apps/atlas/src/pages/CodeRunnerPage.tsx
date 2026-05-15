@@ -1,5 +1,5 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { PanelRightClose, PanelRightOpen, Play, RotateCcw, Square, Terminal } from "lucide-react";
+import { Check, Code2, Copy, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Play, RotateCcw, Square, Terminal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 
@@ -167,6 +167,8 @@ export function CodeRunnerPage() {
   const [vncReady, setVncReady] = useState(false);
   const [clientPreviewNonce, setClientPreviewNonce] = useState(0);
   const [serverLogsOpen, setServerLogsOpen] = useState(false);
+  const [sourceOpen, setSourceOpen] = useState(true);
+  const [sourceCopied, setSourceCopied] = useState(false);
   const streamDisposer = useRef<(() => void) | null>(null);
   const outputRef = useRef<HTMLDivElement | null>(null);
   const currentRunId = useRef<string | null>(null);
@@ -195,9 +197,11 @@ export function CodeRunnerPage() {
     if (!language) {
       return;
     }
-    void getCurrentWindow()
-      .setTitle(`Atlas Run - ${language}`)
-      .catch(() => undefined);
+    const appWindow = getSafeCurrentWindow();
+    if (!appWindow) {
+      return;
+    }
+    void appWindow.setTitle(`Atlas Run - ${language}`).catch(() => undefined);
   }, [language]);
 
   const scrollToEnd = useCallback(() => {
@@ -296,7 +300,11 @@ export function CodeRunnerPage() {
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
-    void getCurrentWindow()
+    const appWindow = getSafeCurrentWindow();
+    if (!appWindow) {
+      return undefined;
+    }
+    void appWindow
       .onCloseRequested(() => {
         streamDisposer.current?.();
         streamDisposer.current = null;
@@ -338,6 +346,23 @@ export function CodeRunnerPage() {
     void beginServerRun();
   }, [beginServerRun, clientLang]);
 
+  const copySource = useCallback(async () => {
+    try {
+      if (!navigator.clipboard?.writeText) {
+        return;
+      }
+      await navigator.clipboard.writeText(code);
+      setSourceCopied(true);
+      window.setTimeout(() => setSourceCopied(false), 1200);
+    } catch {
+      // Clipboard access can be denied in browser preview or locked-down desktop contexts.
+    }
+  }, [code]);
+
+  useEffect(() => {
+    setSourceCopied(false);
+  }, [code, language]);
+
   if (!language) {
     return (
       <div className="runner-shell">
@@ -356,6 +381,16 @@ export function CodeRunnerPage() {
           <RunnerStatusBadge phase={phase} exitCode={exitCode} />
         </div>
         <div className="runner-actions">
+          <button
+            aria-pressed={sourceOpen}
+            className="ghost-button compact-button"
+            onClick={() => setSourceOpen((current) => !current)}
+            title={sourceOpen ? "Hide source" : "Show source"}
+            type="button"
+          >
+            {sourceOpen ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}
+            Source
+          </button>
           {phase === "running" ? (
             <button className="ghost-button compact-button runner-stop" onClick={() => void stopRun()} type="button">
               <Square size={14} /> Stop
@@ -370,7 +405,15 @@ export function CodeRunnerPage() {
         </div>
       </header>
 
-      <main className={`runner-body${showVncPane ? " with-vnc" : ""}`}>
+      <main className={`runner-body${showVncPane ? " with-vnc" : ""}${sourceOpen ? " with-source" : ""}`}>
+        {sourceOpen ? (
+          <RunnerSourcePanel
+            code={code}
+            copied={sourceCopied}
+            language={language}
+            onCopy={() => void copySource()}
+          />
+        ) : null}
         {clientLang ? (
           <ClientPreview code={code} key={clientPreviewNonce} />
         ) : phase === "docker-down" ? (
@@ -407,6 +450,45 @@ export function CodeRunnerPage() {
       </footer>
     </div>
   );
+}
+
+function RunnerSourcePanel({
+  code,
+  copied,
+  language,
+  onCopy,
+}: {
+  code: string;
+  copied: boolean;
+  language: string;
+  onCopy: () => void;
+}) {
+  return (
+    <aside className="runner-source-panel" aria-label="Run source">
+      <div className="runner-source-header">
+        <span className="runner-source-title">
+          <Code2 size={15} />
+          Source
+        </span>
+        <span className="runner-source-language">{language}</span>
+        <button className="ghost-button compact-button runner-source-copy" onClick={onCopy} type="button">
+          {copied ? <Check size={14} /> : <Copy size={14} />}
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <pre className="runner-source-code">
+        <code>{code}</code>
+      </pre>
+    </aside>
+  );
+}
+
+function getSafeCurrentWindow() {
+  try {
+    return getCurrentWindow();
+  } catch {
+    return null;
+  }
 }
 
 function RunnerStatusBadge({ phase, exitCode }: { phase: Phase; exitCode: number | null }) {
@@ -564,7 +646,16 @@ function ClientPreview({ code }: { code: string }) {
     <div className="runner-client-preview">
       <iframe
         className="runner-iframe"
-        onLoad={() => frameRef.current?.contentWindow?.focus()}
+        onLoad={() => {
+          if (typeof navigator !== "undefined" && navigator.userAgent.toLowerCase().includes("jsdom")) {
+            return;
+          }
+          try {
+            frameRef.current?.contentWindow?.focus();
+          } catch {
+            // Some test/browser contexts expose focus but do not implement it.
+          }
+        }}
         ref={frameRef}
         sandbox={CLIENT_PREVIEW_SANDBOX}
         srcDoc={previewDocument}
